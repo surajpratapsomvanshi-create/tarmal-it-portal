@@ -3166,6 +3166,7 @@ function setSidebarCollapsed(collapsed) {
   localStorage.setItem(SIDEBAR_COLLAPSED_KEY, collapsed ? "1" : "0");
   localStorage.setItem(CHROME_COLLAPSED_KEY, collapsed ? "1" : "0");
   toggleSidebarButton?.setAttribute("aria-expanded", collapsed ? "false" : "true");
+  syncMobileNavBackdrop(collapsed);
 }
 
 function setPerformanceFiltersCollapsed(collapsed) {
@@ -3188,10 +3189,26 @@ function setToolbarCollapsed(panel, collapsed) {
   localStorage.setItem(`${TOOLBAR_COLLAPSED_PREFIX}${key}`, collapsed ? "1" : "0");
 }
 
+const MOBILE_NAV_MQ = window.matchMedia("(max-width: 900px)");
+const mobileNavBackdrop = document.querySelector("#mobileNavBackdrop");
+
+function isMobileNavLayout() {
+  return MOBILE_NAV_MQ.matches;
+}
+
+function syncMobileNavBackdrop(collapsed) {
+  if (!mobileNavBackdrop) return;
+  const show = isMobileNavLayout() && !collapsed;
+  mobileNavBackdrop.hidden = !show;
+  mobileNavBackdrop.setAttribute("aria-hidden", show ? "false" : "true");
+}
+
 function initChromeCollapse() {
   const collapsed = localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "1"
     || localStorage.getItem(CHROME_COLLAPSED_KEY) === "1";
-  setSidebarCollapsed(collapsed);
+
+  // Phones/tablets: start with the drawer closed so content isn't squeezed.
+  setSidebarCollapsed(isMobileNavLayout() ? true : collapsed);
 
   toggleSidebarButton?.addEventListener("click", () => {
     setSidebarCollapsed(true);
@@ -3200,6 +3217,32 @@ function initChromeCollapse() {
   expandSidebarButton?.addEventListener("click", () => {
     setSidebarCollapsed(false);
   });
+
+  mobileNavBackdrop?.addEventListener("click", () => {
+    setSidebarCollapsed(true);
+  });
+
+  tabButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      if (isMobileNavLayout()) setSidebarCollapsed(true);
+    });
+  });
+
+  const onViewportChange = () => {
+    if (isMobileNavLayout()) {
+      setSidebarCollapsed(true);
+    } else {
+      const stored = localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "1"
+        || localStorage.getItem(CHROME_COLLAPSED_KEY) === "1";
+      setSidebarCollapsed(stored);
+    }
+  };
+
+  if (typeof MOBILE_NAV_MQ.addEventListener === "function") {
+    MOBILE_NAV_MQ.addEventListener("change", onViewportChange);
+  } else if (typeof MOBILE_NAV_MQ.addListener === "function") {
+    MOBILE_NAV_MQ.addListener(onViewportChange);
+  }
 }
 
 function initPerformanceFilterSidebar() {

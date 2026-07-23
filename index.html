@@ -4,11 +4,12 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Tarmal IT Portal</title>
-    <link rel="stylesheet" href="./styles.css?v=83">
+    <link rel="stylesheet" href="./styles.css?v=84">
   </head>
   <body class="view-focus">
     <script src="./auth.js?v=16"></script>
     <script>Auth.requireLogin();</script>
+    <div class="mobile-nav-backdrop" id="mobileNavBackdrop" hidden></div>
     <main class="app-shell">
       <aside class="app-sidebar" id="appSidebar" aria-label="Main navigation">
         <div class="sidebar-brand-bar">
@@ -79,7 +80,7 @@
         </header>
 
         <div class="sidebar-expand-bar panel-restore-bar" id="sidebarExpandBar">
-          <button class="panel-icon-btn" id="expandSidebarButton" type="button" aria-label="Show menu and header" title="Show menu and header">
+          <button class="panel-icon-btn" id="expandSidebarButton" type="button" aria-label="Open menu" title="Open menu">
             <span class="panel-icon-glyph panel-icon-glyph-menu" aria-hidden="true"></span>
           </button>
           <span class="sidebar-expand-title panel-restore-label" id="activeTabLabel">Dashboard</span>
@@ -1266,7 +1267,7 @@
       </div>
     </div>
 
-    <script src="./app.js?v=109"></script>
+    <script src="./app.js?v=110"></script>
     <script src="./assets.js?v=12"></script>
     <script src="./documents.js?v=9"></script>
   </body>

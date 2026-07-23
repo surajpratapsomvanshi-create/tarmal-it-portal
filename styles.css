@@ -5922,26 +5922,141 @@ body.view-focus .dashboard-layout {
   }
 }
 
+/* ------------------------------------------------------------------ */
+/* Responsive shell — tablet & phone (drawer nav, no page overflow)   */
+/* Breakpoints: 900px (tablet), 768px (narrow), 480px (~375 phones)   */
+/* ------------------------------------------------------------------ */
+
+.mobile-nav-backdrop {
+  display: none;
+}
+
 @media (max-width: 900px) {
-  body.view-focus .app-shell {
-    flex-direction: column;
+  .mobile-nav-backdrop:not([hidden]) {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 1150;
+    background: rgba(15, 23, 42, 0.42);
+    border: 0;
+    padding: 0;
+    margin: 0;
+    cursor: pointer;
   }
 
-  .app-sidebar {
+  body.view-focus .app-shell,
+  .app-shell {
+    flex-direction: column;
     width: 100%;
+    max-width: 100%;
+    margin: 0;
+    padding: 8px;
+    gap: 8px;
+  }
+
+  body.view-focus .app-sidebar,
+  .app-sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    z-index: 1200;
+    display: flex;
+    flex-direction: column;
+    width: min(280px, 86vw);
     min-width: 0;
-    margin-right: 0;
-    margin-bottom: 8px;
+    max-width: 86vw;
+    height: 100dvh;
+    margin: 0;
+    padding: 12px 10px;
+    border-radius: 0;
+    border: 0;
+    border-right: 1px solid var(--line);
+    box-shadow: 8px 0 28px rgba(15, 23, 42, 0.18);
+    background: var(--panel);
+    transform: translateX(0);
+    opacity: 1;
+    pointer-events: auto;
+    overflow: hidden;
+    transition: transform 0.2s ease;
+  }
+
+  body.sidebar-collapsed.view-focus .app-sidebar,
+  body.sidebar-collapsed .app-sidebar {
+    width: min(280px, 86vw);
+    min-width: 0;
+    margin: 0;
+    padding: 12px 10px;
+    border-width: 0 1px 0 0;
+    transform: translateX(-105%);
+    opacity: 1;
+    pointer-events: none;
+    overflow: hidden;
   }
 
   .sidebar-nav {
-    flex-direction: row;
-    flex-wrap: wrap;
+    flex-direction: column;
+    flex-wrap: nowrap;
+    overflow-y: auto;
   }
 
   .sidebar-nav .tab-button {
-    flex: 1 1 calc(50% - 4px);
-    min-width: 120px;
+    flex: 0 0 auto;
+    width: 100%;
+    min-width: 0;
+    min-height: 44px;
+  }
+
+  /* Keep page chrome usable while the drawer is closed */
+  body.sidebar-collapsed .topbar {
+    display: flex;
+  }
+
+  body.view-focus .sidebar-expand-bar,
+  body.sidebar-collapsed .sidebar-expand-bar,
+  .sidebar-expand-bar {
+    display: flex;
+  }
+
+  body:not(.sidebar-collapsed) .sidebar-expand-bar {
+    display: none;
+  }
+
+  .app-main {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+  }
+
+  .topbar {
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 12px 14px;
+  }
+
+  .topbar-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  body.view-focus .topbar h1 {
+    font-size: 20px;
+  }
+
+  body.view-focus .brand-logo-wrap,
+  body.view-focus .brand-logo {
+    height: 40px;
+  }
+
+  .panel-icon-btn {
+    width: 40px;
+    height: 40px;
+  }
+
+  .sidebar-expand-bar {
+    min-height: 44px;
+    padding: 6px 10px;
   }
 
   .performance-layout {
@@ -5958,53 +6073,260 @@ body.view-focus .dashboard-layout {
   body.performance-filters-collapsed .filter-sidebar {
     display: none;
   }
+
+  .dashboard-hero-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .dashboard-hero-actions .primary-button,
+  .dashboard-hero-actions .secondary-button {
+    min-height: 44px;
+  }
+
+  .ticket-filters,
+  .kanban-filters,
+  .asset-filters {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .ticket-filters .filter-field:first-child,
+  .kanban-filters .filter-field:first-child,
+  .ticket-filters .filter-actions,
+  .kanban-filters .filter-actions {
+    grid-column: 1 / -1;
+  }
+
+  .filter-field input,
+  .filter-field select,
+  .multi-select-trigger,
+  .primary-button,
+  .secondary-button {
+    min-height: 44px;
+  }
+
+  .table-wrap,
+  body.view-focus .ticket-board .table-wrap,
+  .performance-table-wrap {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .ticket-table,
+  .document-table,
+  table.users-table,
+  .assets-table,
+  .performance-table {
+    min-width: 720px;
+    table-layout: auto;
+  }
+
+  body.view-focus .kanban-columns,
+  .kanban-columns {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 10px;
+  }
+
+  body.view-focus .kanban-column,
+  .kanban-column {
+    flex: 0 0 min(260px, 78vw);
+    width: min(260px, 78vw);
+    min-width: min(260px, 78vw);
+    max-width: min(260px, 78vw);
+    min-height: 360px;
+  }
+
+  .modal-overlay {
+    padding: 10px;
+    align-items: stretch;
+    place-items: stretch;
+  }
+
+  .modal-card,
+  .modal-card-wide,
+  #ticketCreateModal .modal-card,
+  #ticketEditModal .modal-card {
+    width: 100%;
+    max-width: 100%;
+    max-height: calc(100dvh - 20px);
+    margin: 0;
+    border-radius: 12px;
+    padding: 16px;
+  }
+
+  .field-row,
+  .ticket-form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .modal-actions,
+  .modal-actions-split,
+  .modal-actions-group,
+  #ticketCreateModal .ticket-submit-footer,
+  #ticketEditModal .modal-actions,
+  #ticketEditModal .ticket-submit-footer {
+    flex-wrap: wrap;
+  }
+
+  .modal-actions .primary-button,
+  .modal-actions .secondary-button,
+  #ticketCreateModal .ticket-submit-footer .primary-button,
+  #ticketCreateModal .ticket-submit-footer .secondary-button,
+  #ticketEditModal .ticket-submit-footer .primary-button,
+  #ticketEditModal .ticket-submit-footer .secondary-button {
+    min-height: 44px;
+    flex: 1 1 auto;
+    margin-left: 0;
+  }
+
+  .board-header,
+  .section-title,
+  .board-actions {
+    flex-wrap: wrap;
+  }
+
+  .board-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
 }
 
-@media (max-width: 680px) {
+@media (max-width: 768px) {
+  body.view-focus .app-shell,
   .app-shell {
-    width: calc(100% - 20px);
-    padding-top: 10px;
+    padding: 6px;
+    width: 100%;
   }
 
   .topbar,
   .brand,
-  .section-title,
-  .board-header {
-    align-items: flex-start;
-  }
-
-  .topbar,
-  .board-header,
   .topbar-actions {
     flex-direction: column;
+    align-items: stretch;
   }
 
-  .topbar-actions {
+  .topbar-actions > .user-chip,
+  .topbar-actions > .secondary-button,
+  .topbar-actions > .sync-card {
     width: 100%;
-  }
-
-  .summary-grid,
-  .field-row,
-  .ticket-form-grid,
-  .mini-metrics {
-    grid-template-columns: 1fr;
-  }
-
-  .tabbar {
-    width: 100%;
-  }
-
-  .tab-button {
-    flex: 1 0 auto;
+    justify-content: flex-start;
+    white-space: normal;
+    height: auto;
+    min-height: 44px;
   }
 
   .sync-card {
     width: 100%;
   }
 
+  .summary-grid,
+  .mini-metrics {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .dashboard-hero {
+    padding: 18px 16px;
+  }
+
+  body.view-focus .dashboard-hero {
+    padding: 18px 16px;
+    min-height: 0;
+  }
+
+  .dashboard-hero-title {
+    font-size: 22px;
+  }
+
+  .dashboard-hero-aside {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .dashboard-completion-ring {
+    align-self: center;
+  }
+
   .ticket-filters,
   .kanban-filters,
   .asset-filters {
     grid-template-columns: 1fr;
+  }
+
+  .multi-select-panel {
+    max-width: calc(100vw - 24px);
+  }
+
+  .multi-select-option {
+    min-height: 44px;
+    padding: 10px 12px;
+  }
+}
+
+@media (max-width: 480px) {
+  .app-shell {
+    width: 100%;
+    padding: 4px;
+  }
+
+  body.view-focus .app-shell {
+    padding: 4px;
+  }
+
+  .summary-grid,
+  .field-row,
+  .ticket-form-grid,
+  .mini-metrics,
+  .document-hero-stats {
+    grid-template-columns: 1fr;
+  }
+
+  .dashboard-hero-kpis {
+    flex-direction: column;
+  }
+
+  .dashboard-hero-kpi {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .brand-tagline {
+    font-size: 12px;
+  }
+
+  body.view-focus .topbar h1 {
+    font-size: 18px;
+  }
+
+  .ticket-table,
+  .document-table,
+  table.users-table,
+  .assets-table,
+  .performance-table {
+    min-width: 640px;
+  }
+
+  body.view-focus .kanban-column,
+  .kanban-column {
+    flex-basis: min(240px, 85vw);
+    width: min(240px, 85vw);
+    min-width: min(240px, 85vw);
+    max-width: min(240px, 85vw);
+  }
+
+  .modal-overlay {
+    padding: 0;
+  }
+
+  .modal-card,
+  .modal-card-wide,
+  #ticketCreateModal .modal-card,
+  #ticketEditModal .modal-card {
+    max-height: 100dvh;
+    border-radius: 0;
+    padding: 14px 12px 18px;
   }
 }
