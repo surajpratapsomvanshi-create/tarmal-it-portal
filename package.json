@@ -1,0 +1,20 @@
+{
+  "name": "tarmal-task-ticketing",
+  "version": "1.0.0",
+  "description": "Portable launcher for Tarmal Task Ticketing",
+  "private": true,
+  "bin": "launcher/server.js",
+  "scripts": {
+    "start": "node launcher/server.js",
+    "build:portable": "powershell -ExecutionPolicy Bypass -File ./build-exe.ps1"
+  },
+  "devDependencies": {
+    "pkg": "^5.8.1"
+  },
+  "pkg": {
+    "targets": [
+      "node18-win-x64"
+    ],
+    "outputPath": "dist"
+  }
+}

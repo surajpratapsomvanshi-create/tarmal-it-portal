@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Sign In | Tarmal IT Portal</title>
+    <link rel="stylesheet" href="./styles.css?v=49">
+  </head>
+  <body class="login-page">
+    <main class="login-shell">
+      <div class="login-card">
+        <aside class="login-brand-panel" aria-label="Tarmal branding">
+          <div class="login-brand-inner">
+            <div class="login-logo-frame">
+              <img class="login-logo" src="./assets/tarmal-logo.png" alt="Tarmal">
+            </div>
+            <h1 class="login-brand-title">Tarmal IT Portal</h1>
+            <p class="login-brand-tagline">Unified Access Portal</p>
+            <p class="login-brand-lead">Sign in with your work email or username and password to access tickets, assets, and documents.</p>
+            <div class="login-brand-bars" aria-hidden="true">
+              <span></span>
+              <span></span>
+              <span></span>
+            </div>
+          </div>
+        </aside>
+
+        <section class="login-form-panel">
+          <div class="login-form-inner">
+            <header class="login-form-header">
+              <h2>Welcome back</h2>
+              <p class="login-form-secure">Secure session · Authorized use only</p>
+            </header>
+
+            <form id="loginForm" class="login-form">
+              <label class="login-field">
+                <div class="login-input-wrap">
+                  <input name="identifier" autocomplete="username" required placeholder="name@company.com" aria-label="Email or username">
+                </div>
+              </label>
+
+              <div class="login-field">
+                <div class="login-field-head">
+                  <span class="login-field-label">Password</span>
+                  <button class="login-forgot" type="button" id="loginForgot" tabindex="-1">Forgot?</button>
+                </div>
+                <div class="login-input-wrap login-input-wrap-password">
+                  <input name="password" id="loginPassword" type="password" autocomplete="current-password" required placeholder="Enter your password">
+                  <button class="login-password-toggle" type="button" id="loginPasswordToggle" aria-label="Show password" title="Show password">
+                    <svg class="login-eye-open" width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                      <path d="M2 12C2 12 5.5 5 12 5C18.5 5 22 12 22 12C22 12 18.5 19 12 19C5.5 19 2 12 2 12Z" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"/>
+                      <circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.75"/>
+                    </svg>
+                    <svg class="login-eye-closed" width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true" hidden>
+                      <path d="M3 3L21 21" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/>
+                      <path d="M10.6 10.6C10.2 11 10 11.5 10 12C10 13.1 10.9 14 12 14C12.5 14 13 13.8 13.4 13.4" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/>
+                      <path d="M6.7 6.7C4.9 8.1 3.5 10 2.5 12C3.5 14 4.9 15.9 6.7 17.3C8.5 18.7 10.3 19.5 12 19.5C13.7 19.5 15.5 18.7 17.3 17.3" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/>
+                      <path d="M9.9 5.1C10.6 5 11.3 5 12 5C18.5 5 22 12 22 12C21.3 13.5 20.2 14.9 18.8 16" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/>
+                    </svg>
+                  </button>
+                </div>
+              </div>
+
+              <label class="login-remember">
+                <input type="checkbox" name="remember" id="loginRemember">
+                <span>Remember me on this device</span>
+              </label>
+
+              <p class="login-error" id="loginError" hidden></p>
+
+              <button class="login-submit" type="submit" id="loginSubmit">Log in</button>
+            </form>
+
+            <p class="login-footer-note">© Tarmal Industries · Authorized access only</p>
+          </div>
+        </section>
+      </div>
+    </main>
+
+    <script src="./auth.js?v=16"></script>
+    <script>
+      const REMEMBER_KEY = "tarmal-login-remember";
+
+      if (Auth.getSession()) {
+        window.location.href = "./index.html";
+      }
+
+      const loginForm = document.querySelector("#loginForm");
+      const loginError = document.querySelector("#loginError");
+      const loginSubmit = document.querySelector("#loginSubmit");
+      const loginPassword = document.querySelector("#loginPassword");
+      const loginPasswordToggle = document.querySelector("#loginPasswordToggle");
+      const loginRemember = document.querySelector("#loginRemember");
+      const loginForgot = document.querySelector("#loginForgot");
+      const userSyncOptions = { deferSync: true };
+      let usersPreload = Auth.loadUsersFromSheet(userSyncOptions).catch(() => null);
+
+      try {
+        const saved = JSON.parse(localStorage.getItem(REMEMBER_KEY) || "null");
+        if (saved && saved.identifier) {
+          loginForm.elements.identifier.value = saved.identifier;
+          loginRemember.checked = true;
+        }
+      } catch (error) {
+        localStorage.removeItem(REMEMBER_KEY);
+      }
+
+      loginPasswordToggle.addEventListener("click", () => {
+        const show = loginPassword.type === "password";
+        loginPassword.type = show ? "text" : "password";
+        loginPasswordToggle.setAttribute("aria-label", show ? "Hide password" : "Show password");
+        loginPasswordToggle.title = show ? "Hide password" : "Show password";
+        loginPasswordToggle.querySelector(".login-eye-open").hidden = !show;
+        loginPasswordToggle.querySelector(".login-eye-closed").hidden = show;
+      });
+
+      loginForgot.addEventListener("click", () => {
+        loginError.hidden = false;
+        loginError.textContent = "Contact your IT administrator to reset your password.";
+      });
+
+      function finishLogin(result) {
+        Auth.refreshSessionRights();
+        window.location.href = "./index.html";
+      }
+
+      function resetLoginButton() {
+        loginSubmit.disabled = false;
+        loginSubmit.textContent = "Log in";
+      }
+
+      function storeRememberedIdentifier(identifier) {
+        if (loginRemember.checked) {
+          localStorage.setItem(REMEMBER_KEY, JSON.stringify({ identifier: String(identifier || "").trim() }));
+        } else {
+          localStorage.removeItem(REMEMBER_KEY);
+        }
+      }
+
+      loginForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        loginError.hidden = true;
+        loginSubmit.disabled = true;
+        loginSubmit.textContent = "Signing in...";
+
+        const data = new FormData(loginForm);
+        const identifier = data.get("identifier");
+        const password = data.get("password");
+
+        let result = Auth.login(identifier, password);
+        if (result.ok) {
+          storeRememberedIdentifier(identifier);
+          usersPreload.finally(() => Auth.refreshSessionRights());
+          finishLogin(result);
+          return;
+        }
+
+        try {
+          await Promise.race([
+            usersPreload,
+            Auth.loadUsersFromSheet({ ...userSyncOptions, timeoutMs: 8000 })
+          ]);
+          usersPreload = Promise.resolve();
+          result = Auth.login(identifier, password);
+        } catch (error) {
+          loginError.hidden = false;
+          loginError.textContent = "Cannot verify credentials right now. Check your internet connection and try again.";
+          resetLoginButton();
+          usersPreload = Auth.loadUsersFromSheet(userSyncOptions).catch(() => null);
+          return;
+        }
+
+        if (!result.ok) {
+          loginError.hidden = false;
+          loginError.textContent = result.error;
+          resetLoginButton();
+          return;
+        }
+
+        storeRememberedIdentifier(identifier);
+        finishLogin(result);
+      });
+    </script>
+  </body>
+</html>

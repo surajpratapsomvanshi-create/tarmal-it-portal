@@ -1,0 +1,1273 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Tarmal IT Portal</title>
+    <link rel="stylesheet" href="./styles.css?v=83">
+  </head>
+  <body class="view-focus">
+    <script src="./auth.js?v=16"></script>
+    <script>Auth.requireLogin();</script>
+    <main class="app-shell">
+      <aside class="app-sidebar" id="appSidebar" aria-label="Main navigation">
+        <div class="sidebar-brand-bar">
+          <div class="sidebar-brand">
+            <img class="sidebar-brand-logo" src="./assets/tarmal-logo.png" alt="Tarmal">
+            <div class="sidebar-brand-text">
+              <strong>Tarmal IT</strong>
+              <span>Portal</span>
+            </div>
+          </div>
+          <button class="sidebar-collapse-btn panel-icon-btn" id="toggleSidebarButton" type="button" aria-expanded="true" aria-label="Collapse menu and header" title="Collapse menu and header">
+            <span class="panel-icon-glyph panel-icon-glyph-collapse" aria-hidden="true"></span>
+          </button>
+        </div>
+        <nav class="sidebar-nav tabbar" aria-label="Ticketing sections">
+          <button class="tab-button active" type="button" data-tab="dashboard" data-short="DB">
+            <span class="tab-button-label">Dashboard</span>
+          </button>
+          <button class="tab-button" type="button" data-tab="performance" data-requires="dashboard" data-short="PF">
+            <span class="tab-button-label">Performance</span>
+          </button>
+          <button class="tab-button" type="button" data-tab="tickets" data-requires="dashboard" data-short="TK">
+            <span class="tab-button-label">Tickets</span>
+          </button>
+          <button class="tab-button" type="button" data-tab="projects" data-requires="dashboard" data-short="PJ">
+            <span class="tab-button-label">Projects</span>
+          </button>
+          <button class="tab-button" type="button" data-tab="kanban" data-requires="dashboard" data-short="KB">
+            <span class="tab-button-label">Kanban</span>
+          </button>
+          <button class="tab-button" type="button" data-tab="asset-register" data-requires="manageAssets" data-short="RA">
+            <span class="tab-button-label">Register Asset</span>
+          </button>
+          <button class="tab-button" type="button" data-tab="asset-list" data-requires="viewAssets,manageAssets" data-short="IA">
+            <span class="tab-button-label">IT Assets</span>
+          </button>
+          <button class="tab-button" type="button" data-tab="documents" data-requires="viewDocuments,manageDocuments" data-short="DM">
+            <span class="tab-button-label">DMS</span>
+          </button>
+          <button class="tab-button" type="button" data-tab="users" data-requires="manageUsers" data-short="US">
+            <span class="tab-button-label">Users</span>
+          </button>
+        </nav>
+      </aside>
+
+      <div class="app-main">
+        <header class="topbar">
+          <div class="brand">
+            <div class="brand-logo-wrap">
+              <img class="brand-logo" src="./assets/tarmal-logo.png" alt="Tarmal">
+            </div>
+            <div>
+              <h1>Tarmal IT Portal</h1>
+              <p class="brand-tagline">Unified Access Portal</p>
+            </div>
+          </div>
+          <div class="topbar-actions">
+            <div class="user-chip">
+              <span>Signed in as</span>
+              <strong id="currentUserLabel">User</strong>
+            </div>
+            <button class="secondary-button" id="logoutButton" type="button">Sign Out</button>
+            <div class="sync-card" id="syncCard">
+              <span class="status-dot" id="statusDot"></span>
+              <span id="syncText">Sync not configured</span>
+            </div>
+          </div>
+        </header>
+
+        <div class="sidebar-expand-bar panel-restore-bar" id="sidebarExpandBar">
+          <button class="panel-icon-btn" id="expandSidebarButton" type="button" aria-label="Show menu and header" title="Show menu and header">
+            <span class="panel-icon-glyph panel-icon-glyph-menu" aria-hidden="true"></span>
+          </button>
+          <span class="sidebar-expand-title panel-restore-label" id="activeTabLabel">Dashboard</span>
+        </div>
+
+      <section class="tab-panel active" id="dashboardPanel" data-panel="dashboard" aria-label="Dashboard">
+        <div class="dashboard-hero">
+          <div class="dashboard-hero-glow" aria-hidden="true"></div>
+          <div class="dashboard-hero-main">
+            <h2 class="dashboard-hero-title" id="dashboardWelcomeTitle">Welcome back</h2>
+            <p class="dashboard-subtitle" id="dashboardSubtitle">Live ticket snapshot</p>
+            <div class="dashboard-hero-actions">
+              <button class="primary-button dashboard-hero-cta" type="button" data-open-ticket-create data-requires="createTicket">New Ticket</button>
+              <button class="secondary-button dashboard-hero-cta-secondary" type="button" data-goto-tab="tickets" data-requires="dashboard">View Tickets</button>
+              <button class="secondary-button dashboard-hero-cta-secondary" type="button" data-goto-tab="kanban" data-requires="dashboard">Kanban Board</button>
+            </div>
+          </div>
+          <div class="dashboard-hero-aside">
+            <div class="dashboard-completion-ring" id="dashboardCompletionRing" style="--completion: 0">
+              <div class="dashboard-completion-ring-inner">
+                <strong id="completionRate">0%</strong>
+                <span>Completed</span>
+              </div>
+            </div>
+            <div class="dashboard-hero-kpis">
+              <article class="dashboard-hero-kpi">
+                <strong id="openCount">0</strong>
+                <span>Open</span>
+              </article>
+              <article class="dashboard-hero-kpi dashboard-hero-kpi-alert">
+                <strong id="blockedCount">0</strong>
+                <span>Blocked</span>
+              </article>
+              <article class="dashboard-hero-kpi">
+                <strong id="priorityCount">0</strong>
+                <span>High Priority</span>
+              </article>
+            </div>
+          </div>
+        </div>
+
+        <section class="summary-grid dashboard-metrics" aria-label="Ticket summary">
+          <article class="metric-card metric-total dashboard-metric">
+            <span class="metric-icon layers-icon" aria-hidden="true"></span>
+            <div class="metric-card-body">
+              <strong id="totalCount">0</strong>
+              <p>Total Tasks</p>
+            </div>
+          </article>
+          <article class="metric-card metric-progress dashboard-metric">
+            <span class="metric-icon progress-icon" aria-hidden="true"></span>
+            <div class="metric-card-body">
+              <strong id="progressCount">0</strong>
+              <p>In Progress</p>
+            </div>
+          </article>
+          <article class="metric-card metric-pending dashboard-metric">
+            <span class="metric-icon pending-icon" aria-hidden="true"></span>
+            <div class="metric-card-body">
+              <strong id="pendingCount">0</strong>
+              <p>Not Started</p>
+            </div>
+          </article>
+          <article class="metric-card metric-completed dashboard-metric">
+            <span class="metric-icon completed-icon" aria-hidden="true"></span>
+            <div class="metric-card-body">
+              <strong id="completedCount">0</strong>
+              <p>Completed</p>
+            </div>
+          </article>
+        </section>
+
+        <section class="dashboard-layout dashboard-layout-wide dashboard-insights">
+          <article class="dashboard-panel">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">Workload</p>
+                <h2>Status Breakdown</h2>
+              </div>
+              <span class="panel-total" id="statusPanelTotal">0 tickets</span>
+            </div>
+            <div class="breakdown-list" id="statusList"></div>
+          </article>
+          <article class="dashboard-panel">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">Ownership</p>
+                <h2>Team Distribution</h2>
+              </div>
+              <span class="panel-total" id="ownerPanelTotal">0 tickets</span>
+            </div>
+            <div class="breakdown-list" id="ownerList"></div>
+          </article>
+          <article class="dashboard-panel dashboard-recent-panel">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">Today</p>
+                <h2>Recent Activity</h2>
+              </div>
+            </div>
+            <div class="dashboard-recent-list" id="dashboardRecentList"></div>
+          </article>
+        </section>
+      </section>
+
+      <section class="tab-panel" data-panel="performance" aria-label="IT employee performance">
+        <div class="performance-layout">
+          <aside class="filter-sidebar" id="performanceFilterSidebar" aria-label="Performance filters">
+            <div class="filter-sidebar-header">
+              <h3 class="filter-sidebar-title">Filters</h3>
+              <button class="filter-sidebar-toggle-btn" id="togglePerformanceFiltersButton" type="button" aria-expanded="true" title="Collapse filters">
+                <span class="filter-sidebar-toggle-icon" aria-hidden="true"></span>
+              </button>
+            </div>
+            <div class="filter-sidebar-body performance-controls">
+              <div class="filter-sidebar-group">
+                <span class="filter-sidebar-label">Time period</span>
+                <div class="performance-period-filters performance-period-filters-vertical" id="performancePeriodFilters" role="group" aria-label="Time period">
+                  <button class="performance-period-chip is-active" type="button" data-period="today">Today</button>
+                  <button class="performance-period-chip" type="button" data-period="yesterday">Yesterday</button>
+                  <button class="performance-period-chip" type="button" data-period="week">This Week</button>
+                  <button class="performance-period-chip" type="button" data-period="month">This Month</button>
+                  <button class="performance-period-chip" type="button" data-period="last-month">Last Month</button>
+                  <button class="performance-period-chip" type="button" data-period="all">All Time</button>
+                </div>
+              </div>
+              <label class="field performance-owner-field">
+                <span>Employee</span>
+                <select id="performanceOwnerFilter">
+                  <option value="">All employees</option>
+                </select>
+              </label>
+            </div>
+          </aside>
+
+          <div class="performance-content">
+            <div class="dashboard-header dashboard-header-compact performance-header">
+              <button class="filter-sidebar-expand-btn panel-icon-btn" id="expandPerformanceFiltersButton" type="button" aria-label="Show filters" title="Show filters" hidden>
+                <span class="panel-icon-glyph panel-icon-glyph-filter" aria-hidden="true"></span>
+              </button>
+              <div class="dashboard-intro">
+                <p class="eyebrow">Team Analytics</p>
+                <h2 class="dashboard-title">IT Employee Performance</h2>
+                <p class="dashboard-subtitle" id="performanceSubtitle">Workload and completion metrics from assigned tickets</p>
+              </div>
+            </div>
+
+        <section class="dashboard-panel performance-period-panel" id="performancePeriodPanel">
+          <div class="panel-heading performance-period-heading">
+            <h2 id="performancePeriodTitle">Employee Work — Today</h2>
+            <span class="panel-total" id="performancePeriodTotal">0 tasks</span>
+          </div>
+          <div class="table-wrap performance-matrix-wrap">
+            <table class="perf-matrix" aria-label="Employee work matrix by period">
+              <thead id="performancePeriodHead"></thead>
+              <tbody id="performancePeriodRows"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="dashboard-panel performance-team-panel" id="performanceTeamPanel">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">Comparison</p>
+              <h2>Team Workload</h2>
+            </div>
+            <span class="panel-total" id="performanceTeamTotal">0 employees</span>
+          </div>
+          <div class="perf-chart-host perf-team-chart-host" id="perfTeamChart" aria-label="Team workload bar chart"></div>
+          <div class="table-wrap performance-table-wrap" hidden>
+            <table class="ticket-table performance-table" aria-label="Team performance comparison">
+              <thead>
+                <tr>
+                  <th>Employee</th>
+                  <th>Assigned</th>
+                  <th>Completed</th>
+                  <th>Rate</th>
+                  <th>In Progress</th>
+                  <th>Blocked</th>
+                  <th>Overdue</th>
+                  <th>High Priority</th>
+                  <th>Avg Close</th>
+                </tr>
+              </thead>
+              <tbody id="performanceTeamRows"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="dashboard-layout dashboard-layout-wide performance-detail-layout performance-charts-layout" id="performanceDetailLayout">
+          <article class="dashboard-panel perf-chart-panel">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">Workload</p>
+                <h2 id="perfStatusTitle">Status Mix</h2>
+              </div>
+              <span class="panel-total" id="perfStatusTotal">0 tickets</span>
+            </div>
+            <div class="perf-chart-host" id="perfStatusList"></div>
+          </article>
+          <article class="dashboard-panel perf-chart-panel">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">Focus</p>
+                <h2>Task Types</h2>
+              </div>
+              <span class="panel-total" id="perfTypeTotal">0 tickets</span>
+            </div>
+            <div class="perf-chart-host" id="perfTypeList"></div>
+          </article>
+          <article class="dashboard-panel perf-chart-panel">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">Urgency</p>
+                <h2>Priority Mix</h2>
+              </div>
+              <span class="panel-total" id="perfPriorityTotal">0 tickets</span>
+            </div>
+            <div class="perf-chart-host" id="perfPriorityList"></div>
+          </article>
+          <article class="dashboard-panel dashboard-recent-panel perf-chart-panel">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">Open Tasks</p>
+                <h2 id="perfRecentTitle">Active Workload</h2>
+              </div>
+            </div>
+            <div class="dashboard-recent-list" id="perfRecentList"></div>
+          </article>
+        </section>
+          </div>
+        </div>
+      </section>
+
+      <section class="tab-panel" data-panel="tickets" aria-label="Tickets">
+        <section class="ticket-board" aria-label="Recent tickets">
+          <div class="board-toolbar-panel" id="ticketsToolbarPanel" data-toolbar-key="tickets">
+            <div class="toolbar-restore-row panel-restore-bar">
+              <span class="panel-restore-label">Tickets — filters &amp; actions hidden</span>
+              <button class="panel-icon-btn toolbar-expand-btn" type="button" aria-label="Show filters" title="Show filters">
+                <span class="panel-icon-glyph panel-icon-glyph-filter" aria-hidden="true"></span>
+              </button>
+            </div>
+            <div class="board-toolbar-body">
+              <div class="board-header">
+                <div>
+                  <p class="eyebrow">Preview</p>
+                  <h2>Recent Tickets</h2>
+                </div>
+                <div class="board-actions">
+                  <button class="primary-button" id="openTicketCreateButton" type="button" data-requires="createTicket">+ New Ticket</button>
+                  <button class="secondary-button" id="refreshSheetButton" type="button" data-requires="syncSheet">Refresh</button>
+                  <a class="secondary-button attachments-folder-link" id="attachmentsFolderLink" href="#" target="_blank" rel="noopener noreferrer" hidden>Screenshots Folder</a>
+                  <button class="secondary-button" id="exportButton" type="button" data-requires="exportData">Export CSV</button>
+                  <button class="secondary-button danger" id="clearLocalButton" type="button">Clear Local</button>
+                  <button class="secondary-button toolbar-collapse-btn" type="button">Hide filters</button>
+                </div>
+              </div>
+
+              <div class="ticket-filters" aria-label="Ticket filters">
+            <label class="field filter-field filter-search">
+              <span>Search</span>
+              <input id="ticketSearchFilter" type="search" placeholder="Task, remarks, requester...">
+            </label>
+            <div class="field filter-field">
+              <span>Status</span>
+              <div class="multi-select" data-default-label="All statuses">
+                <button class="multi-select-trigger" id="ticketStatusFilterTrigger" type="button" aria-expanded="false">All statuses</button>
+                <div class="multi-select-panel" id="ticketStatusFilterPanel" hidden></div>
+              </div>
+            </div>
+            <div class="field filter-field">
+              <span>Owner</span>
+              <div class="multi-select" data-default-label="All owners">
+                <button class="multi-select-trigger" id="ticketOwnerFilterTrigger" type="button" aria-expanded="false">All owners</button>
+                <div class="multi-select-panel" id="ticketOwnerFilterPanel" hidden></div>
+              </div>
+            </div>
+            <div class="field filter-field">
+              <span>Type</span>
+              <div class="multi-select" data-default-label="All types">
+                <button class="multi-select-trigger" id="ticketTypeFilterTrigger" type="button" aria-expanded="false">All types</button>
+                <div class="multi-select-panel" id="ticketTypeFilterPanel" hidden></div>
+              </div>
+            </div>
+            <div class="field filter-field">
+              <span>Priority</span>
+              <div class="multi-select" data-default-label="All priorities">
+                <button class="multi-select-trigger" id="ticketPriorityFilterTrigger" type="button" aria-expanded="false">All priorities</button>
+                <div class="multi-select-panel" id="ticketPriorityFilterPanel" hidden></div>
+              </div>
+            </div>
+            <div class="field filter-field">
+              <span>Original Owner</span>
+              <div class="multi-select" data-default-label="All original owners">
+                <button class="multi-select-trigger" id="ticketBhanuFilterTrigger" type="button" aria-expanded="false">All original owners</button>
+                <div class="multi-select-panel" id="ticketBhanuFilterPanel" hidden></div>
+              </div>
+            </div>
+            <label class="field filter-field">
+              <span>Sort by</span>
+              <select id="ticketSortFilter">
+                <option value="recent">Most recent start date</option>
+                <option value="sheet">Row order (newest first)</option>
+                <option value="oldest">Oldest date</option>
+                <option value="priority-desc">Priority high to low</option>
+                <option value="priority-asc">Priority low to high</option>
+                <option value="task">Task A-Z</option>
+                <option value="sap-status">SAP — completed, in progress, not started</option>
+                <option value="infra-status">Infra — completed, in progress, not started</option>
+                <option value="milestone-open-desc" selected>Today's milestone first, then newest milestone</option>
+              </select>
+            </label>
+            <button class="secondary-button filter-clear clear-filters-button" id="clearTicketFilters" type="button">Clear Filters</button>
+          </div>
+          <p class="filter-summary" id="ticketFilterSummary"></p>
+            </div>
+          </div>
+
+          <div class="table-wrap ticket-table-wrap">
+            <table class="ticket-table" id="ticketTable">
+              <thead>
+                <tr>
+                  <th class="task-col">Task</th>
+                  <th class="ticket-col-compact ticket-col-priority">Priority</th>
+                  <th class="ticket-col-compact ticket-col-owner">Owner</th>
+                  <th class="ticket-col-compact ticket-col-raised">Raised By</th>
+                  <th class="ticket-col-compact ticket-col-status">Status</th>
+                  <th class="ticket-col-compact ticket-col-date">Milestone</th>
+                  <th class="ticket-col-compact ticket-col-date">End</th>
+                  <th class="ticket-col-compact ticket-col-type">Type</th>
+                  <th class="remarks-col">Remarks</th>
+                  <th class="actions-col" id="ticketActionsHeader" hidden>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="ticketRows"></tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+
+      <section class="tab-panel" data-panel="projects" aria-label="Project works">
+        <section class="ticket-board" aria-label="Project works">
+          <div class="board-toolbar-panel" id="projectsToolbarPanel" data-toolbar-key="projects">
+            <div class="toolbar-restore-row panel-restore-bar">
+              <span class="panel-restore-label">Projects — filters &amp; actions hidden</span>
+              <button class="panel-icon-btn toolbar-expand-btn" type="button" aria-label="Show filters" title="Show filters">
+                <span class="panel-icon-glyph panel-icon-glyph-filter" aria-hidden="true"></span>
+              </button>
+            </div>
+            <div class="board-toolbar-body">
+              <div class="board-header">
+                <div>
+                  <p class="eyebrow">SAP &amp; Infra</p>
+                  <h2>Project Works</h2>
+                </div>
+                <div class="board-actions">
+                  <button class="primary-button" id="openProjectTicketCreateButton" type="button" data-requires="createTicket">+ New Ticket</button>
+                  <button class="secondary-button" id="refreshProjectsSheetButton" type="button" data-requires="syncSheet">Refresh</button>
+                  <button class="secondary-button" id="exportProjectsButton" type="button" data-requires="exportData">Export CSV</button>
+                  <button class="secondary-button toolbar-collapse-btn" type="button">Hide filters</button>
+                </div>
+              </div>
+
+              <div class="ticket-filters" aria-label="Project filters">
+                <label class="field filter-field filter-search">
+                  <span>Search</span>
+                  <input id="projectSearchFilter" type="search" placeholder="Task, remarks, requester...">
+                </label>
+                <div class="field filter-field">
+                  <span>Status</span>
+                  <div class="multi-select" data-default-label="All statuses">
+                    <button class="multi-select-trigger" id="projectStatusFilterTrigger" type="button" aria-expanded="false">All statuses</button>
+                    <div class="multi-select-panel" id="projectStatusFilterPanel" hidden></div>
+                  </div>
+                </div>
+                <div class="field filter-field">
+                  <span>Owner</span>
+                  <div class="multi-select" data-default-label="All owners">
+                    <button class="multi-select-trigger" id="projectOwnerFilterTrigger" type="button" aria-expanded="false">All owners</button>
+                    <div class="multi-select-panel" id="projectOwnerFilterPanel" hidden></div>
+                  </div>
+                </div>
+                <div class="field filter-field">
+                  <span>Raised By</span>
+                  <div class="multi-select" data-default-label="All requesters">
+                    <button class="multi-select-trigger" id="projectRaisedByFilterTrigger" type="button" aria-expanded="false">All requesters</button>
+                    <div class="multi-select-panel" id="projectRaisedByFilterPanel" hidden></div>
+                  </div>
+                </div>
+                <div class="field filter-field">
+                  <span>Type</span>
+                  <div class="multi-select" data-default-label="All project types">
+                    <button class="multi-select-trigger" id="projectTypeFilterTrigger" type="button" aria-expanded="false">All project types</button>
+                    <div class="multi-select-panel" id="projectTypeFilterPanel" hidden></div>
+                  </div>
+                </div>
+                <div class="field filter-field">
+                  <span>Priority</span>
+                  <div class="multi-select" data-default-label="All priorities">
+                    <button class="multi-select-trigger" id="projectPriorityFilterTrigger" type="button" aria-expanded="false">All priorities</button>
+                    <div class="multi-select-panel" id="projectPriorityFilterPanel" hidden></div>
+                  </div>
+                </div>
+                <label class="field filter-field">
+                  <span>Sort by</span>
+                  <select id="projectSortFilter">
+                    <option value="recent">Most recent start date</option>
+                    <option value="sheet">Row order (newest first)</option>
+                    <option value="oldest">Oldest date</option>
+                    <option value="priority-desc">Priority high to low</option>
+                    <option value="priority-asc">Priority low to high</option>
+                    <option value="task">Task A-Z</option>
+                    <option value="sap-status">SAP — completed, in progress, not started</option>
+                    <option value="infra-status">Infra — completed, in progress, not started</option>
+                    <option value="milestone-open-desc" selected>Today's milestone first, then newest milestone</option>
+                    <option value="important-remarks-first">Important remarks first, then milestone</option>
+                  </select>
+                </label>
+                <button class="secondary-button filter-clear clear-filters-button" id="clearProjectFilters" type="button">Clear Filters</button>
+              </div>
+              <p class="filter-summary" id="projectFilterSummary"></p>
+            </div>
+          </div>
+
+          <div class="table-wrap ticket-table-wrap">
+            <table class="ticket-table" id="projectTable">
+              <thead>
+                <tr>
+                  <th class="task-col">Task</th>
+                  <th class="ticket-col-compact ticket-col-priority">Priority</th>
+                  <th class="ticket-col-compact ticket-col-owner">Owner</th>
+                  <th class="ticket-col-compact ticket-col-raised">Raised By</th>
+                  <th class="ticket-col-compact ticket-col-status">Status</th>
+                  <th class="ticket-col-compact ticket-col-date">Milestone</th>
+                  <th class="ticket-col-compact ticket-col-date">End</th>
+                  <th class="ticket-col-compact ticket-col-type">Type</th>
+                  <th class="remarks-col">Remarks</th>
+                  <th class="actions-col" id="projectActionsHeader" hidden>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="projectRows"></tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+
+      <section class="tab-panel" data-panel="kanban" aria-label="Kanban board">
+        <section class="kanban-board" aria-label="Task kanban">
+          <div class="board-toolbar-panel" id="kanbanToolbarPanel" data-toolbar-key="kanban">
+            <div class="toolbar-restore-row panel-restore-bar">
+              <span class="panel-restore-label">Kanban — filters hidden</span>
+              <button class="panel-icon-btn toolbar-expand-btn" type="button" aria-label="Show filters" title="Show filters">
+                <span class="panel-icon-glyph panel-icon-glyph-filter" aria-hidden="true"></span>
+              </button>
+            </div>
+            <div class="board-toolbar-body">
+              <div class="board-header">
+                <div>
+                  <p class="eyebrow">Workflow</p>
+                  <h2>Kanban Board</h2>
+                </div>
+                <div class="board-actions">
+                  <button class="secondary-button" id="kanbanRefreshButton" type="button" data-requires="syncSheet">Refresh</button>
+                  <button class="secondary-button toolbar-collapse-btn" type="button">Hide filters</button>
+                </div>
+              </div>
+
+              <div class="kanban-filters" aria-label="Kanban filters">
+            <label class="field filter-field filter-search">
+              <span>Search</span>
+              <input id="kanbanSearchFilter" type="search" placeholder="Task, owner, remarks...">
+            </label>
+            <label class="field filter-field">
+              <span>Owner</span>
+              <select id="kanbanOwnerFilter">
+                <option value="">All owners</option>
+              </select>
+            </label>
+            <label class="field filter-field">
+              <span>Priority</span>
+              <select id="kanbanPriorityFilter">
+                <option value="">All priorities</option>
+                <option value="80">High</option>
+                <option value="20">Low</option>
+              </select>
+            </label>
+            <label class="field filter-field kanban-toggle-field">
+              <span>Show completed</span>
+              <input id="kanbanShowCompleted" type="checkbox">
+            </label>
+          </div>
+          <p class="filter-summary" id="kanbanFilterSummary"></p>
+            </div>
+          </div>
+
+          <div class="kanban-columns" id="kanbanColumns"></div>
+        </section>
+      </section>
+
+      <section class="tab-panel" data-panel="asset-register" aria-label="Register IT asset" data-requires="manageAssets">
+          <section id="assetRegisterPanel" class="asset-register-panel" aria-label="Register asset">
+            <div class="section-title">
+              <div>
+                <p class="eyebrow">Inventory</p>
+                <h2 id="assetFormTitle">Register Asset</h2>
+              </div>
+              <button class="icon-button" id="assetClearButton" type="button" title="Clear form" aria-label="Clear form">
+                <span class="clear-icon" aria-hidden="true"></span>
+              </button>
+            </div>
+
+            <input type="hidden" id="assetEditId" value="">
+
+            <div class="field-row">
+              <label class="field" for="assetEmployeeId">
+                <span>Employee ID</span>
+                <input id="assetEmployeeId" type="text" autocomplete="off" placeholder="e.g. EMP-1024">
+              </label>
+              <label class="field" for="assetEmployeeName">
+                <span>Employee Name</span>
+                <input id="assetEmployeeName" type="text" autocomplete="off" placeholder="Full name">
+              </label>
+            </div>
+
+            <div class="field-row">
+              <label class="field" for="assetTypeField">
+                <span>Asset Type</span>
+                <select id="assetTypeField">
+                  <option value="">Select type</option>
+                  <option value="Phone">Phone</option>
+                  <option value="Desktop">Desktop</option>
+                </select>
+              </label>
+              <label class="field" for="assetStatus">
+                <span>Status</span>
+                <select id="assetStatus">
+                  <option value="Active" selected>Active</option>
+                  <option value="In Repair">In Repair</option>
+                  <option value="Retired">Retired</option>
+                  <option value="Lost">Lost</option>
+                </select>
+              </label>
+            </div>
+
+            <div class="field-row">
+              <label class="field" for="assetDeviceModel">
+                <span>Device Model</span>
+                <input id="assetDeviceModel" type="text" autocomplete="off" placeholder="e.g. iPhone 14 / Dell OptiPlex">
+              </label>
+              <label class="field" for="assetSerialImei">
+                <span>Serial / IMEI</span>
+                <input id="assetSerialImei" type="text" autocomplete="off" placeholder="Serial number or IMEI">
+              </label>
+            </div>
+
+            <div class="asset-type-panel" id="assetPhoneFields" hidden>
+              <p class="asset-type-panel-title">Phone Details</p>
+              <div class="field-row">
+                <label class="field" for="assetPhoneNumber">
+                  <span>Phone Number</span>
+                  <input id="assetPhoneNumber" type="text" autocomplete="off" placeholder="+254...">
+                </label>
+                <label class="field" for="assetServiceProvider">
+                  <span>Service Provider</span>
+                  <select id="assetServiceProvider">
+                    <option value="">Select provider</option>
+                    <option value="Airtel">Airtel</option>
+                    <option value="Safaricom">Safaricom</option>
+                  </select>
+                </label>
+              </div>
+              <div class="field-row">
+                <label class="field" for="assetAirtimeBalance">
+                  <span>Airtime Balance</span>
+                  <input id="assetAirtimeBalance" type="text" autocomplete="off" placeholder="e.g. KES 500">
+                </label>
+                <label class="field" for="assetAirtimeValidUntil">
+                  <span>Airtime Valid Until</span>
+                  <input id="assetAirtimeValidUntil" type="date">
+                </label>
+              </div>
+            </div>
+
+            <div class="asset-type-panel" id="assetDesktopFields" hidden>
+              <p class="asset-type-panel-title">Desktop Details</p>
+              <label class="field field-wide" for="assetDesktopSpecs">
+                <span>Desktop Specs</span>
+                <textarea id="assetDesktopSpecs" rows="3" placeholder="CPU, RAM, storage, OS, location..."></textarea>
+              </label>
+            </div>
+
+            <label class="field field-wide" for="assetNotes">
+              <span>Notes</span>
+              <textarea id="assetNotes" rows="2" placeholder="Assignment notes, accessories, warranty..."></textarea>
+            </label>
+
+            <div class="asset-form-actions">
+              <button class="primary-button" id="assetSubmitButton" type="button">Save Asset</button>
+              <button class="secondary-button" id="assetCancelEditButton" type="button" hidden>Cancel Edit</button>
+              <button class="secondary-button" id="downloadAssetTemplateRegisterButton" type="button" data-requires="manageAssets">Download Template</button>
+              <button class="secondary-button" id="importAssetsRegisterButton" type="button" data-requires="manageAssets">Import CSV</button>
+            </div>
+          </section>
+      </section>
+
+      <section class="tab-panel" data-panel="asset-list" aria-label="IT assets list" data-requires="viewAssets,manageAssets">
+          <section class="asset-board" aria-label="IT assets register">
+            <div class="board-toolbar-panel" id="assetsToolbarPanel" data-toolbar-key="assets">
+              <div class="toolbar-restore-row panel-restore-bar">
+                <span class="panel-restore-label">IT Assets — filters &amp; actions hidden</span>
+                <button class="panel-icon-btn toolbar-expand-btn" type="button" aria-label="Show filters" title="Show filters">
+                  <span class="panel-icon-glyph panel-icon-glyph-filter" aria-hidden="true"></span>
+                </button>
+              </div>
+              <div class="board-toolbar-body">
+                <div class="board-header">
+                  <div>
+                    <p class="eyebrow">Inventory</p>
+                    <h2>IT Assets</h2>
+                  </div>
+                  <div class="board-actions">
+                    <button class="secondary-button" id="refreshAssetsButton" type="button" data-requires="viewAssets,manageAssets">Refresh</button>
+                    <button class="secondary-button" id="downloadAssetTemplateButton" type="button" data-requires="manageAssets">Download Template</button>
+                    <button class="secondary-button" id="importAssetsButton" type="button" data-requires="manageAssets">Import CSV</button>
+                    <input type="file" id="importAssetsFile" accept=".csv,text/csv" hidden>
+                    <button class="secondary-button" id="exportAssetsButton" type="button" data-requires="manageAssets">Export CSV</button>
+                    <button class="secondary-button toolbar-collapse-btn" type="button">Hide filters</button>
+                  </div>
+                </div>
+
+                <div class="asset-filters" aria-label="Asset filters">
+              <label class="field filter-field filter-search">
+                <span>Search</span>
+                <input id="assetSearchFilter" type="search" placeholder="Employee, phone, serial...">
+              </label>
+              <label class="field filter-field">
+                <span>Asset Type</span>
+                <select id="assetTypeFilter">
+                  <option value="">All types</option>
+                  <option value="Phone">Phone</option>
+                  <option value="Desktop">Desktop</option>
+                </select>
+              </label>
+              <label class="field filter-field">
+                <span>Provider</span>
+                <select id="assetProviderFilter">
+                  <option value="">All providers</option>
+                  <option value="Airtel">Airtel</option>
+                  <option value="Safaricom">Safaricom</option>
+                </select>
+              </label>
+            </div>
+            <p class="filter-summary" id="assetFilterSummary"></p>
+            <p class="assets-readonly-note" id="assetsReadonlyNote" hidden>View-only access. Ask an admin for Manage IT Assets rights to add or edit records.</p>
+              </div>
+            </div>
+
+            <div class="table-wrap asset-table-wrap">
+              <table class="asset-table">
+                <thead>
+                  <tr>
+                    <th>Emp ID</th>
+                    <th>Employee</th>
+                    <th>Type</th>
+                    <th>Model</th>
+                    <th>Serial / IMEI</th>
+                    <th>Phone</th>
+                    <th>Provider</th>
+                    <th>Airtime</th>
+                    <th>Desktop</th>
+                    <th>Status</th>
+                    <th class="asset-actions-col" data-requires="manageAssets">Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="assetRows"></tbody>
+              </table>
+            </div>
+          </section>
+      </section>
+
+      <section class="tab-panel" data-panel="documents" aria-label="Document management" data-requires="viewDocuments,manageDocuments">
+        <section class="document-board" aria-label="IT document library">
+          <div class="document-hero" id="documentHeroPanel">
+            <div class="document-hero-glow" aria-hidden="true"></div>
+            <div class="document-hero-toolbar">
+              <span class="document-hero-toolbar-label">Document summary</span>
+              <div class="document-hero-toolbar-actions">
+                <button class="primary-button document-hero-upload" id="openDocumentUploadButton" type="button" data-requires="viewDocuments,manageDocuments">+ Upload Document</button>
+                <button class="secondary-button document-hero-refresh" id="refreshDocumentsButton" type="button" data-requires="viewDocuments,manageDocuments">Refresh</button>
+                <button class="secondary-button document-hero-toggle" id="toggleDocumentHeroButton" type="button" aria-expanded="true">Hide summary</button>
+              </div>
+            </div>
+            <div class="document-hero-body" id="documentHeroBody">
+              <div class="document-hero-header">
+                <div class="document-hero-main">
+                  <p class="document-hero-eyebrow">Secure IT library</p>
+                  <h2>Document Management</h2>
+                  <p class="document-hero-subtitle">Upload, share, and preview policies, manuals, and IT guides for your team.</p>
+                </div>
+              </div>
+              <div class="document-hero-stats">
+                <article class="document-stat-card">
+                  <strong id="documentTotalCount">0</strong>
+                  <span>Documents</span>
+                </article>
+                <article class="document-stat-card">
+                  <strong id="documentSharedCount">0</strong>
+                  <span>Shared</span>
+                </article>
+                <article class="document-stat-card">
+                  <strong id="documentCategoryCount">0</strong>
+                  <span>Categories</span>
+                </article>
+              </div>
+            </div>
+          </div>
+
+          <div class="board-toolbar-panel document-filters-panel" id="documentsToolbarPanel" data-toolbar-key="documents">
+            <div class="toolbar-restore-row panel-restore-bar">
+              <span class="panel-restore-label">Document filters hidden</span>
+              <button class="panel-icon-btn toolbar-expand-btn" type="button" aria-label="Show filters" title="Show filters">
+                <span class="panel-icon-glyph panel-icon-glyph-filter" aria-hidden="true"></span>
+              </button>
+            </div>
+            <div class="board-toolbar-body document-toolbar-body">
+              <div class="document-filters" aria-label="Document filters">
+                <label class="field filter-field filter-search">
+                  <span>Search</span>
+                  <input id="documentSearchFilter" type="search" placeholder="Title, category, owner...">
+                </label>
+                <label class="field filter-field">
+                  <span>Category</span>
+                  <select id="documentCategoryFilter">
+                    <option value="">All categories</option>
+                  </select>
+                </label>
+              </div>
+              <div class="document-toolbar-meta">
+                <p class="filter-summary document-filter-summary" id="documentFilterSummary"></p>
+                <button class="secondary-button toolbar-collapse-btn" type="button">Hide filters</button>
+              </div>
+            </div>
+          </div>
+
+          <div id="documentGrid" class="document-list" aria-live="polite"></div>
+        </section>
+      </section>
+
+      <section class="tab-panel" data-panel="users" aria-label="Users">
+        <div class="users-layout">
+          <form id="userForm" class="user-form">
+            <div class="section-title">
+              <div>
+                <p class="eyebrow">Access Control</p>
+                <h2>Add User</h2>
+              </div>
+              <button class="icon-button" type="reset" title="Clear form" aria-label="Clear form">
+                <span class="clear-icon" aria-hidden="true"></span>
+              </button>
+            </div>
+
+            <div class="field-row">
+              <label class="field">
+                <span>Name</span>
+                <input name="name" required placeholder="Full name">
+              </label>
+              <label class="field">
+                <span>Username</span>
+                <input name="username" placeholder="Optional login alias">
+              </label>
+            </div>
+
+            <div class="field-row">
+              <label class="field">
+                <span>Email</span>
+                <input name="email" type="email" placeholder="name@company.com">
+              </label>
+              <label class="field">
+                <span>Password</span>
+                <input name="password" id="userPassword" type="text" required minlength="6" placeholder="Min. 6 characters">
+              </label>
+            </div>
+
+            <div class="password-tools">
+              <button class="secondary-button" id="generatePasswordButton" type="button">Generate Password</button>
+              <button class="secondary-button" id="copyPasswordButton" type="button">Copy Password</button>
+            </div>
+
+            <label class="field">
+              <span>Role Preset</span>
+              <select name="rolePreset" id="rolePreset">
+                <option value="custom">Custom</option>
+                <option value="admin">Admin — full access</option>
+                <option value="agent">Agent — create and sync</option>
+                <option value="viewer">Viewer — dashboard only</option>
+              </select>
+            </label>
+
+            <fieldset class="rights-fieldset">
+              <legend>Rights</legend>
+              <div class="rights-grid" id="rightsCheckboxes"></div>
+            </fieldset>
+
+            <button class="primary-button" type="submit">Create User</button>
+          </form>
+
+          <section class="user-board" aria-label="User rights table">
+            <div class="board-toolbar-panel" id="usersToolbarPanel" data-toolbar-key="users">
+              <div class="toolbar-restore-row panel-restore-bar">
+                <span class="panel-restore-label">Users — actions hidden</span>
+                <button class="panel-icon-btn toolbar-expand-btn" type="button" aria-label="Show actions" title="Show actions">
+                  <span class="panel-icon-glyph panel-icon-glyph-sliders" aria-hidden="true"></span>
+                </button>
+              </div>
+              <div class="board-toolbar-body">
+                <div class="board-header">
+                  <div>
+                    <p class="eyebrow">Team</p>
+                    <h2>User Rights</h2>
+                  </div>
+                  <div class="board-actions">
+                    <button class="secondary-button" id="refreshUsersButton" type="button">Refresh Users</button>
+                    <button class="secondary-button danger" id="deleteSelectedUsersButton" type="button" disabled>Delete Selected</button>
+                    <button class="secondary-button toolbar-collapse-btn" type="button">Hide actions</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="table-wrap user-table-wrap">
+              <table class="user-table">
+                <thead>
+                  <tr id="userTableHead"></tr>
+                </thead>
+                <tbody id="userRows"></tbody>
+              </table>
+            </div>
+          </section>
+        </div>
+      </section>
+      </div>
+    </main>
+
+    <div class="modal-overlay" id="ticketCreateModal" hidden>
+      <div class="modal-card modal-card-wide" role="dialog" aria-labelledby="ticketCreateTitle" aria-modal="true">
+        <div class="modal-header">
+          <div>
+            <p class="eyebrow">Create</p>
+            <h2 id="ticketCreateTitle">New Ticket</h2>
+          </div>
+          <button class="icon-button modal-close-btn" id="closeTicketCreateButton" type="button" aria-label="Close new ticket form">
+            <span class="clear-icon" aria-hidden="true"></span>
+          </button>
+        </div>
+        <form id="ticketForm" class="ticket-form modal-form ticket-form-layout">
+          <input type="hidden" name="parentSheetRow" id="ticketFormParentSheetRow" value="">
+          <div class="ticket-parent-context" id="ticketCreateParentContext" hidden>
+            <p class="ticket-parent-context-label">Sub-task of</p>
+            <p class="ticket-parent-context-task" id="ticketCreateParentLabel"></p>
+            <button class="text-button" id="clearTicketCreateParentButton" type="button">Remove parent link</button>
+          </div>
+          <div class="ticket-form-block">
+            <p class="ticket-form-block-title">Task Details</p>
+            <label class="field field-span-all">
+              <span>Task</span>
+              <textarea name="Task" rows="3" required placeholder="Describe the issue or request"></textarea>
+            </label>
+          </div>
+
+          <div class="ticket-form-block">
+            <p class="ticket-form-block-title">Assignment &amp; Schedule</p>
+            <div class="ticket-form-grid">
+              <label class="field">
+                <span>Priority</span>
+                <select name="Priority" required>
+                  <option value="20">Low</option>
+                  <option value="80">High</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>Status</span>
+                <select name="Status" required>
+                  <option>Not started</option>
+                  <option selected>In progress</option>
+                  <option>Completed</option>
+                  <option>Blocked</option>
+                </select>
+              </label>
+
+              <label class="field owner-form-field">
+                <span>Owner</span>
+                <div class="multi-select owner-form-select">
+                  <button class="multi-select-trigger" id="ticketFormOwnerTrigger" type="button" aria-expanded="false" title="Select one or more owners — creates a separate ticket per owner">Select owners</button>
+                  <div class="multi-select-panel" id="ticketFormOwnerPanel" hidden></div>
+                </div>
+              </label>
+              <label class="field">
+                <span>Raised By</span>
+                <input name="Raised By" required placeholder="Requester name" list="raisedBySuggestions" autocomplete="off">
+              </label>
+
+              <p class="ticket-form-grid-note field-span-all">Select one or more owners — a separate ticket is created for each person.</p>
+
+              <label class="field">
+                <span>Type</span>
+                <select name="Type" required>
+                  <option>Daily - Infra</option>
+                  <option>Daily - SAP</option>
+                  <option>SAP</option>
+                  <option>Infra</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>Milestone</span>
+                <input name="Milestone" type="date">
+              </label>
+
+              <label class="field">
+                <span>Start Date</span>
+                <input name="Start date" type="date" required>
+              </label>
+              <label class="field">
+                <span>End Date</span>
+                <input name="End date" type="date">
+              </label>
+            </div>
+          </div>
+
+          <datalist id="raisedBySuggestions"></datalist>
+
+          <div class="ticket-form-block">
+            <p class="ticket-form-block-title">Notes</p>
+            <div class="field field-span-all ticket-notes-field">
+              <span class="field-hint">Paste screenshots or add remarks. The same notes are copied to each ticket created.</span>
+              <div class="ticket-notes-attachments-panel" data-notes-attachments hidden></div>
+              <div
+                id="ticketNotesEditor"
+                class="ticket-notes-editor"
+                contenteditable="true"
+                role="textbox"
+                aria-multiline="true"
+                data-placeholder="Remarks, follow-up, vendor update, or next action"
+              ></div>
+              <textarea name="Notes" id="ticketNotesInput" hidden></textarea>
+            </div>
+          </div>
+
+          <div class="ticket-submit-footer">
+            <button class="secondary-button" id="cancelTicketCreateButton" type="button">Cancel</button>
+            <button class="primary-button" id="ticketFormSubmitButton" type="submit">
+              <span class="send-icon" aria-hidden="true"></span>
+              <span id="ticketFormSubmitLabel">Submit Ticket</span>
+            </button>
+            <div class="ticket-submit-progress" id="ticketSubmitProgress" hidden>
+              <div class="ticket-submit-progress-head">
+                <span id="ticketSubmitProgressLabel">Submitting...</span>
+                <span id="ticketSubmitProgressPercent">0%</span>
+              </div>
+              <div class="progress-track ticket-submit-progress-track" aria-hidden="true">
+                <div class="progress-fill ticket-submit-progress-fill" id="ticketSubmitProgressFill"></div>
+              </div>
+            </div>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <div class="modal-overlay" id="ticketEditModal" hidden>
+      <div class="modal-card" role="dialog" aria-labelledby="ticketEditTitle" aria-modal="true">
+        <div class="modal-header">
+          <div>
+            <p class="eyebrow">Ticket Editor</p>
+            <h2 id="ticketEditTitle">Edit Ticket</h2>
+          </div>
+          <button class="icon-button modal-close-btn" id="closeTicketEditButton" type="button" aria-label="Close editor">
+            <span class="clear-icon" aria-hidden="true"></span>
+          </button>
+        </div>
+        <form id="ticketEditForm" class="ticket-form modal-form ticket-form-layout">
+          <input type="hidden" name="sheetRow" id="ticketEditSheetRow">
+          <input type="hidden" name="parentSheetRow" id="ticketEditParentSheetRow">
+
+          <div class="ticket-parent-context" id="ticketEditParentContext" hidden>
+            <p class="ticket-parent-context-label">Sub-task of</p>
+            <button class="text-button ticket-parent-link" id="ticketEditParentLink" type="button"></button>
+          </div>
+          <p class="ticket-approval-note" id="ticketEditApprovalNote" hidden></p>
+
+          <div class="ticket-form-block">
+            <p class="ticket-form-block-title">Task Details</p>
+            <label class="field field-span-all">
+              <span>Task</span>
+              <textarea name="Task" rows="3" required placeholder="Describe the issue or request"></textarea>
+            </label>
+          </div>
+
+          <div class="ticket-form-block">
+            <p class="ticket-form-block-title">Assignment &amp; Schedule</p>
+            <div class="ticket-form-grid">
+              <label class="field">
+                <span>Priority</span>
+                <select name="Priority" required>
+                  <option value="20">Low</option>
+                  <option value="80">High</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>Status</span>
+                <select name="Status" required>
+                  <option>Not started</option>
+                  <option>In progress</option>
+                  <option>Completed</option>
+                  <option>Blocked</option>
+                </select>
+              </label>
+
+              <label class="field">
+                <span>Owner</span>
+                <select name="Owner" required>
+                  <option>Suraj</option>
+                  <option>Sushil</option>
+                  <option>Dishon</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>Raised By</span>
+                <input name="Raised By" required placeholder="Requester name" list="raisedBySuggestions" autocomplete="off">
+              </label>
+
+              <label class="field">
+                <span>Type</span>
+                <select name="Type" required>
+                  <option>Daily - Infra</option>
+                  <option>Daily - SAP</option>
+                  <option>SAP</option>
+                  <option>Infra</option>
+                </select>
+              </label>
+              <div class="field">
+                <span>Original Owner</span>
+                <label class="multi-select-option original-owner-option">
+                  <input type="checkbox" name="originalOwnerBhanu" value="Bhanu">
+                  <span>Bhanu</span>
+                </label>
+              </div>
+
+              <label class="field">
+                <span>Start Date</span>
+                <input name="Start date" type="date" required>
+              </label>
+              <label class="field">
+                <span>End Date</span>
+                <input name="End date" type="date">
+              </label>
+
+              <label class="field">
+                <span>Milestone</span>
+                <input name="Milestone" type="date">
+              </label>
+            </div>
+          </div>
+
+          <div class="ticket-form-block">
+            <p class="ticket-form-block-title">Notes</p>
+            <div class="field field-span-all ticket-notes-field">
+              <span class="field-hint">Attachments appear above. Type notes below. Use Remove on an attachment to delete it, then Save Changes.</span>
+              <div class="ticket-notes-attachments-panel" data-notes-attachments hidden></div>
+              <div
+                id="ticketEditNotesEditor"
+                class="ticket-notes-editor"
+                contenteditable="true"
+                role="textbox"
+                aria-multiline="true"
+                data-placeholder="Remarks, follow-up, vendor update, or next action"
+              ></div>
+              <textarea name="Notes" id="ticketEditNotesInput" hidden></textarea>
+            </div>
+          </div>
+
+          <div class="modal-actions modal-actions-split" id="ticketEditModalActions">
+            <div class="ticket-delete-group">
+              <button class="secondary-button danger" id="deleteTicketEditButton" type="button">Delete Task</button>
+              <div class="ticket-delete-confirm" id="ticketDeleteConfirm" hidden>
+                <span class="ticket-delete-confirm-text" id="ticketDeleteConfirmText">Delete this task permanently?</span>
+                <button class="secondary-button danger" id="confirmDeleteTicketButton" type="button">Yes, delete</button>
+                <button class="secondary-button" id="cancelDeleteTicketButton" type="button">Cancel</button>
+              </div>
+              <p class="ticket-delete-error" id="ticketDeleteError" hidden></p>
+            </div>
+            <div class="modal-actions-group">
+              <button class="secondary-button" id="addSubtaskFromEditButton" type="button" hidden>Add Sub-task</button>
+              <button class="secondary-button" id="cancelTicketEditButton" type="button">Cancel</button>
+              <button class="primary-button" type="submit">Save Changes</button>
+            </div>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <div class="modal-overlay" id="screenshotPreviewModal" hidden>
+      <div class="modal-card screenshot-preview-card" role="dialog" aria-modal="true" aria-labelledby="screenshotPreviewTitle">
+        <div class="modal-header">
+          <div>
+            <p class="eyebrow" id="screenshotPreviewEyebrow">Attachment</p>
+            <h2 id="screenshotPreviewTitle">Screenshot Preview</h2>
+          </div>
+          <button class="icon-button modal-close-btn" id="closeScreenshotPreviewButton" type="button" aria-label="Close preview">
+            <span class="clear-icon" aria-hidden="true"></span>
+          </button>
+        </div>
+        <div class="screenshot-preview-body">
+          <p class="screenshot-preview-notice" id="screenshotPreviewNotice" hidden></p>
+          <iframe id="screenshotPreviewFrame" class="screenshot-preview-frame" title="Google Drive screenshot preview" hidden></iframe>
+          <img id="screenshotPreviewImage" alt="Ticket screenshot preview">
+          <p class="screenshot-preview-fallback" id="screenshotPreviewFallback" hidden>
+            Could not load image here.
+            <a id="screenshotPreviewOpenLink" href="#" target="_blank" rel="noopener noreferrer">Open in Google Drive</a>
+          </p>
+        </div>
+        <div class="screenshot-preview-actions">
+          <button class="secondary-button" id="screenshotPreviewPrev" type="button">Previous</button>
+          <span class="screenshot-preview-counter" id="screenshotPreviewCounter">1 / 1</span>
+          <button class="secondary-button" id="screenshotPreviewNext" type="button">Next</button>
+          <a class="secondary-button screenshot-open-link" id="screenshotPreviewDownload" href="#" target="_blank" rel="noopener noreferrer" hidden>Download</a>
+          <a class="secondary-button screenshot-open-link" id="screenshotPreviewExternal" href="#" target="_blank" rel="noopener noreferrer">Open original</a>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal-overlay" id="documentUploadModal" hidden>
+      <div class="modal-card document-upload-modal" role="dialog" aria-modal="true" aria-labelledby="documentUploadTitleLabel">
+        <div class="modal-header">
+          <div>
+            <p class="eyebrow">Upload</p>
+            <h2 id="documentUploadTitleLabel">IT Document</h2>
+          </div>
+          <button class="icon-button modal-close" id="closeDocumentUploadButton" type="button" aria-label="Close">×</button>
+        </div>
+        <form id="documentUploadForm" class="document-upload-form">
+          <input type="hidden" id="documentEditId">
+          <label class="field">
+            <span>Title</span>
+            <input id="documentUploadTitle" type="text" required placeholder="e.g. VPN Setup Guide">
+          </label>
+          <label class="field">
+            <span>Category</span>
+            <select id="documentUploadCategory"></select>
+          </label>
+          <label class="field">
+            <span>Description</span>
+            <textarea id="documentUploadDescription" rows="3" placeholder="Optional summary for the team"></textarea>
+          </label>
+          <label class="field">
+            <span>File</span>
+            <input id="documentUploadFile" type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.png,.jpg,.jpeg,.txt,.csv">
+          </label>
+          <label class="field">
+            <span>Access</span>
+            <select id="documentUploadVisibility">
+              <option value="all">All IT staff</option>
+              <option value="restricted" selected>Selected users</option>
+              <option value="private">Private to me</option>
+            </select>
+          </label>
+          <div class="document-shared-users" id="documentSharedUsersPanel">
+            <div class="document-share-toolbar">
+              <span class="field-label">Share with users</span>
+              <div class="document-share-toolbar-actions">
+                <button class="secondary-button document-share-select-btn" id="documentShareSelectAllButton" type="button">Select all users</button>
+                <button class="secondary-button document-share-clear-btn" id="documentShareClearButton" type="button">Clear</button>
+              </div>
+            </div>
+            <div class="document-share-list" id="documentSharedUsersList"></div>
+          </div>
+          <div class="ticket-submit-progress" id="documentUploadProgress" hidden>
+            <span id="documentUploadProgressLabel">Uploading...</span>
+          </div>
+          <div class="modal-actions">
+            <button class="secondary-button" id="cancelDocumentUploadButton" type="button">Cancel</button>
+            <button class="primary-button" type="submit">Save Document</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <script src="./app.js?v=108"></script>
+    <script src="./assets.js?v=12"></script>
+    <script src="./documents.js?v=9"></script>
+  </body>
+</html>
