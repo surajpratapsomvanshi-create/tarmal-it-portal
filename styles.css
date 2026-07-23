@@ -6122,6 +6122,54 @@ body.view-focus .dashboard-layout {
     table-layout: auto;
   }
 
+  /* Tickets / Projects: Task + Actions only on tablet & phone */
+  #ticketTable,
+  #projectTable {
+    min-width: 0;
+    width: 100%;
+    table-layout: fixed;
+  }
+
+  #ticketTable .ticket-col-compact,
+  #ticketTable .remarks-col,
+  #projectTable .ticket-col-compact,
+  #projectTable .remarks-col {
+    display: none;
+  }
+
+  #ticketTable .task-col,
+  #projectTable .task-col,
+  #ticketTable.ticket-table-can-edit .task-col,
+  #projectTable.ticket-table-can-edit .task-col,
+  #ticketTable:not(.ticket-table-can-edit) .task-col,
+  #projectTable:not(.ticket-table-can-edit) .task-col,
+  body.view-focus #ticketTable .task-col,
+  body.view-focus #ticketTable.ticket-table-can-edit .task-col {
+    width: auto;
+    min-width: 0;
+    max-width: none;
+    white-space: normal;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+    line-height: 1.35;
+  }
+
+  #ticketTable .actions-col,
+  #projectTable .actions-col,
+  #ticketTable.ticket-table-can-edit .actions-col,
+  #projectTable.ticket-table-can-edit .actions-col {
+    width: 88px;
+    min-width: 88px;
+    max-width: 96px;
+    padding: 4px 6px;
+    white-space: nowrap;
+    vertical-align: middle;
+  }
+
+  .ticket-board .table-wrap.ticket-table-wrap {
+    overflow-x: hidden;
+  }
+
   body.view-focus .kanban-columns,
   .kanban-columns {
     flex-wrap: nowrap;
@@ -6307,6 +6355,11 @@ body.view-focus .dashboard-layout {
   .assets-table,
   .performance-table {
     min-width: 640px;
+  }
+
+  #ticketTable,
+  #projectTable {
+    min-width: 0;
   }
 
   body.view-focus .kanban-column,
