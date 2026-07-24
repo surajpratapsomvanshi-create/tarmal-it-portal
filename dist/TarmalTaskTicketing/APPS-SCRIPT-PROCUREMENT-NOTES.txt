@@ -1,0 +1,51 @@
+APPS SCRIPT — PROCUREMENT REDEPLOY NOTES
+=======================================
+
+Paste google-apps-script-full-merged.gs into the Apps Script project
+bound to the Tarmal IT spreadsheet, then Deploy → Manage deployments →
+Edit → Version: New version → Deploy.
+
+What this adds
+--------------
+1) New sheet: Procurement (auto-created on first sync/read)
+2) New Drive folder: "Tarmal Procurement Quotes" (for PDF/image uploads)
+3) New API:
+   - GET  ?resource=procurement
+   - POST action=syncProcurement
+   - POST action=uploadProcurementAttachment
+
+Procurement sheet columns
+-------------------------
+Id | Material | Quantity | Unit | Requested By | Status | Needed By | Remarks | Quotes JSON | Updated At
+
+Quotes JSON is an array of objects, for example:
+[
+  {
+    "id": "quote-...",
+    "vendor": "Acme Supplies",
+    "unitPrice": "250",
+    "total": "12500",
+    "currency": "KES",
+    "validUntil": "2026-08-01",
+    "notes": "Includes delivery",
+    "fileName": "quote.pdf",
+    "mimeType": "application/pdf",
+    "driveFileId": "...",
+    "driveUrl": "https://drive.google.com/..."
+  }
+]
+
+Status values used by the portal
+--------------------------------
+Requested | Quoting | Ordered | Received | Cancelled
+
+After redeploy
+--------------
+1. Open the portal Procurement tab and click Refresh.
+2. Create a test item, add two quotes, attach a PDF/image, confirm View works.
+3. Confirm the Procurement sheet and Drive folder exist.
+
+Without redeploy
+----------------
+The portal still works with localStorage for items/quotes.
+File uploads fall back to local preview until Apps Script is updated.

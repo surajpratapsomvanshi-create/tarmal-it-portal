@@ -184,6 +184,7 @@ const TAB_LABELS = {
   performance: "Performance",
   tickets: "Tickets",
   projects: "Projects",
+  procurement: "Procurement",
   kanban: "Kanban",
   "asset-register": "Register Asset",
   "asset-list": "IT Assets",
@@ -198,7 +199,7 @@ const SIDEBAR_COLLAPSED_KEY = "tarmal-sidebar-collapsed";
 const TOPBAR_COLLAPSED_KEY = "tarmal-topbar-collapsed";
 const PERFORMANCE_FILTERS_COLLAPSED_KEY = "tarmal-performance-filters-collapsed";
 const TOOLBAR_COLLAPSED_PREFIX = "tarmal-toolbar-";
-const DEFAULT_COLLAPSED_TOOLBARS = new Set(["tickets", "projects", "kanban", "assets", "users"]);
+const DEFAULT_COLLAPSED_TOOLBARS = new Set(["tickets", "projects", "procurement", "kanban", "assets", "users"]);
 
 const KANBAN_COLUMNS = [
   { id: "pending", label: "Not Started", statusClass: "status-pending" },
@@ -5276,6 +5277,8 @@ function isAnyModalOpen() {
     (ticketCreateModal && !ticketCreateModal.hidden)
     || (ticketEditModal && !ticketEditModal.hidden)
     || (screenshotPreviewModal && !screenshotPreviewModal.hidden)
+    || (document.querySelector("#procurementItemModal") && !document.querySelector("#procurementItemModal").hidden)
+    || (document.querySelector("#procurementQuotesModal") && !document.querySelector("#procurementQuotesModal").hidden)
   );
 }
 
@@ -5651,6 +5654,11 @@ tabButtons.forEach((button) => {
       Auth.refreshSessionRights();
       if (typeof refreshDocumentsFromSheet === "function") {
         refreshDocumentsFromSheet();
+      }
+    }
+    if (button.dataset.tab === "procurement") {
+      if (typeof refreshProcurementFromSheet === "function") {
+        refreshProcurementFromSheet();
       }
     }
   });

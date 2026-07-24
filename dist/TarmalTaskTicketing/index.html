@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Tarmal IT Portal</title>
-    <link rel="stylesheet" href="./styles.css?v=86">
+    <link rel="stylesheet" href="./styles.css?v=87">
   </head>
   <body class="view-focus">
     <script src="./auth.js?v=16"></script>
@@ -36,6 +36,9 @@
           </button>
           <button class="tab-button" type="button" data-tab="projects" data-requires="dashboard" data-short="PJ">
             <span class="tab-button-label">Projects</span>
+          </button>
+          <button class="tab-button" type="button" data-tab="procurement" data-requires="dashboard" data-short="PR">
+            <span class="tab-button-label">Procurement</span>
           </button>
           <button class="tab-button" type="button" data-tab="kanban" data-requires="dashboard" data-short="KB">
             <span class="tab-button-label">Kanban</span>
@@ -538,6 +541,69 @@
                 </tr>
               </thead>
               <tbody id="projectRows"></tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+
+      <section class="tab-panel" data-panel="procurement" aria-label="Material procurement">
+        <section class="ticket-board procurement-board" aria-label="Procurement tracker">
+          <div class="board-toolbar-panel" id="procurementToolbarPanel" data-toolbar-key="procurement">
+            <div class="toolbar-restore-row panel-restore-bar">
+              <span class="panel-restore-label">Procurement — filters &amp; actions hidden</span>
+              <button class="panel-icon-btn toolbar-expand-btn" type="button" aria-label="Show filters" title="Show filters">
+                <span class="panel-icon-glyph panel-icon-glyph-filter" aria-hidden="true"></span>
+              </button>
+            </div>
+            <div class="board-toolbar-body">
+              <div class="board-header">
+                <div>
+                  <p class="eyebrow">Materials</p>
+                  <h2>Procurement</h2>
+                </div>
+                <div class="board-actions">
+                  <button class="primary-button" id="openProcurementCreateButton" type="button" data-requires="dashboard">+ New Item</button>
+                  <button class="secondary-button" id="refreshProcurementButton" type="button" data-requires="dashboard">Refresh</button>
+                  <button class="secondary-button" id="exportProcurementButton" type="button" data-requires="exportData">Export CSV</button>
+                  <button class="secondary-button toolbar-collapse-btn" type="button">Hide filters</button>
+                </div>
+              </div>
+
+              <div class="ticket-filters procurement-filters" aria-label="Procurement filters">
+                <label class="field filter-field filter-search">
+                  <span>Search</span>
+                  <input id="procurementSearchFilter" type="search" placeholder="Material, vendor, requester...">
+                </label>
+                <label class="field filter-field">
+                  <span>Status</span>
+                  <select id="procurementStatusFilter">
+                    <option value="">All statuses</option>
+                    <option value="Requested">Requested</option>
+                    <option value="Quoting">Quoting</option>
+                    <option value="Ordered">Ordered</option>
+                    <option value="Received">Received</option>
+                    <option value="Cancelled">Cancelled</option>
+                  </select>
+                </label>
+              </div>
+              <p class="filter-summary" id="procurementFilterSummary"></p>
+            </div>
+          </div>
+
+          <div class="table-wrap ticket-table-wrap procurement-table-wrap">
+            <table class="ticket-table procurement-table" id="procurementTable">
+              <thead>
+                <tr>
+                  <th class="task-col">Material</th>
+                  <th class="ticket-col-compact">Qty</th>
+                  <th class="ticket-col-compact procurement-hide-mobile">Requested by</th>
+                  <th class="ticket-col-compact">Status</th>
+                  <th class="ticket-col-compact procurement-hide-mobile">Needed by</th>
+                  <th class="ticket-col-compact">Quotes</th>
+                  <th class="actions-col">Actions</th>
+                </tr>
+              </thead>
+              <tbody id="procurementRows"></tbody>
             </table>
           </div>
         </section>
@@ -1282,8 +1348,124 @@
       </div>
     </div>
 
-    <script src="./app.js?v=111"></script>
+    <div class="modal-overlay" id="procurementItemModal" hidden>
+      <div class="modal-card" role="dialog" aria-labelledby="procurementItemModalTitle" aria-modal="true">
+        <div class="modal-header">
+          <div>
+            <p class="eyebrow">Procurement</p>
+            <h2 id="procurementItemModalTitle">New Procurement Item</h2>
+          </div>
+          <button class="icon-button modal-close-btn" id="closeProcurementItemButton" type="button" aria-label="Close">
+            <span class="clear-icon" aria-hidden="true"></span>
+          </button>
+        </div>
+        <form id="procurementItemForm" class="ticket-form modal-form">
+          <div class="ticket-form-grid">
+            <label class="field field-span-all">
+              <span>Material / item name</span>
+              <input name="material" required placeholder="e.g. Cat6 network cable">
+            </label>
+            <label class="field">
+              <span>Quantity</span>
+              <input name="quantity" type="text" inputmode="decimal" placeholder="e.g. 50">
+            </label>
+            <label class="field">
+              <span>Unit</span>
+              <input name="unit" placeholder="pcs, box, m...">
+            </label>
+            <label class="field">
+              <span>Requested by</span>
+              <input name="requestedBy" placeholder="Owner / requester">
+            </label>
+            <label class="field">
+              <span>Status</span>
+              <select name="status">
+                <option value="Requested">Requested</option>
+                <option value="Quoting">Quoting</option>
+                <option value="Ordered">Ordered</option>
+                <option value="Received">Received</option>
+                <option value="Cancelled">Cancelled</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>Needed by</span>
+              <input name="neededBy" type="date">
+            </label>
+            <label class="field field-span-all">
+              <span>Remarks</span>
+              <textarea name="remarks" rows="3" placeholder="Specs, preferred vendors, delivery notes..."></textarea>
+            </label>
+          </div>
+          <div class="modal-actions">
+            <button class="secondary-button" id="cancelProcurementItemButton" type="button">Cancel</button>
+            <button class="primary-button" type="submit">Save Item</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <div class="modal-overlay" id="procurementQuotesModal" hidden>
+      <div class="modal-card modal-card-wide procurement-quotes-modal-card" role="dialog" aria-labelledby="procurementQuotesTitle" aria-modal="true">
+        <div class="modal-header">
+          <div>
+            <p class="eyebrow">Quotation comparison</p>
+            <h2 id="procurementQuotesTitle">Quotes</h2>
+            <p class="procurement-quotes-subtitle" id="procurementQuotesSubtitle"></p>
+          </div>
+          <button class="icon-button modal-close-btn" id="closeProcurementQuotesButton" type="button" aria-label="Close quotes">
+            <span class="clear-icon" aria-hidden="true"></span>
+          </button>
+        </div>
+
+        <div id="procurementQuotesCompare" class="procurement-quotes-compare" aria-live="polite"></div>
+
+        <form id="procurementQuoteForm" class="ticket-form modal-form procurement-quote-form">
+          <p class="ticket-form-block-title">Add / update vendor quote</p>
+          <div class="ticket-form-grid">
+            <label class="field">
+              <span>Vendor</span>
+              <input name="vendor" required placeholder="Vendor name">
+            </label>
+            <label class="field">
+              <span>Unit price</span>
+              <input name="unitPrice" inputmode="decimal" placeholder="Optional">
+            </label>
+            <label class="field">
+              <span>Total / amount</span>
+              <input name="total" inputmode="decimal" placeholder="e.g. 12500">
+            </label>
+            <label class="field">
+              <span>Currency</span>
+              <input name="currency" placeholder="KES, USD...">
+            </label>
+            <label class="field">
+              <span>Valid until</span>
+              <input name="validUntil" type="date">
+            </label>
+            <label class="field">
+              <span>Quotation file</span>
+              <input id="procurementQuoteFile" name="file" type="file" accept=".pdf,.png,.jpg,.jpeg,.webp,.gif">
+              <span class="field-hint" id="procurementQuoteFileHint">PDF or image (optional)</span>
+            </label>
+            <label class="field field-span-all">
+              <span>Notes</span>
+              <textarea name="notes" rows="2" placeholder="Lead time, warranty, payment terms..."></textarea>
+            </label>
+          </div>
+          <div class="ticket-submit-progress" id="procurementQuoteProgress" hidden>
+            <span id="procurementQuoteProgressLabel">Uploading...</span>
+          </div>
+          <div class="modal-actions">
+            <button class="secondary-button" id="cancelProcurementQuoteButton" type="button">Clear form</button>
+            <button class="primary-button" type="submit"><span id="procurementQuoteSubmitLabel">Add Quote</span></button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <script src="./app.js?v=112"></script>
     <script src="./assets.js?v=12"></script>
     <script src="./documents.js?v=9"></script>
+    <script src="./procurement.js?v=1"></script>
   </body>
 </html>
