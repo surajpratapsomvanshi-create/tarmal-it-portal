@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Tarmal IT Portal</title>
-    <link rel="stylesheet" href="./styles.css?v=87">
+    <link rel="stylesheet" href="./styles.css?v=88">
   </head>
   <body class="view-focus">
     <script src="./auth.js?v=16"></script>
@@ -1391,10 +1391,58 @@
               <span>Needed by</span>
               <input name="neededBy" type="date">
             </label>
-            <label class="field field-span-all">
+
+            <div class="field field-span-all procurement-vendor-pair">
+              <span class="procurement-section-label">Vendor quotations</span>
+              <p class="field-hint procurement-vendor-hint">Capture two quotes on this item. Full comparison and extra vendors stay in Quotes.</p>
+              <div class="procurement-vendor-row">
+                <div class="procurement-vendor-card">
+                  <p class="procurement-vendor-card-title">Vendor 1</p>
+                  <label class="field">
+                    <span>Vendor name</span>
+                    <input name="vendor1Name" placeholder="e.g. Tech Supplies Ltd" autocomplete="organization">
+                  </label>
+                  <label class="field">
+                    <span>Quote amount</span>
+                    <input name="vendor1Amount" inputmode="decimal" placeholder="e.g. 12500">
+                  </label>
+                  <label class="field">
+                    <span>Quick notes</span>
+                    <input name="vendor1Notes" placeholder="Lead time, warranty...">
+                  </label>
+                </div>
+                <div class="procurement-vendor-card">
+                  <p class="procurement-vendor-card-title">Vendor 2</p>
+                  <label class="field">
+                    <span>Vendor name</span>
+                    <input name="vendor2Name" placeholder="e.g. Office Mart" autocomplete="organization">
+                  </label>
+                  <label class="field">
+                    <span>Quote amount</span>
+                    <input name="vendor2Amount" inputmode="decimal" placeholder="e.g. 11800">
+                  </label>
+                  <label class="field">
+                    <span>Quick notes</span>
+                    <input name="vendor2Notes" placeholder="Lead time, warranty...">
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            <div class="field field-span-all ticket-notes-field procurement-remarks-field">
               <span>Remarks</span>
+              <span class="field-hint">Attach quote PDFs or images (same idea as ticket screenshots). Assign each file to Vendor 1, Vendor 2, or General.</span>
+              <div class="ticket-notes-attachments-panel procurement-item-attachments-panel" id="procurementItemAttachmentsPanel" data-notes-attachments hidden></div>
+              <div class="procurement-attach-toolbar">
+                <input id="procurementItemFileInput" type="file" accept=".pdf,.png,.jpg,.jpeg,.webp,.gif" multiple hidden>
+                <button class="secondary-button" id="procurementItemAttachButton" type="button">Attach quote file</button>
+                <span class="field-hint" id="procurementItemAttachHint">PDF or image · max 12 MB each</span>
+              </div>
               <textarea name="remarks" rows="3" placeholder="Specs, preferred vendors, delivery notes..."></textarea>
-            </label>
+            </div>
+          </div>
+          <div class="ticket-submit-progress" id="procurementItemProgress" hidden>
+            <span id="procurementItemProgressLabel">Saving...</span>
           </div>
           <div class="modal-actions">
             <button class="secondary-button" id="cancelProcurementItemButton" type="button">Cancel</button>
@@ -1466,6 +1514,6 @@
     <script src="./app.js?v=112"></script>
     <script src="./assets.js?v=12"></script>
     <script src="./documents.js?v=9"></script>
-    <script src="./procurement.js?v=1"></script>
+    <script src="./procurement.js?v=2"></script>
   </body>
 </html>

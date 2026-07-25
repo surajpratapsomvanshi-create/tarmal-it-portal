@@ -221,6 +221,11 @@ let procurementItemModalTitle;
 let procurementItemId;
 let closeProcurementItemButton;
 let cancelProcurementItemButton;
+let procurementItemAttachmentsPanel;
+let procurementItemFileInput;
+let procurementItemAttachButton;
+let procurementItemProgress;
+let procurementItemProgressLabel;
 let procurementQuotesModal;
 let procurementQuotesTitle;
 let procurementQuotesSubtitle;
@@ -230,6 +235,8 @@ let closeProcurementQuotesButton;
 let cancelProcurementQuoteButton;
 let procurementActiveItemId = "";
 let procurementQuoteEditId = "";
+let procurementItemAttachments = [];
+let procurementItemBaselineQuotes = [];
 
 function canUseProcurement() {
   return Auth.hasPermission("dashboard") || Auth.isAdminLevelUser();
@@ -293,6 +300,416 @@ function formatProcurementMoney(quote) {
   if (total) return currency ? `${currency} ${total}` : total;
   if (unit) return currency ? `${currency} ${unit}` : unit;
   return "—";
+}
+
+function isProcurementImageMime(mimeType, fileName = "") {
+  const mime = String(mimeType || "").toLowerCase();
+  if (mime.startsWith("image/")) return true;
+  return /\.(png|jpe?g|webp|gif)$/i.test(String(fileName || ""));
+}
+
+function resetProcurementItemAttachments() {
+  procurementItemAttachments = [];
+  renderProcurementItemAttachmentsPanel();
+  if (procurementItemFileInput) procurementItemFileInput.value = "";
+}
+
+function seedProcurementItemAttachmentsFromQuotes(quotes = []) {
+  procurementItemAttachments = [];
+  quotes.forEach((quote, index) => {
+    const url = quote.driveUrl || quote.pendingDataUrl;
+    if (!url && !quote.fileName) return;
+    const assignTo = index === 0 ? "vendor1" : index === 1 ? "vendor2" : "general";
+    procurementItemAttachments.push({
+      id: quote.id || Procurement.createId("attach"),
+      quoteId: quote.id || "",
+      fileName: quote.fileName || "Attachment",
+      mimeType: quote.mimeType || "",
+      driveUrl: quote.driveUrl || "",
+      driveFileId: quote.driveFileId || "",
+      pendingDataUrl: quote.pendingDataUrl || "",
+      assignTo,
+      isExisting: true,
+      removed: false
+    });
+  });
+  renderProcurementItemAttachmentsPanel();
+}
+
+function renderProcurementItemAttachmentsPanel() {
+  if (!procurementItemAttachmentsPanel) return;
+
+  const visible = procurementItemAttachments.filter((item) => !item.removed);
+  procurementItemAttachmentsPanel.replaceChildren();
+
+  if (!visible.length) {
+    procurementItemAttachmentsPanel.hidden = true;
+    procurementItemAttachmentsPanel.classList.remove("has-attachments");
+    return;
+  }
+
+  visible.forEach((item) => {
+    const row = document.createElement("div");
+    row.className = "ticket-notes-attachment-item procurement-item-attachment-item";
+    row.dataset.attachmentId = item.id;
+
+    const previewTile = document.createElement("button");
+    previewTile.type = "button";
+    previewTile.className = "ticket-notes-attachment-preview";
+    previewTile.setAttribute("aria-label", `Preview ${item.fileName || "attachment"}`);
+
+    const previewUrl = item.driveUrl || item.pendingDataUrl;
+    if (previewUrl && isProcurementImageMime(item.mimeType, item.fileName)) {
+      const img = document.createElement("img");
+      img.src = previewUrl;
+      img.alt = item.fileName || "Quote attachment";
+      previewTile.appendChild(img);
+    } else {
+      const placeholder = document.createElement("span");
+      placeholder.className = "procurement-file-chip-icon";
+      placeholder.textContent = /\.pdf$/i.test(item.fileName || "") || /pdf/i.test(item.mimeType || "")
+        ? "PDF"
+        : "FILE";
+      previewTile.appendChild(placeholder);
+    }
+
+    previewTile.addEventListener("click", () => {
+      const url = item.driveUrl || item.pendingDataUrl;
+      if (!url) {
+        alert("No preview available for this file yet.");
+        return;
+      }
+      if (typeof openScreenshotPreview === "function") {
+        openScreenshotPreview([url], 0, {
+          title: item.fileName || "Quotation",
+          eyebrow: "Quote attachment"
+        });
+        return;
+      }
+      window.open(url, "_blank", "noopener");
+    });
+
+    const name = document.createElement("span");
+    name.className = "procurement-file-chip-name";
+    name.textContent = item.fileName || "Attachment";
+    name.title = item.fileName || "Attachment";
+
+    const assign = document.createElement("select");
+    assign.className = "procurement-attach-assign";
+    assign.setAttribute("aria-label", "Assign attachment");
+    [
+      { value: "vendor1", label: "Vendor 1" },
+      { value: "vendor2", label: "Vendor 2" },
+      { value: "general", label: "General" }
+    ].forEach((option) => {
+      const opt = document.createElement("option");
+      opt.value = option.value;
+      opt.textContent = option.label;
+      if (item.assignTo === option.value) opt.selected = true;
+      assign.appendChild(opt);
+    });
+    assign.addEventListener("change", () => {
+      item.assignTo = assign.value;
+    });
+
+    const removeButton = document.createElement("button");
+    removeButton.type = "button";
+    removeButton.className = "ticket-notes-attachment-remove";
+    removeButton.setAttribute("aria-label", "Remove attachment");
+    removeButton.title = "Remove attachment";
+    removeButton.textContent = "×";
+    removeButton.addEventListener("click", () => {
+      item.removed = true;
+      if (!item.isExisting) {
+        procurementItemAttachments = procurementItemAttachments.filter((entry) => entry.id !== item.id);
+      }
+      renderProcurementItemAttachmentsPanel();
+    });
+
+    row.append(previewTile, name, assign, removeButton);
+    procurementItemAttachmentsPanel.appendChild(row);
+  });
+
+  procurementItemAttachmentsPanel.hidden = false;
+  procurementItemAttachmentsPanel.classList.add("has-attachments");
+}
+
+async function addProcurementItemFiles(fileList) {
+  const files = [...(fileList || [])];
+  if (!files.length) return;
+
+  for (const file of files) {
+    if (file.size > Procurement.MAX_FILE_BYTES) {
+      alert(`${file.name} is too large. Maximum size is 12 MB.`);
+      continue;
+    }
+
+    const visibleCount = procurementItemAttachments.filter((item) => !item.removed).length;
+    const defaultAssign = visibleCount === 0 ? "vendor1" : visibleCount === 1 ? "vendor2" : "general";
+
+    try {
+      const dataUrl = await readProcurementFileAsDataUrl(file);
+      procurementItemAttachments.push({
+        id: Procurement.createId("attach"),
+        quoteId: "",
+        fileName: file.name,
+        mimeType: file.type || "",
+        driveUrl: "",
+        driveFileId: "",
+        pendingDataUrl: dataUrl,
+        assignTo: defaultAssign,
+        isExisting: false,
+        removed: false,
+        file
+      });
+    } catch (error) {
+      console.error(error);
+      alert(`Could not read ${file.name}.`);
+    }
+  }
+
+  renderProcurementItemAttachmentsPanel();
+  if (procurementItemFileInput) procurementItemFileInput.value = "";
+}
+
+function readInlineVendorFields(form) {
+  return {
+    vendor1: {
+      vendor: String(form.vendor1Name?.value || "").trim(),
+      total: String(form.vendor1Amount?.value || "").trim(),
+      notes: String(form.vendor1Notes?.value || "").trim()
+    },
+    vendor2: {
+      vendor: String(form.vendor2Name?.value || "").trim(),
+      total: String(form.vendor2Amount?.value || "").trim(),
+      notes: String(form.vendor2Notes?.value || "").trim()
+    }
+  };
+}
+
+function fillInlineVendorFields(form, quotes = []) {
+  const q1 = quotes[0] || {};
+  const q2 = quotes[1] || {};
+  if (form.vendor1Name) form.vendor1Name.value = q1.vendor || "";
+  if (form.vendor1Amount) form.vendor1Amount.value = q1.total || "";
+  if (form.vendor1Notes) form.vendor1Notes.value = q1.notes || "";
+  if (form.vendor2Name) form.vendor2Name.value = q2.vendor || "";
+  if (form.vendor2Amount) form.vendor2Amount.value = q2.total || "";
+  if (form.vendor2Notes) form.vendor2Notes.value = q2.notes || "";
+}
+
+function quoteHasInlineContent(data = {}) {
+  return Boolean(String(data.vendor || "").trim() || String(data.total || "").trim() || String(data.notes || "").trim());
+}
+
+function attachmentFileMeta(attachment) {
+  if (!attachment || attachment.removed) return null;
+  return {
+    fileName: attachment.fileName || "",
+    mimeType: attachment.mimeType || "",
+    driveFileId: attachment.driveFileId || "",
+    driveUrl: attachment.driveUrl || "",
+    pendingDataUrl: attachment.pendingDataUrl || ""
+  };
+}
+
+async function uploadProcurementAttachmentFile(file, title) {
+  if (Auth.SHEET_WEB_APP_URL) {
+    try {
+      const uploaded = await Procurement.uploadQuoteFile(file, title);
+      return {
+        fileName: uploaded.fileName || file.name,
+        mimeType: uploaded.mimeType || file.type,
+        driveFileId: uploaded.driveFileId || "",
+        driveUrl: uploaded.driveUrl || "",
+        pendingDataUrl: ""
+      };
+    } catch (error) {
+      console.error(error);
+      const dataUrl = await readProcurementFileAsDataUrl(file);
+      return {
+        fileName: file.name,
+        mimeType: file.type || "",
+        driveFileId: "",
+        driveUrl: "",
+        pendingDataUrl: dataUrl
+      };
+    }
+  }
+
+  const dataUrl = file ? await readProcurementFileAsDataUrl(file) : "";
+  return {
+    fileName: file?.name || "",
+    mimeType: file?.type || "",
+    driveFileId: "",
+    driveUrl: "",
+    pendingDataUrl: dataUrl
+  };
+}
+
+async function resolveProcurementItemAttachments(material) {
+  const resolved = [];
+  for (const item of procurementItemAttachments) {
+    if (item.removed) {
+      resolved.push({ ...item, fileMeta: null });
+      continue;
+    }
+
+    if (item.file) {
+      const fileMeta = await uploadProcurementAttachmentFile(
+        item.file,
+        `${material || "procurement"}-${item.assignTo || "quote"}`
+      );
+      resolved.push({ ...item, fileMeta });
+      continue;
+    }
+
+    resolved.push({ ...item, fileMeta: attachmentFileMeta(item) });
+  }
+  return resolved;
+}
+
+function buildInlineVendorQuote(existing, formData, fileMeta, fileCleared) {
+  const hasForm = quoteHasInlineContent(formData);
+  const hasNewOrKeptFile = Boolean(fileMeta && (fileMeta.driveUrl || fileMeta.pendingDataUrl || fileMeta.fileName));
+
+  if (!hasForm && !hasNewOrKeptFile) {
+    // Empty form and no file → drop this vendor slot (user cleared, or never filled).
+    return null;
+  }
+
+  const preservedFile = (!fileCleared && !fileMeta && existing)
+    ? {
+        fileName: existing.fileName || "",
+        mimeType: existing.mimeType || "",
+        driveFileId: existing.driveFileId || "",
+        driveUrl: existing.driveUrl || "",
+        pendingDataUrl: existing.pendingDataUrl || ""
+      }
+    : null;
+
+  const nextFile = fileMeta || preservedFile || {
+    fileName: "",
+    mimeType: "",
+    driveFileId: "",
+    driveUrl: "",
+    pendingDataUrl: ""
+  };
+
+  if (!hasForm && !(nextFile.driveUrl || nextFile.pendingDataUrl || nextFile.fileName)) {
+    return null;
+  }
+
+  return Procurement.normalizeQuote({
+    id: existing?.id || Procurement.createId("quote"),
+    vendor: formData.vendor || existing?.vendor || "",
+    unitPrice: existing?.unitPrice || "",
+    total: formData.total,
+    currency: existing?.currency || "",
+    validUntil: existing?.validUntil || "",
+    notes: formData.notes,
+    ...nextFile
+  });
+}
+
+function mergeProcurementQuotesFromItemForm(existingQuotes, vendorFields, resolvedAttachments) {
+  const existing = Array.isArray(existingQuotes) ? existingQuotes.map((q) => Procurement.normalizeQuote(q)) : [];
+  const rest = existing.slice(2);
+
+  const active = resolvedAttachments.filter((item) => !item.removed);
+  const byAssign = {
+    vendor1: active.filter((item) => item.assignTo === "vendor1"),
+    vendor2: active.filter((item) => item.assignTo === "vendor2"),
+    general: active.filter((item) => item.assignTo === "general")
+  };
+
+  const removedExisting = resolvedAttachments.filter((item) => item.removed && item.isExisting);
+  const clearedVendor1File = removedExisting.some(
+    (item) => item.assignTo === "vendor1" || (existing[0] && item.quoteId === existing[0].id)
+  );
+  const clearedVendor2File = removedExisting.some(
+    (item) => item.assignTo === "vendor2" || (existing[1] && item.quoteId === existing[1].id)
+  );
+
+  // Prefer newly assigned file; otherwise keep existing quote file unless explicitly cleared.
+  const pickFile = (assigned, _existingQuote, cleared) => {
+    if (!assigned.length && cleared) {
+      return { fileName: "", mimeType: "", driveFileId: "", driveUrl: "", pendingDataUrl: "" };
+    }
+    const preferred = assigned.find((item) => !item.isExisting) || assigned[assigned.length - 1];
+    if (preferred?.fileMeta) return preferred.fileMeta;
+    if (cleared) {
+      return { fileName: "", mimeType: "", driveFileId: "", driveUrl: "", pendingDataUrl: "" };
+    }
+    return null;
+  };
+
+  const quote1 = buildInlineVendorQuote(
+    existing[0],
+    vendorFields.vendor1,
+    pickFile(byAssign.vendor1, existing[0], clearedVendor1File),
+    clearedVendor1File && !byAssign.vendor1[0]
+  );
+  const quote2 = buildInlineVendorQuote(
+    existing[1],
+    vendorFields.vendor2,
+    pickFile(byAssign.vendor2, existing[1], clearedVendor2File),
+    clearedVendor2File && !byAssign.vendor2[0]
+  );
+
+  const next = [];
+  if (quote1) next.push(quote1);
+  if (quote2) next.push(quote2);
+
+  const usedIds = new Set(next.map((q) => q.id));
+  const removedQuoteIds = new Set(
+    removedExisting
+      .filter((item) => item.assignTo === "general")
+      .map((item) => item.quoteId)
+      .filter(Boolean)
+  );
+
+  rest.forEach((quote) => {
+    if (usedIds.has(quote.id)) return;
+
+    const movedToVendor = active.find(
+      (item) => item.quoteId === quote.id && (item.assignTo === "vendor1" || item.assignTo === "vendor2")
+    );
+    if (movedToVendor) return;
+
+    if (removedQuoteIds.has(quote.id)) {
+      const stillHasText = quote.vendor || quote.total || quote.unitPrice || quote.notes;
+      if (!stillHasText) return;
+      next.push(Procurement.normalizeQuote({
+        ...quote,
+        fileName: "",
+        mimeType: "",
+        driveFileId: "",
+        driveUrl: "",
+        pendingDataUrl: ""
+      }));
+      return;
+    }
+
+    next.push(quote);
+  });
+
+  byAssign.general.forEach((item) => {
+    if (!item.fileMeta) return;
+    const matched = next.find((quote) => item.quoteId && quote.id === item.quoteId);
+    if (matched) {
+      Object.assign(matched, item.fileMeta);
+      return;
+    }
+    next.push(Procurement.normalizeQuote({
+      id: item.quoteId || Procurement.createId("quote"),
+      vendor: item.fileName ? `File: ${item.fileName}` : "Attached quote",
+      notes: "Uploaded with item remarks",
+      ...item.fileMeta
+    }));
+  });
+
+  return next.map((quote) => Procurement.normalizeQuote(quote));
 }
 
 function getFilteredProcurementItems() {
@@ -369,6 +786,7 @@ function renderProcurement() {
 function openProcurementItemModal(item = null) {
   if (!procurementItemModal || !procurementItemForm) return;
   procurementItemId = item?.id || "";
+  procurementItemBaselineQuotes = item?.quotes ? item.quotes.map((quote) => Procurement.normalizeQuote(quote)) : [];
   if (procurementItemModalTitle) {
     procurementItemModalTitle.textContent = item ? "Edit Procurement Item" : "New Procurement Item";
   }
@@ -380,6 +798,10 @@ function openProcurementItemModal(item = null) {
   procurementItemForm.status.value = item?.status || "Requested";
   procurementItemForm.neededBy.value = item?.neededBy || "";
   procurementItemForm.remarks.value = item?.remarks || "";
+  fillInlineVendorFields(procurementItemForm, procurementItemBaselineQuotes);
+  seedProcurementItemAttachmentsFromQuotes(procurementItemBaselineQuotes);
+
+  if (procurementItemProgress) procurementItemProgress.hidden = true;
 
   procurementItemModal.hidden = false;
   document.body.classList.add("modal-open");
@@ -390,7 +812,10 @@ function closeProcurementItemModal() {
   if (!procurementItemModal) return;
   procurementItemModal.hidden = true;
   procurementItemId = "";
+  procurementItemBaselineQuotes = [];
+  resetProcurementItemAttachments();
   procurementItemForm?.reset();
+  if (procurementItemProgress) procurementItemProgress.hidden = true;
   if (!document.querySelector(".modal-overlay:not([hidden])")) {
     document.body.classList.remove("modal-open");
   }
@@ -410,28 +835,62 @@ async function saveProcurementItem(event) {
     return;
   }
 
+  const vendorFields = readInlineVendorFields(form);
   const items = Procurement.read();
   const existing = items.find((item) => item.id === procurementItemId);
+  const baselineQuotes = existing?.quotes?.length
+    ? existing.quotes
+    : procurementItemBaselineQuotes;
+
+  if (procurementItemProgress) procurementItemProgress.hidden = false;
+  if (procurementItemProgressLabel) {
+    const pendingUploads = procurementItemAttachments.some((item) => !item.removed && item.file);
+    procurementItemProgressLabel.textContent = pendingUploads
+      ? "Uploading quote files..."
+      : "Saving procurement item...";
+  }
+
+  let quotes = baselineQuotes;
+  try {
+    const resolvedAttachments = await resolveProcurementItemAttachments(material);
+    quotes = mergeProcurementQuotesFromItemForm(baselineQuotes, vendorFields, resolvedAttachments);
+  } catch (error) {
+    console.error(error);
+    alert(error.message || "Could not save quote attachments.");
+    if (procurementItemProgress) procurementItemProgress.hidden = true;
+    return;
+  }
+
+  let status = String(form.status.value || "Requested").trim();
+
   const next = Procurement.normalize({
     id: existing?.id || Procurement.createId(),
     material,
     quantity: form.quantity.value,
     unit: form.unit.value,
     requestedBy: form.requestedBy.value,
-    status: form.status.value,
+    status,
     neededBy: form.neededBy.value,
     remarks: form.remarks.value,
     updatedAt: new Date().toISOString(),
-    quotes: existing?.quotes || []
+    quotes
   });
 
   const updated = existing
     ? items.map((item) => (item.id === existing.id ? next : item))
     : [next, ...items];
 
-  await Procurement.write(updated);
+  try {
+    await Procurement.write(updated);
+  } finally {
+    if (procurementItemProgress) procurementItemProgress.hidden = true;
+  }
+
   closeProcurementItemModal();
   renderProcurement();
+  if (procurementActiveItemId === next.id) {
+    renderProcurementQuotesCompare(next);
+  }
   if (typeof setStatus === "function") setStatus("online", "Procurement item saved");
 }
 
@@ -838,6 +1297,11 @@ function bindProcurementElements() {
   procurementItemModalTitle = document.querySelector("#procurementItemModalTitle");
   closeProcurementItemButton = document.querySelector("#closeProcurementItemButton");
   cancelProcurementItemButton = document.querySelector("#cancelProcurementItemButton");
+  procurementItemAttachmentsPanel = document.querySelector("#procurementItemAttachmentsPanel");
+  procurementItemFileInput = document.querySelector("#procurementItemFileInput");
+  procurementItemAttachButton = document.querySelector("#procurementItemAttachButton");
+  procurementItemProgress = document.querySelector("#procurementItemProgress");
+  procurementItemProgressLabel = document.querySelector("#procurementItemProgressLabel");
   procurementQuotesModal = document.querySelector("#procurementQuotesModal");
   procurementQuotesTitle = document.querySelector("#procurementQuotesTitle");
   procurementQuotesSubtitle = document.querySelector("#procurementQuotesSubtitle");
@@ -857,6 +1321,35 @@ function initProcurementModule() {
   procurementItemForm?.addEventListener("submit", saveProcurementItem);
   procurementItemModal?.addEventListener("click", (event) => {
     if (event.target === procurementItemModal) closeProcurementItemModal();
+  });
+
+  procurementItemAttachButton?.addEventListener("click", () => {
+    procurementItemFileInput?.click();
+  });
+  procurementItemFileInput?.addEventListener("change", (event) => {
+    addProcurementItemFiles(event.target.files);
+  });
+
+  const remarksField = procurementItemForm?.querySelector(".procurement-remarks-field");
+  remarksField?.addEventListener("dragover", (event) => {
+    if ([...(event.dataTransfer?.types || [])].includes("Files")) {
+      event.preventDefault();
+    }
+  });
+  remarksField?.addEventListener("drop", (event) => {
+    const files = [...(event.dataTransfer?.files || [])];
+    if (!files.length) return;
+    event.preventDefault();
+    addProcurementItemFiles(files);
+  });
+  remarksField?.addEventListener("paste", async (event) => {
+    const items = event.clipboardData?.items;
+    if (!items) return;
+    const imageItem = [...items].find((entry) => entry.type.startsWith("image/"));
+    if (!imageItem) return;
+    event.preventDefault();
+    const file = imageItem.getAsFile();
+    if (file) await addProcurementItemFiles([file]);
   });
 
   closeProcurementQuotesButton?.addEventListener("click", closeProcurementQuotesModal);
