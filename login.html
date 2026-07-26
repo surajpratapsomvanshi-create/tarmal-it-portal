@@ -79,7 +79,7 @@
       </div>
     </main>
 
-    <script src="./auth.js?v=17"></script>
+    <script src="./auth.js?v=18"></script>
     <script>
       const REMEMBER_KEY = "tarmal-login-remember";
 
@@ -94,8 +94,31 @@
       const loginPasswordToggle = document.querySelector("#loginPasswordToggle");
       const loginRemember = document.querySelector("#loginRemember");
       const loginForgot = document.querySelector("#loginForgot");
-      const userSyncOptions = { deferSync: true, timeoutMs: 12000 };
-      let usersPreload = Auth.loadUsersFromSheet(userSyncOptions);
+      const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || "");
+      const userSyncOptions = {
+        deferSync: true,
+        // Apps Script JSONP is often slow on phones (cold start + redirects).
+        timeoutMs: isMobile ? 28000 : 20000,
+        retries: 1
+      };
+      let preloadState = "pending";
+      let usersPreload;
+
+      function startUsersPreload() {
+        preloadState = "pending";
+        usersPreload = Auth.loadUsersFromSheet(userSyncOptions)
+          .then((users) => {
+            preloadState = "ok";
+            return users;
+          })
+          .catch((error) => {
+            preloadState = "err";
+            throw error;
+          });
+        return usersPreload;
+      }
+
+      startUsersPreload();
 
       try {
         const saved = JSON.parse(localStorage.getItem(REMEMBER_KEY) || "null");
@@ -146,11 +169,25 @@
       }
 
       async function refreshUsersForLogin() {
-        // Always start a real sheet fetch. Do not race a prior preload that may
-        // already have failed and resolved to null (that skipped waiting).
-        const fresh = Auth.loadUsersFromSheet(userSyncOptions);
-        usersPreload = fresh;
-        return fresh;
+        // Reuse an in-flight or successful preload so submit does not abandon a
+        // nearly-complete Apps Script response (common on mobile).
+        if (preloadState === "pending" || preloadState === "ok") {
+          try {
+            return await usersPreload;
+          } catch (error) {
+            // Fall through and start a fresh attempt below.
+          }
+        }
+
+        return startUsersPreload();
+      }
+
+      function syncFailureMessage(error) {
+        const message = String(error && error.message || "");
+        if (/timed out/i.test(message)) {
+          return "Account sync timed out. Your password may be correct — wait a moment and try again.";
+        }
+        return "Cannot refresh accounts from the server right now. Try again in a moment.";
       }
 
       loginForm.addEventListener("submit", async (event) => {
@@ -163,6 +200,7 @@
         const identifier = data.get("identifier");
         const password = data.get("password");
 
+        // Prefer cached / seeded AppUsers first (works offline for known users).
         let result = Auth.login(identifier, password);
         if (result.ok) {
           storeRememberedIdentifier(identifier);
@@ -175,14 +213,19 @@
           await refreshUsersForLogin();
           result = Auth.login(identifier, password);
         } catch (error) {
+          // Sheet refresh failed/timed out — still allow cache login if password matches.
           result = Auth.login(identifier, password);
-          if (!result.ok) {
-            loginError.hidden = false;
-            loginError.textContent = "Cannot verify credentials right now. Check your internet connection and try again.";
-            resetLoginButton();
-            usersPreload = Auth.loadUsersFromSheet(userSyncOptions);
+          if (result.ok) {
+            storeRememberedIdentifier(identifier);
+            finishLogin();
             return;
           }
+
+          loginError.hidden = false;
+          loginError.textContent = syncFailureMessage(error);
+          resetLoginButton();
+          startUsersPreload();
+          return;
         }
 
         if (!result.ok) {

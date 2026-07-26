@@ -296,23 +296,27 @@ const Auth = {
   loadUsersFromSheet(options = {}) {
     const deferSync = options.deferSync !== false;
     const timeoutMs = Number(options.timeoutMs) || 0;
+    const retries = Math.max(0, Number(options.retries) || 0);
 
-    const fetchUsers = new Promise((resolve, reject) => {
+    const fetchOnce = () => new Promise((resolve, reject) => {
       if (!this.SHEET_WEB_APP_URL) {
         reject(new Error("Sync is not configured."));
         return;
       }
 
       const localUsers = this.readUsers();
-      const callbackName = `handleSheetUsers_${Date.now()}`;
+      const callbackName = `handleSheetUsers_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
       const script = document.createElement("script");
       const separator = this.SHEET_WEB_APP_URL.includes("?") ? "&" : "?";
+      let settled = false;
       const cleanup = () => {
         delete window[callbackName];
         script.remove();
       };
 
       window[callbackName] = (payload) => {
+        if (settled) return;
+        settled = true;
         cleanup();
         if (!payload || payload.ok === false) {
           reject(new Error(payload?.error || "Could not load users."));
@@ -342,24 +346,42 @@ const Auth = {
       };
 
       script.onerror = () => {
+        if (settled) return;
+        settled = true;
         cleanup();
         reject(new Error("Could not load users."));
       };
 
       script.src = `${this.SHEET_WEB_APP_URL}${separator}resource=users&callback=${callbackName}`;
       document.body.appendChild(script);
+
+      if (timeoutMs > 0) {
+        window.setTimeout(() => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          reject(new Error("User sync timed out."));
+        }, timeoutMs);
+      }
     });
 
-    if (timeoutMs > 0) {
-      return Promise.race([
-        fetchUsers,
-        new Promise((_, reject) => {
-          window.setTimeout(() => reject(new Error("User sync timed out.")), timeoutMs);
-        })
-      ]);
+    if (retries < 1) {
+      return fetchOnce();
     }
 
-    return fetchUsers;
+    const runWithRetries = async () => {
+      let lastError;
+      for (let attempt = 0; attempt <= retries; attempt += 1) {
+        try {
+          return await fetchOnce();
+        } catch (error) {
+          lastError = error;
+        }
+      }
+      throw lastError || new Error("Could not load users.");
+    };
+
+    return runWithRetries();
   },
 
   async syncUsersToSheet(users) {
