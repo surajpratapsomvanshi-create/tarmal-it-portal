@@ -3039,7 +3039,7 @@ function autoExpandParentsForNewSearch(searchQuery, tickets, scope = "tickets") 
     if (parentRow) parentRowsWithChildren.add(parentRow);
   });
   parentRowsWithChildren.forEach((parentRow) => {
-    setSubtaskParentCollapsed(parentRow, false);
+    setSubtaskParentCollapsed(parentRow, false, scope);
   });
 }
 
@@ -4330,25 +4330,60 @@ function getParentTicket(ticket) {
   return parentRow ? findTicketBySheetRow(parentRow) : null;
 }
 
+/** Panel-specific collapse prefs: { tickets: { row: bool }, projects: { row: bool } }. Legacy flat { row: true } migrates to tickets. */
 function readCollapsedSubtaskParents() {
   try {
     const parsed = JSON.parse(localStorage.getItem(SUBTASK_COLLAPSE_KEY) || "{}");
-    return parsed && typeof parsed === "object" ? parsed : {};
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return { tickets: {}, projects: {} };
+    }
+    const hasPanelKeys = Object.prototype.hasOwnProperty.call(parsed, "tickets")
+      || Object.prototype.hasOwnProperty.call(parsed, "projects");
+    if (!hasPanelKeys) {
+      // Legacy flat map of collapsed parents — keep under tickets only.
+      return { tickets: parsed, projects: {} };
+    }
+    return {
+      tickets: parsed.tickets && typeof parsed.tickets === "object" && !Array.isArray(parsed.tickets)
+        ? parsed.tickets
+        : {},
+      projects: parsed.projects && typeof parsed.projects === "object" && !Array.isArray(parsed.projects)
+        ? parsed.projects
+        : {}
+    };
   } catch {
-    return {};
+    return { tickets: {}, projects: {} };
   }
 }
 
-function isSubtaskParentCollapsed(sheetRow) {
-  return Boolean(readCollapsedSubtaskParents()[String(sheetRow)]);
+function normalizeSubtaskCollapsePanel(panel) {
+  return panel === "projects" ? "projects" : "tickets";
 }
 
-function setSubtaskParentCollapsed(sheetRow, collapsed) {
-  const state = readCollapsedSubtaskParents();
+/** Default when no saved preference: tickets expanded, projects collapsed. */
+function defaultSubtaskParentCollapsed(panel) {
+  return normalizeSubtaskCollapsePanel(panel) === "projects";
+}
+
+function isSubtaskParentCollapsed(sheetRow, panel = "tickets") {
+  const scope = normalizeSubtaskCollapsePanel(panel);
+  const state = readCollapsedSubtaskParents()[scope] || {};
   const key = String(sheetRow);
-  if (collapsed) state[key] = true;
-  else delete state[key];
-  localStorage.setItem(SUBTASK_COLLAPSE_KEY, JSON.stringify(state));
+  if (Object.prototype.hasOwnProperty.call(state, key)) {
+    return Boolean(state[key]);
+  }
+  return defaultSubtaskParentCollapsed(scope);
+}
+
+function setSubtaskParentCollapsed(sheetRow, collapsed, panel = "tickets") {
+  const scope = normalizeSubtaskCollapsePanel(panel);
+  const all = readCollapsedSubtaskParents();
+  const state = { ...(all[scope] || {}) };
+  const key = String(sheetRow);
+  // Always persist explicit preference so panel defaults only apply when unset.
+  state[key] = Boolean(collapsed);
+  all[scope] = state;
+  localStorage.setItem(SUBTASK_COLLAPSE_KEY, JSON.stringify(all));
 }
 
 function getChildSubtasks(parentSheetRow, tickets) {
@@ -5007,9 +5042,10 @@ function bindTicketEditButtons(root = rows) {
       event.stopPropagation();
       const parentRow = Number(button.dataset.sheetRow);
       if (!parentRow) return;
-      const nextCollapsed = !isSubtaskParentCollapsed(parentRow);
-      setSubtaskParentCollapsed(parentRow, nextCollapsed);
-      renderTickets();
+      const panel = normalizeSubtaskCollapsePanel(button.dataset.collapsePanel || "tickets");
+      const nextCollapsed = !isSubtaskParentCollapsed(parentRow, panel);
+      setSubtaskParentCollapsed(parentRow, nextCollapsed, panel);
+      renderTickets({ activeOnly: true, forcePanel: panel });
     });
   });
 }
@@ -5019,6 +5055,7 @@ function renderTicketTable(tickets, options = {}) {
   const tableEl = options.tableEl || ticketTable;
   const actionsHeaderEl = options.actionsHeaderEl || ticketActionsHeader;
   const emptyMessage = options.emptyMessage || "No tickets match the current filters.";
+  const collapsePanel = normalizeSubtaskCollapsePanel(options.collapsePanel || options.loadMoreKind || "tickets");
   if (!bodyEl) return;
 
   const canEdit = canEditTickets();
@@ -5057,8 +5094,8 @@ function renderTicketTable(tickets, options = {}) {
       const parentRow = Number(ticket.sheetRow);
       const childCount = childCounts.get(parentRow) || 0;
       const hasChildren = !subtask && childCount > 0;
-      const collapsed = hasChildren && isSubtaskParentCollapsed(parentRow);
-      const parentCollapsed = subtask && isSubtaskParentCollapsed(Number(ticket.parentSheetRow));
+      const collapsed = hasChildren && isSubtaskParentCollapsed(parentRow, collapsePanel);
+      const parentCollapsed = subtask && isSubtaskParentCollapsed(Number(ticket.parentSheetRow), collapsePanel);
 
       let taskCell = "";
       if (subtask) {
@@ -5070,6 +5107,7 @@ function renderTicketTable(tickets, options = {}) {
               class="ticket-subtask-toggle"
               type="button"
               data-sheet-row="${parentRow}"
+              data-collapse-panel="${collapsePanel}"
               aria-expanded="${collapsed ? "false" : "true"}"
               aria-label="${collapsed ? "Expand" : "Collapse"} ${childCount} sub-task${childCount === 1 ? "" : "s"}"
               title="${collapsed ? "Show" : "Hide"} sub-tasks"
@@ -5298,7 +5336,8 @@ function renderTickets(options = {}) {
     }
     renderTicketTable(filteredTickets, {
       pageLimit: ticketTableLimit,
-      loadMoreKind: "tickets"
+      loadMoreKind: "tickets",
+      collapsePanel: "tickets"
     });
   }
 
@@ -5326,7 +5365,8 @@ function renderTickets(options = {}) {
       emptyMessage: "No SAP or Infra project works match the current filters.",
       highlightImportantRemarks: true,
       pageLimit: projectTableLimit,
-      loadMoreKind: "projects"
+      loadMoreKind: "projects",
+      collapsePanel: "projects"
     });
   }
 
