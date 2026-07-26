@@ -2860,6 +2860,59 @@ function populateFilterOptionsIfNeeded(tickets) {
   }
 }
 
+function ticketSearchHaystack(ticket) {
+  return [
+    ticket.Task,
+    ticket.Remarks,
+    ticket["Raised By"],
+    ticket.Owner,
+    ticket.Type,
+    ticket.Status
+  ].join(" ").toLowerCase();
+}
+
+function expandFilteredTicketsWithSubtaskFamily(filteredTickets, sourceTickets) {
+  const filtered = Array.isArray(filteredTickets) ? filteredTickets : [];
+  const source = Array.isArray(sourceTickets) ? sourceTickets : [];
+  if (!filtered.length || !source.length) return filtered;
+
+  const keyOf = (ticket) => Number(ticket.sheetRow) || ticketIdentityKey(ticket);
+  const included = new Map();
+  filtered.forEach((ticket) => included.set(keyOf(ticket), ticket));
+
+  const byRow = new Map();
+  source.forEach((ticket) => {
+    const row = Number(ticket.sheetRow);
+    if (row) byRow.set(row, ticket);
+  });
+
+  // Parents that matched filters themselves — keep their children visible.
+  const matchedParentRows = new Set();
+  filtered.forEach((ticket) => {
+    if (isSubtaskTicket(ticket)) return;
+    const row = Number(ticket.sheetRow);
+    if (row) matchedParentRows.add(row);
+  });
+
+  source.forEach((ticket) => {
+    if (!isSubtaskTicket(ticket)) return;
+    const parentRow = Number(ticket.parentSheetRow);
+    if (!matchedParentRows.has(parentRow)) return;
+    included.set(keyOf(ticket), ticket);
+  });
+
+  // Subtasks that matched — keep their parent visible for context.
+  filtered.forEach((ticket) => {
+    if (!isSubtaskTicket(ticket)) return;
+    const parentRow = Number(ticket.parentSheetRow);
+    const parent = byRow.get(parentRow);
+    if (!parent || isSubtaskTicket(parent)) return;
+    included.set(keyOf(parent), parent);
+  });
+
+  return source.filter((ticket) => included.has(keyOf(ticket)));
+}
+
 function applyTicketFilters(tickets) {
   const search = cleanText(ticketSearchFilter.value).toLowerCase();
   const statusValues = getMultiFilterValues(ticketStatusFilterPanel);
@@ -2868,25 +2921,17 @@ function applyTicketFilters(tickets) {
   const priorityValues = getMultiFilterValues(ticketPriorityFilterPanel);
   const bhanuValues = getMultiFilterValues(ticketBhanuFilterPanel);
 
-  return tickets.filter((ticket) => {
+  const filtered = tickets.filter((ticket) => {
     if (statusValues.length && !statusValues.includes(ticket.Status)) return false;
     if (ownerValues.length && !ownerValues.includes(ticket.Owner)) return false;
     if (typeValues.length && !typeValues.includes(ticket.Type)) return false;
     if (priorityValues.length && !priorityValues.includes(ticket.Priority)) return false;
     if (bhanuValues.length && !bhanuValues.includes(getTicketOriginalOwnerValue(ticket))) return false;
     if (!search) return true;
-
-    const haystack = [
-      ticket.Task,
-      ticket.Remarks,
-      ticket["Raised By"],
-      ticket.Owner,
-      ticket.Type,
-      ticket.Status
-    ].join(" ").toLowerCase();
-
-    return haystack.includes(search);
+    return ticketSearchHaystack(ticket).includes(search);
   });
+
+  return search ? expandFilteredTicketsWithSubtaskFamily(filtered, tickets) : filtered;
 }
 
 function applyProjectFilters(tickets) {
@@ -2897,7 +2942,7 @@ function applyProjectFilters(tickets) {
   const typeValues = getMultiFilterValues(projectTypeFilterPanel);
   const priorityValues = getMultiFilterValues(projectPriorityFilterPanel);
 
-  return tickets.filter((ticket) => {
+  const filtered = tickets.filter((ticket) => {
     if (statusValues.length && !statusValues.includes(ticket.Status)) return false;
     if (ownerValues.length && !ownerValues.includes(ticket.Owner)) return false;
     if (raisedByValues.length && !raisedByValues.includes(ticket["Raised By"])) return false;
@@ -2907,18 +2952,10 @@ function applyProjectFilters(tickets) {
     }
     if (priorityValues.length && !priorityValues.includes(ticket.Priority)) return false;
     if (!search) return true;
-
-    const haystack = [
-      ticket.Task,
-      ticket.Remarks,
-      ticket["Raised By"],
-      ticket.Owner,
-      ticket.Type,
-      ticket.Status
-    ].join(" ").toLowerCase();
-
-    return haystack.includes(search);
+    return ticketSearchHaystack(ticket).includes(search);
   });
+
+  return search ? expandFilteredTicketsWithSubtaskFamily(filtered, tickets) : filtered;
 }
 
 function setProjectSortFilter(sortKey = DEFAULT_TICKET_SORT) {
@@ -3014,23 +3051,15 @@ function applyKanbanFilters(tickets) {
   const priority = normalizePriority(kanbanPriorityFilter?.value);
   const showCompleted = Boolean(kanbanShowCompleted?.checked);
 
-  return tickets.filter((ticket) => {
+  const filtered = tickets.filter((ticket) => {
     if (!showCompleted && kanbanColumnId(ticket.Status) === "completed") return false;
     if (owner && ticket.Owner !== owner) return false;
     if (priority && normalizePriority(ticket.Priority) !== priority) return false;
     if (!search) return true;
-
-    const haystack = [
-      ticket.Task,
-      ticket.Remarks,
-      ticket["Raised By"],
-      ticket.Owner,
-      ticket.Type,
-      ticket.Status
-    ].join(" ").toLowerCase();
-
-    return haystack.includes(search);
+    return ticketSearchHaystack(ticket).includes(search);
   });
+
+  return search ? expandFilteredTicketsWithSubtaskFamily(filtered, tickets) : filtered;
 }
 
 let lastKanbanOwnerSignature = "";
@@ -4882,8 +4911,9 @@ function renderTicketTable(tickets, options = {}) {
       const parentRow = Number(ticket.sheetRow);
       const childCount = childCounts.get(parentRow) || 0;
       const hasChildren = !subtask && childCount > 0;
-      const collapsed = hasChildren && isSubtaskParentCollapsed(parentRow);
-      const parentCollapsed = subtask && isSubtaskParentCollapsed(Number(ticket.parentSheetRow));
+      const forceExpand = Boolean(options.forceExpandSubtasks);
+      const collapsed = hasChildren && !forceExpand && isSubtaskParentCollapsed(parentRow);
+      const parentCollapsed = subtask && !forceExpand && isSubtaskParentCollapsed(Number(ticket.parentSheetRow));
 
       let taskCell = "";
       if (subtask) {
@@ -5049,7 +5079,8 @@ function renderTickets() {
     ticketFilterSummary.textContent = sortLabels[sortKey] || defaultLabel;
   }
 
-  renderTicketTable(filteredTickets);
+  const ticketSearchActive = Boolean(cleanText(ticketSearchFilter?.value));
+  renderTicketTable(filteredTickets, { forceExpandSubtasks: ticketSearchActive });
 
   const projectTickets = getProjectTickets(tickets);
   const filteredProjects = getFilteredDisplayedProjectTickets();
@@ -5067,12 +5098,14 @@ function renderTickets() {
         ? `Showing ${projectTickets.length} SAP & Infra project${projectTickets.length === 1 ? "" : "s"}`
         : `Showing ${filteredProjects.length} of ${projectTickets.length} projects`);
   }
+  const projectSearchActive = Boolean(cleanText(projectSearchFilter?.value));
   renderTicketTable(filteredProjects, {
     bodyEl: projectRows,
     tableEl: projectTable,
     actionsHeaderEl: projectActionsHeader,
     emptyMessage: "No SAP or Infra project works match the current filters.",
-    highlightImportantRemarks: true
+    highlightImportantRemarks: true,
+    forceExpandSubtasks: projectSearchActive
   });
 
   renderKanbanBoard(tickets);
