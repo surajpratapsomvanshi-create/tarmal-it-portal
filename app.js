@@ -3016,7 +3016,66 @@ function expandFilteredTicketsWithSubtaskFamily(filteredTickets, sourceTickets) 
     included.set(keyOf(parent), parent);
   });
 
-  return source.filter((ticket) => included.has(keyOf(ticket)));
+  // Preserve filteredTickets order (e.g. after sort). Do not fall back to source
+  // order — that would pull Daily SAP/Infra subtasks into type clusters away from parents.
+  const childrenByParent = new Map();
+  included.forEach((ticket) => {
+    if (!isSubtaskTicket(ticket)) return;
+    const parentRow = Number(ticket.parentSheetRow);
+    if (!parentRow || !included.has(parentRow)) return;
+    if (!childrenByParent.has(parentRow)) childrenByParent.set(parentRow, []);
+    childrenByParent.get(parentRow).push(ticket);
+  });
+
+  const result = [];
+  const placed = new Set();
+
+  const pushTicket = (ticket) => {
+    if (!ticket) return;
+    const key = keyOf(ticket);
+    if (placed.has(key) || !included.has(key)) return;
+    result.push(included.get(key));
+    placed.add(key);
+  };
+
+  const pushFamily = (parentTicket) => {
+    pushTicket(parentTicket);
+    const parentRow = Number(parentTicket?.sheetRow);
+    if (!parentRow) return;
+    (childrenByParent.get(parentRow) || []).forEach((child) => pushTicket(child));
+  };
+
+  filtered.forEach((ticket) => {
+    const key = keyOf(ticket);
+    if (placed.has(key)) return;
+
+    if (isSubtaskTicket(ticket)) {
+      const parentRow = Number(ticket.parentSheetRow);
+      const parent = included.get(parentRow) || byRow.get(parentRow);
+      if (parent && included.has(keyOf(parent)) && !isSubtaskTicket(parent)) {
+        pushFamily(parent);
+        return;
+      }
+      pushTicket(ticket);
+      return;
+    }
+
+    pushFamily(included.get(key) || ticket);
+  });
+
+  included.forEach((ticket) => {
+    if (placed.has(keyOf(ticket))) return;
+    if (isSubtaskTicket(ticket)) {
+      const parent = included.get(Number(ticket.parentSheetRow));
+      if (parent && !isSubtaskTicket(parent) && !placed.has(keyOf(parent))) {
+        pushFamily(parent);
+        return;
+      }
+    }
+    pushTicket(ticket);
+  });
+
+  return result;
 }
 
 /** When the search query changes, expand parents that have children in the result once. Later toggles are honored. */
@@ -3061,7 +3120,8 @@ function applyTicketFilters(tickets) {
     return ticketSearchHaystack(ticket).includes(search);
   });
 
-  return search ? expandFilteredTicketsWithSubtaskFamily(filtered, tickets) : filtered;
+  // Always keep parent↔subtask families together across type/status/owner filters.
+  return expandFilteredTicketsWithSubtaskFamily(filtered, tickets);
 }
 
 function applyProjectFilters(tickets) {
@@ -3085,7 +3145,8 @@ function applyProjectFilters(tickets) {
     return ticketSearchHaystack(ticket).includes(search);
   });
 
-  return search ? expandFilteredTicketsWithSubtaskFamily(filtered, tickets) : filtered;
+  // Always keep parent↔subtask families together (e.g. Daily SAP under a project parent).
+  return expandFilteredTicketsWithSubtaskFamily(filtered, tickets);
 }
 
 function setProjectSortFilter(sortKey = DEFAULT_TICKET_SORT) {
@@ -5761,9 +5822,9 @@ function getFilteredDisplayedTickets() {
     ticketSortFilter?.value || DEFAULT_TICKET_SORT,
     { includeCompleted: statusFilterIncludesCompleted(ticketStatusFilterPanel) }
   );
-  // Open-only sorts can drop completed family members after search expand — re-attach them.
+  // Type sorts (sap/infra) and open-only sorts can drop family members — re-attach, then glue.
+  displayed = expandFilteredTicketsWithSubtaskFamily(displayed, filtered);
   if (search) {
-    displayed = expandFilteredTicketsWithSubtaskFamily(displayed, filtered);
     autoExpandParentsForNewSearch(search, displayed, "tickets");
   } else {
     lastTicketSearchQueryForExpand = "";
@@ -5779,8 +5840,9 @@ function getFilteredDisplayedProjectTickets() {
     projectSortFilter?.value || DEFAULT_TICKET_SORT,
     { includeCompleted: statusFilterIncludesCompleted(projectStatusFilterPanel) }
   );
+  // Re-attach family after sort so Daily SAP/Infra subtasks stay under their project parent.
+  displayed = expandFilteredTicketsWithSubtaskFamily(displayed, filtered);
   if (search) {
-    displayed = expandFilteredTicketsWithSubtaskFamily(displayed, filtered);
     autoExpandParentsForNewSearch(search, displayed, "projects");
   } else {
     lastProjectSearchQueryForExpand = "";
