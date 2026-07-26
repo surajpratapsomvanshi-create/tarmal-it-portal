@@ -19,6 +19,8 @@ const PENDING_SYNC_TTL_MS = 120000;
 const EXCLUDED_TICKET_OWNERS = new Set(["Bhanu", "Noorali"]);
 const HIERARCHY_KEY = "tarmal-user-hierarchy";
 const SUBTASK_COLLAPSE_KEY = "tarmal-subtask-collapsed";
+let lastTicketSearchQueryForExpand = null;
+let lastProjectSearchQueryForExpand = null;
 const FALLBACK_HIERARCHY = [
   { user: "Suraj", manager: "", email: "sap@tarmalsteel.com" },
   { user: "Sushil", manager: "Suraj", email: "sushilpatil3760@gmail.com" },
@@ -2913,6 +2915,30 @@ function expandFilteredTicketsWithSubtaskFamily(filteredTickets, sourceTickets) 
   return source.filter((ticket) => included.has(keyOf(ticket)));
 }
 
+/** When the search query changes, expand parents that have children in the result once. Later toggles are honored. */
+function autoExpandParentsForNewSearch(searchQuery, tickets, scope = "tickets") {
+  const query = cleanText(searchQuery).toLowerCase();
+  const previous = scope === "projects" ? lastProjectSearchQueryForExpand : lastTicketSearchQueryForExpand;
+  if (!query) {
+    if (scope === "projects") lastProjectSearchQueryForExpand = "";
+    else lastTicketSearchQueryForExpand = "";
+    return;
+  }
+  if (query === previous) return;
+  if (scope === "projects") lastProjectSearchQueryForExpand = query;
+  else lastTicketSearchQueryForExpand = query;
+
+  const parentRowsWithChildren = new Set();
+  tickets.forEach((ticket) => {
+    if (!isSubtaskTicket(ticket)) return;
+    const parentRow = Number(ticket.parentSheetRow);
+    if (parentRow) parentRowsWithChildren.add(parentRow);
+  });
+  parentRowsWithChildren.forEach((parentRow) => {
+    setSubtaskParentCollapsed(parentRow, false);
+  });
+}
+
 function applyTicketFilters(tickets) {
   const search = cleanText(ticketSearchFilter.value).toLowerCase();
   const statusValues = getMultiFilterValues(ticketStatusFilterPanel);
@@ -4911,9 +4937,8 @@ function renderTicketTable(tickets, options = {}) {
       const parentRow = Number(ticket.sheetRow);
       const childCount = childCounts.get(parentRow) || 0;
       const hasChildren = !subtask && childCount > 0;
-      const forceExpand = Boolean(options.forceExpandSubtasks);
-      const collapsed = hasChildren && !forceExpand && isSubtaskParentCollapsed(parentRow);
-      const parentCollapsed = subtask && !forceExpand && isSubtaskParentCollapsed(Number(ticket.parentSheetRow));
+      const collapsed = hasChildren && isSubtaskParentCollapsed(parentRow);
+      const parentCollapsed = subtask && isSubtaskParentCollapsed(Number(ticket.parentSheetRow));
 
       let taskCell = "";
       if (subtask) {
@@ -5079,8 +5104,7 @@ function renderTickets() {
     ticketFilterSummary.textContent = sortLabels[sortKey] || defaultLabel;
   }
 
-  const ticketSearchActive = Boolean(cleanText(ticketSearchFilter?.value));
-  renderTicketTable(filteredTickets, { forceExpandSubtasks: ticketSearchActive });
+  renderTicketTable(filteredTickets);
 
   const projectTickets = getProjectTickets(tickets);
   const filteredProjects = getFilteredDisplayedProjectTickets();
@@ -5098,14 +5122,12 @@ function renderTickets() {
         ? `Showing ${projectTickets.length} SAP & Infra project${projectTickets.length === 1 ? "" : "s"}`
         : `Showing ${filteredProjects.length} of ${projectTickets.length} projects`);
   }
-  const projectSearchActive = Boolean(cleanText(projectSearchFilter?.value));
   renderTicketTable(filteredProjects, {
     bodyEl: projectRows,
     tableEl: projectTable,
     actionsHeaderEl: projectActionsHeader,
     emptyMessage: "No SAP or Infra project works match the current filters.",
-    highlightImportantRemarks: true,
-    forceExpandSubtasks: projectSearchActive
+    highlightImportantRemarks: true
   });
 
   renderKanbanBoard(tickets);
@@ -5405,23 +5427,38 @@ function statusFilterIncludesCompleted(panel) {
 }
 
 function getFilteredDisplayedTickets() {
-  return groupTicketsWithSubtasks(
-    sortTickets(
-      applyTicketFilters(getValidTickets()),
-      ticketSortFilter?.value || DEFAULT_TICKET_SORT,
-      { includeCompleted: statusFilterIncludesCompleted(ticketStatusFilterPanel) }
-    )
+  const search = cleanText(ticketSearchFilter?.value);
+  const filtered = applyTicketFilters(getValidTickets());
+  let displayed = sortTickets(
+    filtered,
+    ticketSortFilter?.value || DEFAULT_TICKET_SORT,
+    { includeCompleted: statusFilterIncludesCompleted(ticketStatusFilterPanel) }
   );
+  // Open-only sorts can drop completed family members after search expand — re-attach them.
+  if (search) {
+    displayed = expandFilteredTicketsWithSubtaskFamily(displayed, filtered);
+    autoExpandParentsForNewSearch(search, displayed, "tickets");
+  } else {
+    lastTicketSearchQueryForExpand = "";
+  }
+  return groupTicketsWithSubtasks(displayed);
 }
 
 function getFilteredDisplayedProjectTickets() {
-  return groupTicketsWithSubtasks(
-    sortTickets(
-      applyProjectFilters(getProjectTickets()),
-      projectSortFilter?.value || DEFAULT_TICKET_SORT,
-      { includeCompleted: statusFilterIncludesCompleted(projectStatusFilterPanel) }
-    )
+  const search = cleanText(projectSearchFilter?.value);
+  const filtered = applyProjectFilters(getProjectTickets());
+  let displayed = sortTickets(
+    filtered,
+    projectSortFilter?.value || DEFAULT_TICKET_SORT,
+    { includeCompleted: statusFilterIncludesCompleted(projectStatusFilterPanel) }
   );
+  if (search) {
+    displayed = expandFilteredTicketsWithSubtaskFamily(displayed, filtered);
+    autoExpandParentsForNewSearch(search, displayed, "projects");
+  } else {
+    lastProjectSearchQueryForExpand = "";
+  }
+  return groupTicketsWithSubtasks(displayed);
 }
 
 function downloadCsv(tickets = getFilteredDisplayedTickets(), filenameBase = "tarmal-tickets") {
