@@ -16,6 +16,9 @@ const DEFAULT_TICKET_OWNERS = ["Suraj", "Sushil", "Dishon"];
 const DEFAULT_TICKET_SORT = "milestone-open-desc";
 const CLEARED_TICKET_SORT = "recent";
 const PENDING_SYNC_TTL_MS = 120000;
+/** Initial DOM rows for ticket/project tables — keeps first paint fast with 700+ tickets. */
+const TABLE_PAGE_SIZE = 80;
+const TABLE_PAGE_STEP = 80;
 const EXCLUDED_TICKET_OWNERS = new Set(["Bhanu", "Noorali"]);
 const HIERARCHY_KEY = "tarmal-user-hierarchy";
 const SUBTASK_COLLAPSE_KEY = "tarmal-subtask-collapsed";
@@ -585,18 +588,28 @@ const sampleTickets = [
   }
 ];
 
+let ticketsMemoryCache = null;
+
 function readTickets() {
+  if (ticketsMemoryCache) return ticketsMemoryCache;
+
   const saved = localStorage.getItem(LOCAL_KEY);
-  if (!saved) return sampleTickets;
+  if (!saved) {
+    ticketsMemoryCache = sampleTickets;
+    return ticketsMemoryCache;
+  }
 
   try {
-    return JSON.parse(saved);
+    ticketsMemoryCache = JSON.parse(saved);
+    return ticketsMemoryCache;
   } catch {
-    return sampleTickets;
+    ticketsMemoryCache = sampleTickets;
+    return ticketsMemoryCache;
   }
 }
 
 function writeTickets(tickets) {
+  ticketsMemoryCache = tickets;
   localStorage.setItem(LOCAL_KEY, JSON.stringify(tickets));
 }
 
@@ -1075,12 +1088,83 @@ function getActiveTabName() {
 let secondaryPanelsRenderToken = 0;
 let lastSheetRefreshAt = 0;
 let bootRefreshInProgress = false;
+let ticketTableLimit = TABLE_PAGE_SIZE;
+let projectTableLimit = TABLE_PAGE_SIZE;
+let lastRenderedTicketsSignature = "";
+let lastFilterUiSignature = "";
+let lastDashboardRecentToken = 0;
+let renderTicketsDebounceTimer = 0;
+let pendingRenderTicketsOptions = null;
+
+function computeTicketsDataSignature(tickets) {
+  const list = Array.isArray(tickets) ? tickets : [];
+  let out = String(list.length);
+  for (let i = 0; i < list.length; i += 1) {
+    const ticket = list[i];
+    out += `|${ticket.sheetRow || ""}:${ticket.Status || ""}:${ticket.Priority || ""}:${ticket.Owner || ""}:${ticket.Task || ""}:${ticket.Milestone || ""}:${ticket["End date"] || ""}:${ticket.parentSheetRow || ""}:${String(ticket.Notes || ticket.Remarks || "").length}`;
+  }
+  return out;
+}
+
+function getFilterUiSignature() {
+  return [
+    ticketSearchFilter?.value || "",
+    ticketSortFilter?.value || "",
+    ticketStatusFilterPanel ? getMultiFilterValues(ticketStatusFilterPanel).join(",") : "",
+    ticketOwnerFilterPanel ? getMultiFilterValues(ticketOwnerFilterPanel).join(",") : "",
+    ticketTypeFilterPanel ? getMultiFilterValues(ticketTypeFilterPanel).join(",") : "",
+    ticketPriorityFilterPanel ? getMultiFilterValues(ticketPriorityFilterPanel).join(",") : "",
+    ticketBhanuFilterPanel ? getMultiFilterValues(ticketBhanuFilterPanel).join(",") : "",
+    projectSearchFilter?.value || "",
+    projectSortFilter?.value || "",
+    projectStatusFilterPanel ? getMultiFilterValues(projectStatusFilterPanel).join(",") : "",
+    projectOwnerFilterPanel ? getMultiFilterValues(projectOwnerFilterPanel).join(",") : "",
+    projectRaisedByFilterPanel ? getMultiFilterValues(projectRaisedByFilterPanel).join(",") : "",
+    projectTypeFilterPanel ? getMultiFilterValues(projectTypeFilterPanel).join(",") : "",
+    projectPriorityFilterPanel ? getMultiFilterValues(projectPriorityFilterPanel).join(",") : ""
+  ].join("|");
+}
+
+function resetTablePageLimits() {
+  ticketTableLimit = TABLE_PAGE_SIZE;
+  projectTableLimit = TABLE_PAGE_SIZE;
+}
+
+function scheduleRenderTickets(options = {}) {
+  pendingRenderTicketsOptions = {
+    ...(pendingRenderTicketsOptions || {}),
+    ...options
+  };
+  if (options.immediate) {
+    if (renderTicketsDebounceTimer) {
+      window.clearTimeout(renderTicketsDebounceTimer);
+      renderTicketsDebounceTimer = 0;
+    }
+    const opts = pendingRenderTicketsOptions || {};
+    pendingRenderTicketsOptions = null;
+    renderTickets(opts);
+    return;
+  }
+  if (renderTicketsDebounceTimer) return;
+  renderTicketsDebounceTimer = window.setTimeout(() => {
+    renderTicketsDebounceTimer = 0;
+    const opts = pendingRenderTicketsOptions || {};
+    pendingRenderTicketsOptions = null;
+    renderTickets(opts);
+  }, 48);
+}
 
 function mergeRemoteTicketsWithLocal(remoteTickets) {
   const remote = Array.isArray(remoteTickets) ? remoteTickets : [];
+  const localTickets = readTickets();
+  const localBySheetRow = new Map();
+  localTickets.forEach((ticket) => {
+    const row = Number(ticket.sheetRow);
+    if (row) localBySheetRow.set(row, ticket);
+  });
 
   if (!remote.length) {
-    const existing = readTickets().filter((ticket) => cleanText(ticket.Task));
+    const existing = localTickets.filter((ticket) => cleanText(ticket.Task));
     if (existing.length) {
       return existing.map((ticket) => normalizeTicket(ticket));
     }
@@ -1091,11 +1175,11 @@ function mergeRemoteTicketsWithLocal(remoteTickets) {
     .map((ticket, index) => mergeTicketFromSheet({
     ...ticket,
     sheetRow: ticket.sheetRow ?? index + 2
-  }, index));
+  }, index, localBySheetRow));
   const mergedKeys = new Set(merged.map(ticketIdentityKey));
   const now = Date.now();
 
-  readTickets().forEach((local) => {
+  localTickets.forEach((local) => {
     if (!cleanText(local.Task)) return;
     const key = ticketIdentityKey(local);
     if (mergedKeys.has(key)) return;
@@ -1112,9 +1196,12 @@ function mergeRemoteTicketsWithLocal(remoteTickets) {
   return merged;
 }
 
-function mergeTicketFromSheet(remoteTicket, index) {
+function mergeTicketFromSheet(remoteTicket, index, localBySheetRow = null) {
   const sheetRow = remoteTicket.sheetRow ?? index + 2;
-  const local = readTickets().find((ticket) => Number(ticket.sheetRow) === Number(sheetRow));
+  const rowKey = Number(sheetRow);
+  const local = localBySheetRow
+    ? localBySheetRow.get(rowKey)
+    : readTickets().find((ticket) => Number(ticket.sheetRow) === rowKey);
   const notesRaw = [remoteTicket.Notes, remoteTicket.Remarks].filter(Boolean).join("\n");
   const screenshotUrls = dedupeScreenshotUrls([
     ...collectTicketScreenshotUrls({ ...remoteTicket, NotesRaw: notesRaw }),
@@ -2865,17 +2952,14 @@ let lastFilterTicketSignature = "";
 let lastProjectFilterTicketSignature = "";
 
 function populateFilterOptionsIfNeeded(tickets) {
-  const signature = tickets.map((ticket) =>
-    `${ticket.Task}|${ticket.Status}|${ticket.Owner}|${ticket.Type}|${ticket.Priority}|${getTicketOriginalOwnerValue(ticket)}`
-  ).join("||");
+  const signature = computeTicketsDataSignature(tickets);
   if (signature !== lastFilterTicketSignature) {
     lastFilterTicketSignature = signature;
     populateFilterOptions(tickets);
   }
 
-  const projectSignature = getProjectTickets(tickets).map((ticket) =>
-    `${ticket.Task}|${ticket.Status}|${ticket.Owner}|${ticket["Raised By"]}|${ticket.Type}|${ticket.Priority}`
-  ).join("||");
+  const projectTickets = getProjectTickets(tickets);
+  const projectSignature = computeTicketsDataSignature(projectTickets);
   if (projectSignature !== lastProjectFilterTicketSignature) {
     lastProjectFilterTicketSignature = projectSignature;
     populateProjectFilterOptions(tickets);
@@ -3226,7 +3310,7 @@ function setStatus(kind, message) {
   syncText.textContent = message;
 }
 
-function setActiveTab(tabName) {
+function setActiveTab(tabName, options = {}) {
   tabButtons.forEach((button) => {
     button.classList.toggle("active", button.dataset.tab === tabName);
   });
@@ -3239,8 +3323,12 @@ function setActiveTab(tabName) {
     activeTabLabel.textContent = TAB_LABELS[tabName] || tabName;
   }
 
-  // Performance / Kanban may have been deferred after a fast first paint.
-  if (tabName === "performance" || tabName === "kanban") {
+  if (options.skipRender) return;
+
+  // Paint only the newly visible panel from cache — avoid rebuilding every table.
+  if (tabName === "dashboard" || tabName === "tickets" || tabName === "projects") {
+    renderTickets({ activeOnly: true, forcePanel: tabName });
+  } else if (tabName === "performance" || tabName === "kanban") {
     secondaryPanelsRenderToken += 1;
     renderSecondaryTicketPanels(getValidTickets());
   }
@@ -4942,6 +5030,12 @@ function renderTicketTable(tickets, options = {}) {
   }
 
   const columnCount = canEdit ? 10 : 9;
+  const pageLimit = Number(options.pageLimit) > 0 ? Number(options.pageLimit) : 0;
+  const loadMoreKind = options.loadMoreKind || "";
+  const visibleTickets = pageLimit && tickets.length > pageLimit
+    ? tickets.slice(0, pageLimit)
+    : tickets;
+  const remaining = Math.max(0, tickets.length - visibleTickets.length);
 
   if (!tickets.length) {
     bodyEl.innerHTML = `<tr class="empty-row"><td colspan="${columnCount}">${escapeHtml(emptyMessage)}</td></tr>`;
@@ -4956,7 +5050,7 @@ function renderTicketTable(tickets, options = {}) {
     childCounts.set(parentRow, (childCounts.get(parentRow) || 0) + 1);
   });
 
-  bodyEl.innerHTML = tickets
+  const rowsHtml = visibleTickets
     .map((ticket) => {
       const parent = getParentTicket(ticket);
       const subtask = isSubtaskTicket(ticket);
@@ -5043,8 +5137,30 @@ function renderTicketTable(tickets, options = {}) {
     })
     .join("");
 
+  const loadMoreHtml = remaining > 0 && loadMoreKind
+    ? `<tr class="load-more-row"><td colspan="${columnCount}">
+        <button class="secondary-button load-more-tickets-button" type="button" data-load-more="${escapeHtml(loadMoreKind)}">
+          Show more (${remaining} remaining)
+        </button>
+      </td></tr>`
+    : "";
+
+  bodyEl.innerHTML = rowsHtml + loadMoreHtml;
+
   bindTicketEditButtons(bodyEl);
   bindScreenshotPreviewButtons(bodyEl);
+  bodyEl.querySelectorAll("[data-load-more]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const kind = button.dataset.loadMore;
+      if (kind === "tickets") {
+        ticketTableLimit += TABLE_PAGE_STEP;
+        renderTickets({ activeOnly: true, forcePanel: "tickets" });
+      } else if (kind === "projects") {
+        projectTableLimit += TABLE_PAGE_STEP;
+        renderTickets({ activeOnly: true, forcePanel: "projects" });
+      }
+    });
+  });
 }
 
 function buildTicketsFromForm(selectedOwners = null) {
@@ -5087,12 +5203,24 @@ function scheduleSecondaryTicketPanels(tickets) {
 
 function renderTickets(options = {}) {
   const tickets = getValidTickets();
+  const dataSignature = computeTicketsDataSignature(tickets);
+  if (options.skipIfUnchanged && dataSignature === lastRenderedTicketsSignature && !options.force) {
+    return;
+  }
+
   const sortKey = ticketSortFilter?.value || DEFAULT_TICKET_SORT;
-  const filteredTickets = getFilteredDisplayedTickets();
-  const activeTab = getActiveTabName();
+  const activeTab = options.forcePanel || getActiveTabName();
+  const activeOnly = options.activeOnly !== false;
   const deferSecondary = Boolean(options.deferSecondary)
     && activeTab !== "performance"
     && activeTab !== "kanban";
+  const deferRecent = options.deferRecent !== false;
+
+  const filterSig = getFilterUiSignature();
+  if (filterSig !== lastFilterUiSignature) {
+    lastFilterUiSignature = filterSig;
+    resetTablePageLimits();
+  }
 
   populateFilterOptionsIfNeeded(tickets);
   populateTicketFormOwnersIfNeeded(tickets);
@@ -5103,6 +5231,7 @@ function renderTickets(options = {}) {
   const open = tickets.length - completed;
   const completion = tickets.length ? Math.round((completed / tickets.length) * 100) : 0;
 
+  // Lightweight KPI counters — cheap even when dashboard panel is hidden.
   if (totalCount) totalCount.textContent = tickets.length;
   if (progressCount) progressCount.textContent = tickets.filter((ticket) => ticket.Status === "In progress").length;
   if (pendingCount) pendingCount.textContent = tickets.filter((ticket) => ticket.Status === "Not started").length;
@@ -5127,57 +5256,91 @@ function renderTickets(options = {}) {
   if (statusPanelTotal) statusPanelTotal.textContent = `${tickets.length} tickets`;
   if (ownerPanelTotal) ownerPanelTotal.textContent = `${tickets.length} tickets`;
 
-  renderBreakdownList(statusList, countBy(tickets, "Status"), tickets.length, "status");
-  renderBreakdownList(ownerList, countBy(tickets, "Owner"), tickets.length, "owner");
-  renderDashboardRecent(tickets);
-  renderLatestTickets(tickets);
+  const paintDashboard = !activeOnly || activeTab === "dashboard";
+  const paintTickets = !activeOnly || activeTab === "tickets";
+  const paintProjects = !activeOnly || activeTab === "projects";
+  const paintSecondaryNow = activeTab === "performance" || activeTab === "kanban";
 
-  if (ticketFilterSummary) {
-    const ticketOpenWord = statusFilterIncludesCompleted(ticketStatusFilterPanel) ? "" : "open ";
-    const sortLabels = {
-      "milestone-open-desc": `Showing ${filteredTickets.length} ${ticketOpenWord}ticket${filteredTickets.length === 1 ? "" : "s"} — today's milestone first, then newest`,
-      "sap-status": `Showing ${filteredTickets.length} SAP ticket${filteredTickets.length === 1 ? "" : "s"} — completed, then in progress, then not started`,
-      "infra-status": `Showing ${filteredTickets.length} Infra ticket${filteredTickets.length === 1 ? "" : "s"} — completed, then in progress, then not started`
-    };
-    const defaultLabel = filteredTickets.length === tickets.length
-      ? `Showing ${tickets.length} ticket${tickets.length === 1 ? "" : "s"} sorted by date`
-      : `Showing ${filteredTickets.length} of ${tickets.length} tickets`;
-
-    ticketFilterSummary.textContent = sortLabels[sortKey] || defaultLabel;
+  if (paintDashboard) {
+    renderBreakdownList(statusList, countBy(tickets, "Status"), tickets.length, "status");
+    renderBreakdownList(ownerList, countBy(tickets, "Owner"), tickets.length, "owner");
+    if (deferRecent) {
+      const token = ++lastDashboardRecentToken;
+      if (dashboardRecentList) {
+        dashboardRecentList.innerHTML = '<div class="breakdown-empty">Loading activity…</div>';
+      }
+      scheduleIdleWork(() => {
+        if (token !== lastDashboardRecentToken) return;
+        renderDashboardRecent(tickets);
+        renderLatestTickets(tickets);
+      }, 900);
+    } else {
+      lastDashboardRecentToken += 1;
+      renderDashboardRecent(tickets);
+      renderLatestTickets(tickets);
+    }
   }
 
-  renderTicketTable(filteredTickets);
+  if (paintTickets) {
+    const filteredTickets = getFilteredDisplayedTickets();
+    if (ticketFilterSummary) {
+      const ticketOpenWord = statusFilterIncludesCompleted(ticketStatusFilterPanel) ? "" : "open ";
+      const sortLabels = {
+        "milestone-open-desc": `Showing ${filteredTickets.length} ${ticketOpenWord}ticket${filteredTickets.length === 1 ? "" : "s"} — today's milestone first, then newest`,
+        "sap-status": `Showing ${filteredTickets.length} SAP ticket${filteredTickets.length === 1 ? "" : "s"} — completed, then in progress, then not started`,
+        "infra-status": `Showing ${filteredTickets.length} Infra ticket${filteredTickets.length === 1 ? "" : "s"} — completed, then in progress, then not started`
+      };
+      const defaultLabel = filteredTickets.length === tickets.length
+        ? `Showing ${tickets.length} ticket${tickets.length === 1 ? "" : "s"} sorted by date`
+        : `Showing ${filteredTickets.length} of ${tickets.length} tickets`;
 
-  const projectTickets = getProjectTickets(tickets);
-  const filteredProjects = getFilteredDisplayedProjectTickets();
-  const projectSortKey = projectSortFilter?.value || DEFAULT_TICKET_SORT;
-  if (projectFilterSummary) {
-    const projectOpenWord = statusFilterIncludesCompleted(projectStatusFilterPanel) ? "" : "open ";
-    const projectSortLabels = {
-      "milestone-open-desc": `Showing ${filteredProjects.length} ${projectOpenWord}project${filteredProjects.length === 1 ? "" : "s"} — today's milestone first`,
-      "important-remarks-first": `Showing ${filteredProjects.length} ${projectOpenWord}project${filteredProjects.length === 1 ? "" : "s"} — important remarks first`,
-      "sap-status": `Showing ${filteredProjects.length} SAP project${filteredProjects.length === 1 ? "" : "s"}`,
-      "infra-status": `Showing ${filteredProjects.length} Infra project${filteredProjects.length === 1 ? "" : "s"}`
-    };
-    projectFilterSummary.textContent = projectSortLabels[projectSortKey]
-      || (filteredProjects.length === projectTickets.length
-        ? `Showing ${projectTickets.length} SAP & Infra project${projectTickets.length === 1 ? "" : "s"}`
-        : `Showing ${filteredProjects.length} of ${projectTickets.length} projects`);
+      ticketFilterSummary.textContent = sortLabels[sortKey] || defaultLabel;
+    }
+    renderTicketTable(filteredTickets, {
+      pageLimit: ticketTableLimit,
+      loadMoreKind: "tickets"
+    });
   }
-  renderTicketTable(filteredProjects, {
-    bodyEl: projectRows,
-    tableEl: projectTable,
-    actionsHeaderEl: projectActionsHeader,
-    emptyMessage: "No SAP or Infra project works match the current filters.",
-    highlightImportantRemarks: true
-  });
 
-  if (deferSecondary) {
+  if (paintProjects) {
+    const projectTickets = getProjectTickets(tickets);
+    const filteredProjects = getFilteredDisplayedProjectTickets();
+    const projectSortKey = projectSortFilter?.value || DEFAULT_TICKET_SORT;
+    if (projectFilterSummary) {
+      const projectOpenWord = statusFilterIncludesCompleted(projectStatusFilterPanel) ? "" : "open ";
+      const projectSortLabels = {
+        "milestone-open-desc": `Showing ${filteredProjects.length} ${projectOpenWord}project${filteredProjects.length === 1 ? "" : "s"} — today's milestone first`,
+        "important-remarks-first": `Showing ${filteredProjects.length} ${projectOpenWord}project${filteredProjects.length === 1 ? "" : "s"} — important remarks first`,
+        "sap-status": `Showing ${filteredProjects.length} SAP project${filteredProjects.length === 1 ? "" : "s"}`,
+        "infra-status": `Showing ${filteredProjects.length} Infra project${filteredProjects.length === 1 ? "" : "s"}`
+      };
+      projectFilterSummary.textContent = projectSortLabels[projectSortKey]
+        || (filteredProjects.length === projectTickets.length
+          ? `Showing ${projectTickets.length} SAP & Infra project${projectTickets.length === 1 ? "" : "s"}`
+          : `Showing ${filteredProjects.length} of ${projectTickets.length} projects`);
+    }
+    renderTicketTable(filteredProjects, {
+      bodyEl: projectRows,
+      tableEl: projectTable,
+      actionsHeaderEl: projectActionsHeader,
+      emptyMessage: "No SAP or Infra project works match the current filters.",
+      highlightImportantRemarks: true,
+      pageLimit: projectTableLimit,
+      loadMoreKind: "projects"
+    });
+  }
+
+  if (paintSecondaryNow) {
+    secondaryPanelsRenderToken += 1;
+    renderSecondaryTicketPanels(tickets);
+  } else if (deferSecondary) {
     scheduleSecondaryTicketPanels(tickets);
-  } else {
+  } else if (!activeOnly) {
     secondaryPanelsRenderToken += 1;
     renderSecondaryTicketPanels(tickets);
   }
+
+  lastRenderedTicketsSignature = dataSignature;
 }
 
 function applyCreatedTicketSyncResult(localTicket, result = {}) {
@@ -5328,10 +5491,11 @@ function loadSheetTickets() {
         writeHierarchyRows(normalizeHierarchyRows(payload.hierarchy));
       }
 
-      resolve((payload.tickets || []).map((ticket, index) => mergeTicketFromSheet({
+      // Raw sheet rows — merge happens once in mergeRemoteTicketsWithLocal (Map lookup).
+      resolve((payload.tickets || []).map((ticket, index) => ({
         ...ticket,
         sheetRow: ticket.sheetRow ?? index + 2
-      }, index)));
+      })));
     };
 
     script.onerror = () => {
@@ -5339,7 +5503,10 @@ function loadSheetTickets() {
       reject(new Error("Could not load ticket data."));
     };
 
-    script.src = `${SHEET_WEB_APP_URL}${separator}callback=${callbackName}`;
+    // compact=1 omits assets/documents/procurement and trims heavy note payloads.
+    // Requires Apps Script redeploy of google-apps-script-full-merged.gs; older
+    // deployments ignore the flag and still return a full payload.
+    script.src = `${SHEET_WEB_APP_URL}${separator}callback=${callbackName}&compact=1`;
     document.body.appendChild(script);
   });
 }
@@ -5356,10 +5523,22 @@ async function refreshFromSheet(options = {}) {
     const remoteTickets = await loadSheetTickets();
     reconcileDeletedTicketTombstones(remoteTickets);
     const tickets = mergeRemoteTicketsWithLocal(remoteTickets);
+    const nextSignature = computeTicketsDataSignature(tickets);
+    const dataChanged = nextSignature !== lastRenderedTicketsSignature;
     writeTickets(tickets);
-    lastFilterTicketSignature = "";
+    if (dataChanged) {
+      lastFilterTicketSignature = "";
+      lastProjectFilterTicketSignature = "";
+    }
     lastSheetRefreshAt = Date.now();
-    renderTickets({ deferSecondary: Boolean(options.deferSecondary) });
+    if (dataChanged || options.forceRender) {
+      scheduleRenderTickets({
+        deferSecondary: Boolean(options.deferSecondary),
+        activeOnly: true,
+        deferRecent: true,
+        immediate: Boolean(options.immediateRender)
+      });
+    }
     if (!options.silent) setStatus("online", `Loaded ${tickets.length} tickets`);
 
     if (!options.skipAttachmentsFolder) {
@@ -5886,22 +6065,22 @@ openProjectTicketCreateButton?.addEventListener("click", () => openTicketCreateM
 
 [kanbanSearchFilter, kanbanOwnerFilter, kanbanPriorityFilter, kanbanShowCompleted]
   .filter(Boolean)
-  .forEach((control) => control.addEventListener("input", renderTickets));
+  .forEach((control) => control.addEventListener("input", () => scheduleRenderTickets()));
 
-performanceOwnerFilter?.addEventListener("change", renderTickets);
+performanceOwnerFilter?.addEventListener("change", () => scheduleRenderTickets({ immediate: true }));
 
 performancePeriodFilters?.querySelectorAll("[data-period]").forEach((button) => {
   button.addEventListener("click", () => {
     setSelectedPerformancePeriod(button.dataset.period || "today");
-    renderTickets();
+    scheduleRenderTickets({ immediate: true });
   });
 });
 setSelectedPerformancePeriod(selectedPerformancePeriod);
 
-ticketSearchFilter?.addEventListener("input", renderTickets);
-ticketSortFilter?.addEventListener("change", renderTickets);
-projectSearchFilter?.addEventListener("input", renderTickets);
-projectSortFilter?.addEventListener("change", renderTickets);
+ticketSearchFilter?.addEventListener("input", () => scheduleRenderTickets());
+ticketSortFilter?.addEventListener("change", () => scheduleRenderTickets({ immediate: true }));
+projectSearchFilter?.addEventListener("input", () => scheduleRenderTickets());
+projectSortFilter?.addEventListener("change", () => scheduleRenderTickets({ immediate: true }));
 
 initMultiFilterControls();
 setTicketSortFilter(DEFAULT_TICKET_SORT);
@@ -5911,11 +6090,11 @@ bindClearTicketFiltersButtons();
 function bindClearTicketFiltersButtons() {
   clearTicketFilters?.addEventListener("click", () => {
     resetTicketFilters();
-    renderTickets();
+    scheduleRenderTickets({ immediate: true });
   });
   clearProjectFilters?.addEventListener("click", () => {
     resetProjectFilters();
-    renderTickets();
+    scheduleRenderTickets({ immediate: true });
   });
 }
 
@@ -6027,15 +6206,15 @@ initPerformanceFilterSidebar();
 initToolbarCollapse();
 const initialTab = document.querySelector(".tab-button.active")?.dataset.tab;
 if (initialTab) {
-  setActiveTab(initialTab);
+  setActiveTab(initialTab, { skipRender: true });
 }
 Auth.refreshSessionRights();
 Auth.applyAccessControl();
 setStatus(SHEET_WEB_APP_URL ? "online" : "", SHEET_WEB_APP_URL ? "Ready to sync" : "Sync not configured");
 renderRightsForm(emptyRights());
 renderUsers();
-// Paint cached local tickets immediately, then soft-refresh from the sheet in background.
-renderTickets({ deferSecondary: true });
+// Paint cached local tickets for the active tab only, then soft-refresh in background.
+renderTickets({ deferSecondary: true, activeOnly: true, deferRecent: true });
 initAutoRefresh();
 if (SHEET_WEB_APP_URL) {
   softRefreshAfterLocalPaint();
