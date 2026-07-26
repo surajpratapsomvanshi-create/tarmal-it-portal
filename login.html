@@ -6,7 +6,7 @@
     <title>Sign In | Tarmal IT Portal</title>
     <link rel="icon" href="./assets/tarmal-mark.png?v=1" type="image/png">
     <link rel="apple-touch-icon" href="./assets/apple-touch-icon.png?v=1">
-    <link rel="stylesheet" href="./styles.css?v=84">
+    <link rel="stylesheet" href="./styles.css?v=85">
   </head>
   <body class="login-page">
     <main class="login-shell">
@@ -79,7 +79,7 @@
       </div>
     </main>
 
-    <script src="./auth.js?v=16"></script>
+    <script src="./auth.js?v=17"></script>
     <script>
       const REMEMBER_KEY = "tarmal-login-remember";
 
@@ -94,8 +94,8 @@
       const loginPasswordToggle = document.querySelector("#loginPasswordToggle");
       const loginRemember = document.querySelector("#loginRemember");
       const loginForgot = document.querySelector("#loginForgot");
-      const userSyncOptions = { deferSync: true };
-      let usersPreload = Auth.loadUsersFromSheet(userSyncOptions).catch(() => null);
+      const userSyncOptions = { deferSync: true, timeoutMs: 12000 };
+      let usersPreload = Auth.loadUsersFromSheet(userSyncOptions);
 
       try {
         const saved = JSON.parse(localStorage.getItem(REMEMBER_KEY) || "null");
@@ -107,13 +107,19 @@
         localStorage.removeItem(REMEMBER_KEY);
       }
 
-      loginPasswordToggle.addEventListener("click", () => {
-        const show = loginPassword.type === "password";
+      function setPasswordVisibility(show) {
         loginPassword.type = show ? "text" : "password";
         loginPasswordToggle.setAttribute("aria-label", show ? "Hide password" : "Show password");
         loginPasswordToggle.title = show ? "Hide password" : "Show password";
-        loginPasswordToggle.querySelector(".login-eye-open").hidden = !show;
-        loginPasswordToggle.querySelector(".login-eye-closed").hidden = show;
+        loginPasswordToggle.classList.toggle("is-showing", show);
+        loginPasswordToggle.querySelector(".login-eye-open").hidden = show;
+        loginPasswordToggle.querySelector(".login-eye-closed").hidden = !show;
+      }
+
+      setPasswordVisibility(false);
+
+      loginPasswordToggle.addEventListener("click", () => {
+        setPasswordVisibility(loginPassword.type === "password");
       });
 
       loginForgot.addEventListener("click", () => {
@@ -121,7 +127,7 @@
         loginError.textContent = "Contact your IT administrator to reset your password.";
       });
 
-      function finishLogin(result) {
+      function finishLogin() {
         Auth.refreshSessionRights();
         window.location.href = "./index.html";
       }
@@ -139,6 +145,14 @@
         }
       }
 
+      async function refreshUsersForLogin() {
+        // Always start a real sheet fetch. Do not race a prior preload that may
+        // already have failed and resolved to null (that skipped waiting).
+        const fresh = Auth.loadUsersFromSheet(userSyncOptions);
+        usersPreload = fresh;
+        return fresh;
+      }
+
       loginForm.addEventListener("submit", async (event) => {
         event.preventDefault();
         loginError.hidden = true;
@@ -152,24 +166,23 @@
         let result = Auth.login(identifier, password);
         if (result.ok) {
           storeRememberedIdentifier(identifier);
-          usersPreload.finally(() => Auth.refreshSessionRights());
-          finishLogin(result);
+          usersPreload.catch(() => null).finally(() => Auth.refreshSessionRights());
+          finishLogin();
           return;
         }
 
         try {
-          await Promise.race([
-            usersPreload,
-            Auth.loadUsersFromSheet({ ...userSyncOptions, timeoutMs: 8000 })
-          ]);
-          usersPreload = Promise.resolve();
+          await refreshUsersForLogin();
           result = Auth.login(identifier, password);
         } catch (error) {
-          loginError.hidden = false;
-          loginError.textContent = "Cannot verify credentials right now. Check your internet connection and try again.";
-          resetLoginButton();
-          usersPreload = Auth.loadUsersFromSheet(userSyncOptions).catch(() => null);
-          return;
+          result = Auth.login(identifier, password);
+          if (!result.ok) {
+            loginError.hidden = false;
+            loginError.textContent = "Cannot verify credentials right now. Check your internet connection and try again.";
+            resetLoginButton();
+            usersPreload = Auth.loadUsersFromSheet(userSyncOptions);
+            return;
+          }
         }
 
         if (!result.ok) {
@@ -180,7 +193,7 @@
         }
 
         storeRememberedIdentifier(identifier);
-        finishLogin(result);
+        finishLogin();
       });
     </script>
   </body>

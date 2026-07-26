@@ -4627,13 +4627,20 @@ body.view-focus .dashboard-layout {
   padding-right: 46px;
 }
 
+/* Hide Edge/IE native password reveal so it does not stack on our toggle. */
+.login-input-wrap-password input::-ms-reveal,
+.login-input-wrap-password input::-ms-clear {
+  display: none;
+}
+
 .login-password-toggle {
   position: absolute;
   top: 50%;
   right: 10px;
   transform: translateY(-50%);
-  display: grid;
-  place-items: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   width: 32px;
   height: 32px;
   padding: 0;
@@ -4642,6 +4649,22 @@ body.view-focus .dashboard-layout {
   background: transparent;
   color: #64748b;
   cursor: pointer;
+}
+
+.login-password-toggle svg[hidden] {
+  display: none !important;
+}
+
+.login-password-toggle .login-eye-closed {
+  display: none;
+}
+
+.login-password-toggle.is-showing .login-eye-open {
+  display: none;
+}
+
+.login-password-toggle.is-showing .login-eye-closed {
+  display: block;
 }
 
 .login-password-toggle:hover {
