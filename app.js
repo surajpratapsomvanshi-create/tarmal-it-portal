@@ -1056,6 +1056,26 @@ function yieldToUi() {
   });
 }
 
+function scheduleIdleWork(fn, timeoutMs = 1200) {
+  if (typeof window.requestIdleCallback === "function") {
+    window.requestIdleCallback(() => {
+      try { fn(); } catch (error) { console.error(error); }
+    }, { timeout: timeoutMs });
+    return;
+  }
+  window.setTimeout(() => {
+    try { fn(); } catch (error) { console.error(error); }
+  }, Math.min(timeoutMs, 200));
+}
+
+function getActiveTabName() {
+  return document.querySelector(".tab-button.active")?.dataset.tab || "dashboard";
+}
+
+let secondaryPanelsRenderToken = 0;
+let lastSheetRefreshAt = 0;
+let bootRefreshInProgress = false;
+
 function mergeRemoteTicketsWithLocal(remoteTickets) {
   const remote = Array.isArray(remoteTickets) ? remoteTickets : [];
 
@@ -3218,6 +3238,12 @@ function setActiveTab(tabName) {
   if (activeTabLabel) {
     activeTabLabel.textContent = TAB_LABELS[tabName] || tabName;
   }
+
+  // Performance / Kanban may have been deferred after a fast first paint.
+  if (tabName === "performance" || tabName === "kanban") {
+    secondaryPanelsRenderToken += 1;
+    renderSecondaryTicketPanels(getValidTickets());
+  }
 }
 
 function setSidebarCollapsed(collapsed) {
@@ -5046,10 +5072,27 @@ function escapeHtml(value) {
     .replaceAll("'", "&#039;");
 }
 
-function renderTickets() {
+function renderSecondaryTicketPanels(tickets) {
+  renderPerformance(tickets);
+  renderKanbanBoard(tickets);
+}
+
+function scheduleSecondaryTicketPanels(tickets) {
+  const token = ++secondaryPanelsRenderToken;
+  scheduleIdleWork(() => {
+    if (token !== secondaryPanelsRenderToken) return;
+    renderSecondaryTicketPanels(getValidTickets());
+  }, 1800);
+}
+
+function renderTickets(options = {}) {
   const tickets = getValidTickets();
   const sortKey = ticketSortFilter?.value || DEFAULT_TICKET_SORT;
   const filteredTickets = getFilteredDisplayedTickets();
+  const activeTab = getActiveTabName();
+  const deferSecondary = Boolean(options.deferSecondary)
+    && activeTab !== "performance"
+    && activeTab !== "kanban";
 
   populateFilterOptionsIfNeeded(tickets);
   populateTicketFormOwnersIfNeeded(tickets);
@@ -5087,7 +5130,6 @@ function renderTickets() {
   renderBreakdownList(statusList, countBy(tickets, "Status"), tickets.length, "status");
   renderBreakdownList(ownerList, countBy(tickets, "Owner"), tickets.length, "owner");
   renderDashboardRecent(tickets);
-  renderPerformance(tickets);
   renderLatestTickets(tickets);
 
   if (ticketFilterSummary) {
@@ -5130,7 +5172,12 @@ function renderTickets() {
     highlightImportantRemarks: true
   });
 
-  renderKanbanBoard(tickets);
+  if (deferSecondary) {
+    scheduleSecondaryTicketPanels(tickets);
+  } else {
+    secondaryPanelsRenderToken += 1;
+    renderSecondaryTicketPanels(tickets);
+  }
 }
 
 function applyCreatedTicketSyncResult(localTicket, result = {}) {
@@ -5300,7 +5347,7 @@ function loadSheetTickets() {
 async function refreshFromSheet(options = {}) {
   if (!SHEET_WEB_APP_URL) {
     if (!options.silent) setStatus("", "Sync not configured");
-    return;
+    return false;
   }
 
   if (!options.silent) setStatus("", "Refreshing tickets...");
@@ -5311,20 +5358,38 @@ async function refreshFromSheet(options = {}) {
     const tickets = mergeRemoteTicketsWithLocal(remoteTickets);
     writeTickets(tickets);
     lastFilterTicketSignature = "";
-    renderTickets();
-    await refreshAttachmentsFolderLink();
+    lastSheetRefreshAt = Date.now();
+    renderTickets({ deferSecondary: Boolean(options.deferSecondary) });
     if (!options.silent) setStatus("online", `Loaded ${tickets.length} tickets`);
 
-    if (!options.skipScreenshotSync) {
-      await syncPendingScreenshotsToDrive(getValidTickets());
+    if (!options.skipAttachmentsFolder) {
+      // Folder link is non-critical — never block ticket paint on Drive metadata.
+      const folderPromise = refreshAttachmentsFolderLink();
+      if (!options.deferAttachmentsFolder) {
+        await folderPromise;
+      } else {
+        folderPromise.catch((error) => console.error(error));
+      }
     }
+
+    if (!options.skipScreenshotSync) {
+      const syncPromise = syncPendingScreenshotsToDrive(getValidTickets());
+      if (options.deferScreenshotSync) {
+        syncPromise.catch((error) => console.error(error));
+      } else {
+        await syncPromise;
+      }
+    }
+    return true;
   } catch (error) {
     if (!options.silent) setStatus("error", "Could not refresh tickets");
     console.error(error);
+    return false;
   }
 }
 
 const AUTO_REFRESH_INTERVAL_MS = 120000;
+const AUTO_REFRESH_MIN_GAP_MS = 45000;
 let autoRefreshInProgress = false;
 
 function isAnyModalOpen() {
@@ -5340,12 +5405,18 @@ function isAnyModalOpen() {
 async function autoRefreshTickets() {
   if (!SHEET_WEB_APP_URL) return;
   if (document.hidden) return;
-  if (autoRefreshInProgress) return;
+  if (autoRefreshInProgress || bootRefreshInProgress) return;
   if (isAnyModalOpen()) return;
+  if (lastSheetRefreshAt && (Date.now() - lastSheetRefreshAt) < AUTO_REFRESH_MIN_GAP_MS) return;
 
   autoRefreshInProgress = true;
   try {
-    await refreshFromSheet({ skipScreenshotSync: true, silent: true });
+    await refreshFromSheet({
+      skipScreenshotSync: true,
+      skipAttachmentsFolder: true,
+      deferSecondary: true,
+      silent: true
+    });
     setStatus("online", `Auto-refreshed at ${new Date().toLocaleTimeString()}`);
   } finally {
     autoRefreshInProgress = false;
@@ -5354,12 +5425,49 @@ async function autoRefreshTickets() {
 
 function initAutoRefresh() {
   if (!SHEET_WEB_APP_URL) return;
-  setInterval(autoRefreshTickets, AUTO_REFRESH_INTERVAL_MS);
+  // Skip an immediate interval tick right after boot refresh.
+  window.setTimeout(() => {
+    setInterval(autoRefreshTickets, AUTO_REFRESH_INTERVAL_MS);
+  }, AUTO_REFRESH_INTERVAL_MS);
   document.addEventListener("visibilitychange", () => {
     if (!document.hidden) {
       autoRefreshTickets();
     }
   });
+}
+
+async function softRefreshAfterLocalPaint() {
+  if (!SHEET_WEB_APP_URL || bootRefreshInProgress) return;
+
+  bootRefreshInProgress = true;
+  setStatus("", "Refreshing tickets...");
+  try {
+    await yieldToUi();
+    const [ticketsOk] = await Promise.all([
+      refreshFromSheet({
+        skipScreenshotSync: true,
+        skipAttachmentsFolder: true,
+        deferSecondary: true,
+        silent: true
+      }),
+      refreshUsersFromSheet()
+    ]);
+    if (ticketsOk) {
+      const count = getValidTickets().length;
+      setStatus("online", count ? `Loaded ${count} tickets` : "Synced");
+      scheduleIdleWork(() => {
+        refreshAttachmentsFolderLink().catch((error) => console.error(error));
+        syncPendingScreenshotsToDrive(getValidTickets()).catch((error) => console.error(error));
+      }, 2500);
+    } else {
+      setStatus("error", "Could not refresh tickets");
+    }
+  } catch (error) {
+    setStatus("error", "Could not refresh tickets");
+    console.error(error);
+  } finally {
+    bootRefreshInProgress = false;
+  }
 }
 
 function loadAttachmentsFolderInfo() {
@@ -5926,10 +6034,9 @@ Auth.applyAccessControl();
 setStatus(SHEET_WEB_APP_URL ? "online" : "", SHEET_WEB_APP_URL ? "Ready to sync" : "Sync not configured");
 renderRightsForm(emptyRights());
 renderUsers();
-renderTickets();
-if (SHEET_WEB_APP_URL) {
-  refreshFromSheet();
-  refreshUsersFromSheet();
-  refreshAttachmentsFolderLink();
-}
+// Paint cached local tickets immediately, then soft-refresh from the sheet in background.
+renderTickets({ deferSecondary: true });
 initAutoRefresh();
+if (SHEET_WEB_APP_URL) {
+  softRefreshAfterLocalPaint();
+}

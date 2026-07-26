@@ -6,7 +6,7 @@
     <title>Tarmal IT Portal</title>
     <link rel="icon" href="./assets/tarmal-mark.png?v=1" type="image/png">
     <link rel="apple-touch-icon" href="./assets/apple-touch-icon.png?v=1">
-    <link rel="stylesheet" href="./styles.css?v=88">
+    <link rel="stylesheet" href="./styles.css?v=89">
   </head>
   <body class="view-focus">
     <script src="./auth.js?v=16"></script>
@@ -16,7 +16,7 @@
       <aside class="app-sidebar" id="appSidebar" aria-label="Main navigation">
         <div class="sidebar-brand-bar">
           <div class="sidebar-brand">
-            <img class="sidebar-brand-logo" src="./assets/tarmal-logo.png" alt="Tarmal">
+            <img class="sidebar-brand-logo" src="./assets/tarmal-logo.png" alt="Tarmal" decoding="async">
             <div class="sidebar-brand-text">
               <strong>Tarmal IT</strong>
               <span>Portal</span>
@@ -64,7 +64,7 @@
         <header class="topbar" id="siteTopbar">
           <div class="brand">
             <div class="brand-logo-wrap">
-              <img class="brand-logo" src="./assets/tarmal-logo.png" alt="Tarmal">
+              <img class="brand-logo" src="./assets/tarmal-logo.png" alt="Tarmal" decoding="async" fetchpriority="high">
             </div>
             <div>
               <h1>Tarmal IT Portal</h1>
@@ -90,7 +90,7 @@
 
         <div class="topbar-expand-bar" id="topbarExpandBar" hidden>
           <div class="topbar-expand-brand">
-            <img class="topbar-expand-logo" src="./assets/tarmal-logo.png" alt="">
+            <img class="topbar-expand-logo" src="./assets/tarmal-logo.png" alt="" loading="lazy" decoding="async">
             <span class="topbar-expand-title">Tarmal IT Portal</span>
           </div>
           <button class="topbar-expand-btn" id="expandTopbarButton" type="button" aria-controls="siteTopbar" aria-expanded="false" title="Show header">
@@ -1513,9 +1513,9 @@
       </div>
     </div>
 
-    <script src="./app.js?v=113"></script>
+    <script src="./app.js?v=115"></script>
     <script src="./assets.js?v=12"></script>
     <script src="./documents.js?v=9"></script>
-    <script src="./procurement.js?v=2"></script>
+    <script src="./procurement.js?v=3"></script>
   </body>
 </html>

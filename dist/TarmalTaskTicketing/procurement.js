@@ -1417,8 +1417,20 @@ function initProcurementModule() {
   });
 
   renderProcurement();
+  // Defer sheet sync until after first paint so tickets boot isn't competed with.
   if (Auth.SHEET_WEB_APP_URL && canUseProcurement()) {
-    refreshProcurementFromSheet();
+    const startProcurementRefresh = () => {
+      if (typeof window.requestIdleCallback === "function") {
+        window.requestIdleCallback(() => refreshProcurementFromSheet(), { timeout: 4000 });
+      } else {
+        window.setTimeout(() => refreshProcurementFromSheet(), 1500);
+      }
+    };
+    if (document.readyState === "complete") {
+      startProcurementRefresh();
+    } else {
+      window.addEventListener("load", startProcurementRefresh, { once: true });
+    }
   }
 }
 
