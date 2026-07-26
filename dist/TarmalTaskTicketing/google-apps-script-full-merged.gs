@@ -442,6 +442,8 @@ function enrichTicketNotesWithDriveAttachments_(data) {
 function doGet(e) {
   try {
     const resource = e && e.parameter && e.parameter.resource;
+    const compact = e && e.parameter && (String(e.parameter.compact || "") === "1"
+      || String(e.parameter.compact || "").toLowerCase() === "true");
 
     if (resource === "users") {
       return buildResponse_({ ok: true, users: readUsers_() }, e);
@@ -475,6 +477,19 @@ function doGet(e) {
       return buildResponse_({ ok: true, hierarchy: readUserMaster_() }, e);
     }
 
+    // compact=1: list payload for portal boot/refresh — tickets + users + hierarchy only,
+    // with heavy note/base64 content trimmed. Frontend requests this on every refresh.
+    if (compact) {
+      const tickets = readTickets_().map(compactTicketForList_);
+      return buildResponse_({
+        ok: true,
+        compact: true,
+        tickets: tickets,
+        users: readUsers_(),
+        hierarchy: readUserMaster_()
+      }, e);
+    }
+
     const tickets = readTickets_();
     const users = readUsers_();
     const assets = readAssets_();
@@ -493,6 +508,33 @@ function doGet(e) {
   } catch (error) {
     return buildResponse_({ ok: false, error: error.message }, e);
   }
+}
+
+/**
+ * Shrink list payloads: drop base64 images, keep Drive screenshot URLs + note text.
+ * Does not truncate note body (avoids clobbering richer local remarks on merge).
+ */
+function compactTicketForList_(ticket) {
+  const source = ticket || {};
+  const notes = String(source.Notes || source.Remarks || "");
+  const cleaned = notes.replace(/data:image\/[a-zA-Z0-9.+-]+;base64,[A-Za-z0-9+/=]+/g, "[image]");
+  const links = extractScreenshotLinksFromNotes_(cleaned);
+  const text = stripScreenshotMetadata_(cleaned).replace(/\s+/g, " ").trim();
+  let compactNotes = text;
+  if (links.length) {
+    compactNotes = (compactNotes ? compactNotes + "\n" : "")
+      + links.map(function(url, index) {
+        return "Screenshot " + (index + 1) + ": " + url;
+      }).join("\n");
+  }
+  const out = Object.assign({}, source, {
+    Notes: compactNotes,
+    Remarks: compactNotes
+  });
+  if (out.NotesHtml) delete out.NotesHtml;
+  if (out.ScreenshotUrls) delete out.ScreenshotUrls;
+  if (out.screenshots) delete out.screenshots;
+  return out;
 }
 
 function readDeferredPostSaveQueue_() {
@@ -780,11 +822,12 @@ function readTickets_() {
   const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
   const columnMap = buildColumnMap_(headers);
   const auditMap = readTaskAuditMap_();
+  const values = sheet.getRange(2, 1, lastRow, lastCol).getValues();
   const tickets = [];
 
-  for (let sheetRow = 2; sheetRow <= lastRow; sheetRow++) {
-    const row = sheet.getRange(sheetRow, 1, 1, lastCol).getValues()[0];
-    const ticket = rowToTicket_(row, columnMap, sheetRow);
+  for (let i = 0; i < values.length; i++) {
+    const sheetRow = i + 2;
+    const ticket = rowToTicket_(values[i], columnMap, sheetRow);
     if (String(ticket.Task || "").trim()) {
       tickets.push(attachTicketAudit_(ticket, auditMap));
     }

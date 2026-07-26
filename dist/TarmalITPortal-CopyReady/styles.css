@@ -4799,6 +4799,17 @@ body.view-focus .dashboard-layout {
   background: #fff;
 }
 
+.load-more-row td {
+  text-align: center;
+  padding: 16px 12px;
+  background: #f8fafc;
+  border-top: 1px solid var(--line);
+}
+
+.load-more-tickets-button {
+  min-width: 180px;
+}
+
 .users-layout {
   display: grid;
   grid-template-columns: minmax(340px, 1fr) minmax(0, 2.4fr);
