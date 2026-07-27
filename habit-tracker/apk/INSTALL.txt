@@ -1,0 +1,52 @@
+# Atomic Habits - Android package
+
+## Download on your phone (HTTPS)
+
+**Best link (tap to download):**
+https://surajpratapsomvanshi-create.github.io/atomic-habits/AtomicHabits.apk
+
+Also available:
+- https://surajpratapsomvanshi-create.github.io/atomic-habits/download/AtomicHabits.apk
+- https://github.com/surajpratapsomvanshi-create/atomic-habits/releases/download/v1.0.0/AtomicHabits.apk
+
+On Android, your browser may ask you to allow **Install unknown apps** for that browser before the APK can install.
+
+## App URL (current / install this)
+
+https://surajpratapsomvanshi-create.github.io/atomic-habits/
+
+Open that link in Chrome on your phone for the installable PWA, or install the APK above.
+
+## Install the APK on your phone
+
+1. Open one of the download links above on your Android phone (or copy **AtomicHabits-github.apk** from this folder).
+2. Open the downloaded APK and allow **Install from unknown sources** / **Install unknown apps** if asked.
+3. Open the app - it loads https://surajpratapsomvanshi-create.github.io/atomic-habits/
+
+If Android refuses to install over an older Atomic Habits build, uninstall the old app first, then install this APK (same package id `com.atomichabits.tracker`, same signing key as prior builds).
+
+## Local file
+
+`habit-tracker/apk/AtomicHabits-github.apk`
+
+## Files
+
+| File | Use |
+|---|---|
+| `AtomicHabits-github.apk` | **Install this** - points at GitHub Pages (permanent) |
+| `AtomicHabits-suraj.apk` | Secondary / older - Surge host https://atomic-habits-suraj.surge.sh |
+| `AtomicHabits-permanent.apk` | STALE - old Surge domain (other account; no longer updatable) |
+| `AtomicHabits.apk` | STALE - temporary Cloudflare tunnel build |
+| `AtomicHabits-permanent.aab` / `AtomicHabits.aab` | Older Play bundles (optional / reference) |
+| `atomic-habits-permanent-android.zip` / `atomic-habits-android.zip` | Older PWABuilder packaging zips |
+| `_pwabuilder-github.zip` | PWABuilder package used for the GitHub Pages APK |
+| `_pwabuilder-suraj.zip` | Older PWABuilder package for the Suraj Surge APK |
+| `extracted/signing-key-info.txt` | Keep safe - needed for Play Store updates |
+| `extracted/signing.keystore` | Keep safe - signing key (reused for all APKs) |
+
+## Notes
+
+- The GitHub APK is signed with the **same keystore** as earlier builds (`com.atomichabits.tracker`).
+- Google Sheets sync is unchanged (Apps Script URL still prefilled in the app).
+- GitHub Pages serves `.well-known/assetlinks.json`, so Digital Asset Links can verify on this host (better than Surge for Trusted Web Activity).
+- Surge site was left in place and not deleted.
