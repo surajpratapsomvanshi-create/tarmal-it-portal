@@ -2077,14 +2077,20 @@ function dateInPerformancePeriod(date, periodId = selectedPerformancePeriod) {
   return true;
 }
 
-function ticketPeriodDates(ticket) {
+// Employee Work period relevance: Origin (Start date) OR End date OR Milestone.
+// Type ("Daily - *"), closedOn, and createdOn alone do not qualify a ticket.
+function ticketPeriodDateChecks(ticket) {
   return [
-    parseTicketDate(ticket["End date"]),
-    parseTicketDate(ticket.Milestone),
-    parseTicketDate(ticket["Start date"]),
-    parseTicketDate(ticket.closedOn),
-    parseTicketDate(ticket.createdOn)
-  ].filter(Boolean);
+    { label: "Origin", date: parseTicketDate(ticket["Start date"]) },
+    { label: "End", date: parseTicketDate(ticket["End date"]) },
+    { label: "Milestone", date: parseTicketDate(ticket.Milestone) }
+  ];
+}
+
+function ticketPeriodDates(ticket) {
+  return ticketPeriodDateChecks(ticket)
+    .map((entry) => entry.date)
+    .filter(Boolean);
 }
 
 function ticketRelevantInPeriod(ticket, periodId = selectedPerformancePeriod) {
@@ -2094,13 +2100,9 @@ function ticketRelevantInPeriod(ticket, periodId = selectedPerformancePeriod) {
 
 function getTicketPeriodMatchLabel(ticket, periodId = selectedPerformancePeriod) {
   if (periodId === "all") return "";
-  const checks = [
-    { label: "End", date: parseTicketDate(ticket["End date"]) },
-    { label: "Milestone", date: parseTicketDate(ticket.Milestone) || parseTicketDate(ticket["Start date"]) },
-    { label: "Start", date: parseTicketDate(ticket["Start date"]) },
-    { label: "Created", date: parseTicketDate(ticket.createdOn) }
-  ];
-  const match = checks.find((entry) => dateInPerformancePeriod(entry.date, periodId));
+  const match = ticketPeriodDateChecks(ticket).find((entry) =>
+    dateInPerformancePeriod(entry.date, periodId)
+  );
   return match?.label || "";
 }
 
