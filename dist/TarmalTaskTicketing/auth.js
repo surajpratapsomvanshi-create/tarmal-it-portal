@@ -111,31 +111,10 @@ const Auth = {
       name: String(user.name || "").trim(),
       username: String(user.username || user.name || "").trim(),
       email: String(user.email || "").trim(),
-      password: String(user.password || "").trim(),
+      password: String(user.password || ""),
       active: user.active !== false,
       rights: finalRights
     };
-  },
-
-  matchesIdentifier_(user, value) {
-    const needle = String(value || "").trim().toLowerCase();
-    if (!needle) return false;
-
-    const name = String(user.name || "").trim().toLowerCase();
-    const username = String(user.username || "").trim().toLowerCase();
-    const email = String(user.email || "").trim().toLowerCase();
-
-    if (name === needle || username === needle || (email && email === needle)) {
-      return true;
-    }
-
-    // Allow first-token match so "Suraj" works when username is "Suraj Pratap".
-    const tokens = new Set(
-      [name, username]
-        .filter(Boolean)
-        .flatMap((part) => part.split(/[\s._@-]+/).filter(Boolean))
-    );
-    return tokens.has(needle);
   },
 
   hasPermission(rightId) {
@@ -231,69 +210,31 @@ const Auth = {
     return list;
   },
 
-  userIdentityKeys_(user) {
-    const keys = new Set();
-    const id = String(user.id || "").trim().toLowerCase();
-    const name = String(user.name || "").trim().toLowerCase();
-    const username = String(user.username || "").trim().toLowerCase();
-    const email = String(user.email || "").trim().toLowerCase();
-    if (id) keys.add(`id:${id}`);
-    if (name) keys.add(`name:${name}`);
-    if (username) keys.add(`username:${username}`);
-    if (email) keys.add(`email:${email}`);
-    return [...keys];
-  },
-
-  findMergedUserId_(index, user) {
-    for (const key of this.userIdentityKeys_(user)) {
-      const existingId = index.get(key);
-      if (existingId) return existingId;
-    }
-    return String(user.id || "");
-  },
-
-  indexMergedUser_(index, user) {
-    this.userIdentityKeys_(user).forEach((key) => index.set(key, user.id));
-  },
-
   mergeUsers(localUsers, remoteUsers, preferRemote = false) {
     const merged = new Map();
-    const identityIndex = new Map();
 
     remoteUsers.forEach((user) => {
-      const normalized = this.normalizeUser(user);
-      const id = normalized.id || `user-${merged.size + 1}`;
-      const next = this.normalizeUser({ ...normalized, id });
-      merged.set(id, next);
-      this.indexMergedUser_(identityIndex, next);
+      merged.set(user.id, this.normalizeUser(user));
     });
 
     localUsers.forEach((user) => {
       const normalized = this.normalizeUser(user);
-      const existingId = this.findMergedUserId_(identityIndex, normalized);
-
-      if (existingId && merged.has(existingId)) {
-        if (preferRemote) return;
-
-        const remote = merged.get(existingId);
-        const next = this.normalizeUser({
-          ...remote,
-          ...normalized,
-          id: existingId,
-          rights: {
-            ...remote.rights,
-            ...normalized.rights
-          }
-        });
-        merged.set(existingId, next);
-        this.indexMergedUser_(identityIndex, next);
+      if (!merged.has(user.id)) {
+        merged.set(user.id, normalized);
         return;
       }
 
-      const id = normalized.id || `user-local-${merged.size + 1}`;
-      const next = this.normalizeUser({ ...normalized, id });
-      merged.set(id, next);
-      this.indexMergedUser_(identityIndex, next);
+      if (preferRemote) return;
+
+      const remote = merged.get(user.id);
+      merged.set(user.id, this.normalizeUser({
+        ...remote,
+        ...normalized,
+        rights: {
+          ...remote.rights,
+          ...normalized.rights
+        }
+      }));
     });
 
     return this.ensureAdminUser([...merged.values()]).map((user) => this.normalizeUser(user));
@@ -302,27 +243,23 @@ const Auth = {
   loadUsersFromSheet(options = {}) {
     const deferSync = options.deferSync !== false;
     const timeoutMs = Number(options.timeoutMs) || 0;
-    const retries = Math.max(0, Number(options.retries) || 0);
 
-    const fetchOnce = () => new Promise((resolve, reject) => {
+    const fetchUsers = new Promise((resolve, reject) => {
       if (!this.SHEET_WEB_APP_URL) {
         reject(new Error("Sync is not configured."));
         return;
       }
 
       const localUsers = this.readUsers();
-      const callbackName = `handleSheetUsers_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
+      const callbackName = `handleSheetUsers_${Date.now()}`;
       const script = document.createElement("script");
       const separator = this.SHEET_WEB_APP_URL.includes("?") ? "&" : "?";
-      let settled = false;
       const cleanup = () => {
         delete window[callbackName];
         script.remove();
       };
 
       window[callbackName] = (payload) => {
-        if (settled) return;
-        settled = true;
         cleanup();
         if (!payload || payload.ok === false) {
           reject(new Error(payload?.error || "Could not load users."));
@@ -333,10 +270,9 @@ const Auth = {
         const merged = this.mergeUsers(localUsers, remoteUsers, true);
         this.saveUsers(merged);
 
-        // Never push when the sheet returned an empty user list — that wipe risk
-        // has deleted real AppUsers rows after a failed/partial read.
-        const shouldPushToSheet = remoteUsers.length > 0
-          && (merged.length > remoteUsers.length || this.usersChanged_(merged, remoteUsers));
+        const shouldPushToSheet = !remoteUsers.length
+          || merged.length > remoteUsers.length
+          || this.usersChanged_(merged, remoteUsers);
 
         if (shouldPushToSheet) {
           const syncPromise = this.syncUsersToSheet(merged);
@@ -352,42 +288,24 @@ const Auth = {
       };
 
       script.onerror = () => {
-        if (settled) return;
-        settled = true;
         cleanup();
         reject(new Error("Could not load users."));
       };
 
       script.src = `${this.SHEET_WEB_APP_URL}${separator}resource=users&callback=${callbackName}`;
       document.body.appendChild(script);
-
-      if (timeoutMs > 0) {
-        window.setTimeout(() => {
-          if (settled) return;
-          settled = true;
-          cleanup();
-          reject(new Error("User sync timed out."));
-        }, timeoutMs);
-      }
     });
 
-    if (retries < 1) {
-      return fetchOnce();
+    if (timeoutMs > 0) {
+      return Promise.race([
+        fetchUsers,
+        new Promise((_, reject) => {
+          window.setTimeout(() => reject(new Error("User sync timed out.")), timeoutMs);
+        })
+      ]);
     }
 
-    const runWithRetries = async () => {
-      let lastError;
-      for (let attempt = 0; attempt <= retries; attempt += 1) {
-        try {
-          return await fetchOnce();
-        } catch (error) {
-          lastError = error;
-        }
-      }
-      throw lastError || new Error("Could not load users.");
-    };
-
-    return runWithRetries();
+    return fetchUsers;
   },
 
   async syncUsersToSheet(users) {
@@ -532,16 +450,14 @@ const Auth = {
 
   login(identifier, password) {
     const value = String(identifier || "").trim().toLowerCase();
-    const secret = String(password || "");
     const users = this.readUsers();
-    const matches = users.filter((entry) => this.matchesIdentifier_(entry, value));
+    const user = users.find((entry) =>
+      entry.name.toLowerCase() === value
+      || String(entry.username || "").toLowerCase() === value
+      || String(entry.email || "").toLowerCase() === value
+    );
 
-    // Prefer a password match when stale local duplicates share the same name.
-    const user = matches.find((entry) => entry.password === secret)
-      || matches.find((entry) => entry.password === secret.trim())
-      || null;
-
-    if (!user) {
+    if (!user || user.password !== password) {
       return { ok: false, error: "Invalid username or password." };
     }
 
