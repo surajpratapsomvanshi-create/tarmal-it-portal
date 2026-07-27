@@ -34,10 +34,10 @@
               <p class="login-form-secure">Secure session · Authorized use only</p>
             </header>
 
-            <form id="loginForm" class="login-form">
+            <form id="loginForm" class="login-form" method="post" action="#" autocomplete="on">
               <label class="login-field">
                 <div class="login-input-wrap">
-                  <input name="identifier" autocomplete="username" required placeholder="name@company.com" aria-label="Email or username">
+                  <input name="identifier" id="loginIdentifier" autocomplete="username" required placeholder="name@company.com" aria-label="Email or username">
                 </div>
               </label>
 
@@ -79,9 +79,37 @@
       </div>
     </main>
 
-    <script src="./auth.js?v=19"></script>
+    <script src="./auth.js?v=20"></script>
     <script>
+      (function initLoginPage() {
       const REMEMBER_KEY = "tarmal-login-remember";
+
+      function consumeLoginQueryParams() {
+        const url = new URL(window.location.href);
+        const identifier = String(
+          url.searchParams.get("identifier")
+          || url.searchParams.get("username")
+          || url.searchParams.get("email")
+          || ""
+        ).trim();
+        const hadSensitiveParams = identifier
+          || url.searchParams.has("password")
+          || url.searchParams.has("username")
+          || url.searchParams.has("email");
+
+        if (hadSensitiveParams) {
+          url.searchParams.delete("identifier");
+          url.searchParams.delete("username");
+          url.searchParams.delete("email");
+          url.searchParams.delete("password");
+          const nextUrl = url.searchParams.toString()
+            ? `${url.pathname}?${url.searchParams}`
+            : url.pathname;
+          history.replaceState(null, "", nextUrl);
+        }
+
+        return identifier;
+      }
 
       if (Auth.getSession()) {
         window.location.href = "./index.html";
@@ -121,14 +149,21 @@
 
       startUsersPreload();
 
+      const queryIdentifier = consumeLoginQueryParams();
+
       try {
         const saved = JSON.parse(localStorage.getItem(REMEMBER_KEY) || "null");
-        if (saved && saved.identifier) {
+        if (queryIdentifier) {
+          loginForm.elements.identifier.value = queryIdentifier;
+        } else if (saved && saved.identifier) {
           loginForm.elements.identifier.value = saved.identifier;
           loginRemember.checked = true;
         }
       } catch (error) {
         localStorage.removeItem(REMEMBER_KEY);
+        if (queryIdentifier) {
+          loginForm.elements.identifier.value = queryIdentifier;
+        }
       }
 
       function setPasswordVisibility(show) {
@@ -251,6 +286,7 @@
         storeRememberedIdentifier(identifier);
         finishLogin();
       });
+      })();
     </script>
   </body>
 </html>
