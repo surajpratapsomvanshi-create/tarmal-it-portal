@@ -7,3 +7,21 @@ Thumbs.db
 *.log
 .build-tools/
 .netlify/
+
+# Habit tracker — local/dev artifacts (not for repo)
+habit-tracker/_v*.png
+habit-tracker/_verify*.png
+habit-tracker/*-verify-results.json
+habit-tracker/apk/**/*.apk
+habit-tracker/apk/**/*.aab
+habit-tracker/apk/**/*.zip
+habit-tracker/apk/**/signing.keystore
+habit-tracker/apk/**/signing-key-info.txt
+habit-tracker/apk/_*/
+habit-tracker/apk/extracted/
+habit-tracker/tools/cloudflared.exe
+habit-tracker/tools/uber-apk-signer.jar
+habit-tracker/_publish/AtomicHabits.apk
+
+# Portal build outputs
+dist/
