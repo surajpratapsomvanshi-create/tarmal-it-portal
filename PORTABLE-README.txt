@@ -54,7 +54,7 @@ payloads stay large (full tickets + assets + documents + procurement).
 
 What the compact list endpoint changes:
 - Returns tickets + users + hierarchy only (skips assets/documents/procurement)
-- Trims note text and strips base64 image payloads from list responses
+- Strips base64 image payloads from list note fields (keeps Drive screenshot URLs)
 - Reads the Tasks sheet in one batch (faster Apps Script execution)
 
 
