@@ -2824,7 +2824,7 @@ function populateTicketFormOwners(tickets = getValidTickets()) {
   `).join("");
 
   ticketFormOwnerPanel.querySelectorAll("input[type='checkbox']").forEach((input) => {
-    input.addEventListener("change", updateTicketFormOwnerLabel);
+    input.addEventListener("change", onTicketFormOwnerChange);
   });
 
   updateTicketFormOwnerLabel();
@@ -2864,6 +2864,52 @@ function applyDefaultTicketFormOwner() {
   if (!match) return;
   match.checked = true;
   updateTicketFormOwnerLabel();
+}
+
+const DAILY_SAP_TYPE = "Daily - SAP";
+let surajCreateDefaultsActive = false;
+let ticketCreateTypeTouched = false;
+let ticketCreateMilestoneTouched = false;
+
+function ownersIncludeSuraj(owners = getNewTicketOwners()) {
+  return owners.some((owner) => String(owner || "").trim().toLowerCase() === "suraj");
+}
+
+function resetSurajTicketCreateTracking() {
+  surajCreateDefaultsActive = false;
+  ticketCreateTypeTouched = false;
+  ticketCreateMilestoneTouched = false;
+}
+
+function applySurajTicketCreateDefaults({ force = false } = {}) {
+  if (!form) return;
+  const hasSuraj = ownersIncludeSuraj();
+  if (!hasSuraj) {
+    surajCreateDefaultsActive = false;
+    return;
+  }
+
+  // Apply when Suraj is newly selected, or when the create modal opens fresh with Suraj.
+  const shouldApply = force || !surajCreateDefaultsActive;
+  if (!shouldApply) return;
+
+  if (force || !ticketCreateTypeTouched) {
+    const typeField = form.elements.Type;
+    if (typeField) {
+      const option = [...typeField.options].find((entry) => entry.value === DAILY_SAP_TYPE || entry.textContent === DAILY_SAP_TYPE);
+      typeField.value = option ? option.value : DAILY_SAP_TYPE;
+    }
+  }
+  if (force || !ticketCreateMilestoneTouched) {
+    const milestoneField = form.elements.Milestone;
+    if (milestoneField) milestoneField.value = getTodayDateValue();
+  }
+  surajCreateDefaultsActive = true;
+}
+
+function onTicketFormOwnerChange() {
+  updateTicketFormOwnerLabel();
+  applySurajTicketCreateDefaults();
 }
 
 function initTicketFormOwnerSelect() {
@@ -4531,7 +4577,9 @@ function openSubtaskCreateModal(parentSheetRow) {
   if (form?.elements["Raised By"] && parent["Raised By"]) {
     form.elements["Raised By"].value = parent["Raised By"];
   }
+  resetSurajTicketCreateTracking();
   applyDefaultTicketFormOwner();
+  applySurajTicketCreateDefaults({ force: true });
   form?.elements.Task?.focus();
 }
 
@@ -4570,7 +4618,9 @@ function openTicketCreateModal() {
   setActiveTab("tickets");
   ticketCreateModal.hidden = false;
   document.body.classList.add("modal-open");
+  resetSurajTicketCreateTracking();
   applyDefaultTicketFormOwner();
+  applySurajTicketCreateDefaults({ force: true });
   form?.elements.Task?.focus();
 }
 
@@ -6295,6 +6345,17 @@ deleteSelectedUsersButton?.addEventListener("click", async () => {
 form?.addEventListener("reset", () => {
   clearTicketNotesEditor(ticketNotesEditor, ticketNotesInput);
   clearTicketFormOwners();
+  resetSurajTicketCreateTracking();
+});
+
+form?.elements.Type?.addEventListener("change", () => {
+  ticketCreateTypeTouched = true;
+});
+form?.elements.Milestone?.addEventListener("change", () => {
+  ticketCreateMilestoneTouched = true;
+});
+form?.elements.Milestone?.addEventListener("input", () => {
+  ticketCreateMilestoneTouched = true;
 });
 
 if (form?.elements["Start date"]) {
