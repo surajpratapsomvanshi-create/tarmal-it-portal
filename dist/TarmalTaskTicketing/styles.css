@@ -3290,7 +3290,7 @@ body.modal-open {
   flex: 1 1 auto;
   min-width: 0;
   white-space: normal;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
   word-break: normal;
 }
 
@@ -6317,19 +6317,28 @@ body.view-focus .dashboard-layout {
     table-layout: auto;
   }
 
-  /* Tickets / Projects: Task + Actions only on tablet & phone */
+  /* Tickets / Projects: Task + Actions only on tablet & phone.
+     Hide other columns hard, give Task the remaining width, and avoid
+     letter-stacking from break-word/anywhere in a collapsed cell. */
   #ticketTable,
   #projectTable {
-    min-width: 0;
-    width: 100%;
-    table-layout: fixed;
+    min-width: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    table-layout: fixed !important;
   }
 
   #ticketTable .ticket-col-compact,
   #ticketTable .remarks-col,
   #projectTable .ticket-col-compact,
   #projectTable .remarks-col {
-    display: none;
+    display: none !important;
+    width: 0 !important;
+    min-width: 0 !important;
+    max-width: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    overflow: hidden !important;
   }
 
   #ticketTable .task-col,
@@ -6339,30 +6348,68 @@ body.view-focus .dashboard-layout {
   #ticketTable:not(.ticket-table-can-edit) .task-col,
   #projectTable:not(.ticket-table-can-edit) .task-col,
   body.view-focus #ticketTable .task-col,
-  body.view-focus #ticketTable.ticket-table-can-edit .task-col {
-    width: auto;
-    min-width: 0;
-    max-width: none;
-    white-space: normal;
-    word-break: break-word;
-    overflow-wrap: anywhere;
+  body.view-focus #ticketTable.ticket-table-can-edit .task-col,
+  body.view-focus #projectTable .task-col,
+  body.view-focus #projectTable.ticket-table-can-edit .task-col {
+    width: calc(100% - 92px) !important;
+    min-width: 0 !important;
+    max-width: none !important;
+    white-space: normal !important;
+    word-break: normal !important;
+    overflow-wrap: break-word !important;
     line-height: 1.35;
+    vertical-align: top;
   }
 
   #ticketTable .actions-col,
   #projectTable .actions-col,
   #ticketTable.ticket-table-can-edit .actions-col,
-  #projectTable.ticket-table-can-edit .actions-col {
-    width: 88px;
-    min-width: 88px;
-    max-width: 96px;
+  #projectTable.ticket-table-can-edit .actions-col,
+  body.view-focus #ticketTable .actions-col,
+  body.view-focus #projectTable .actions-col,
+  body.view-focus #ticketTable.ticket-table-can-edit .actions-col,
+  body.view-focus #projectTable.ticket-table-can-edit .actions-col {
+    width: 92px !important;
+    min-width: 92px !important;
+    max-width: 92px !important;
     padding: 4px 6px;
     white-space: nowrap;
     vertical-align: middle;
+    text-align: center;
+  }
+
+  #ticketTable .ticket-task-head,
+  #projectTable .ticket-task-head {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  #ticketTable .ticket-parent-task,
+  #projectTable .ticket-parent-task {
+    flex: 1 1 auto;
+    min-width: 0;
+    max-width: 100%;
+    white-space: normal !important;
+    word-break: normal !important;
+    overflow-wrap: break-word !important;
+  }
+
+  /* Read-only: Actions column omitted — Task fills the row */
+  #ticketTable:not(.ticket-table-can-edit) .task-col,
+  #projectTable:not(.ticket-table-can-edit) .task-col,
+  body.view-focus #ticketTable:not(.ticket-table-can-edit) .task-col,
+  body.view-focus #projectTable:not(.ticket-table-can-edit) .task-col {
+    width: 100% !important;
   }
 
   .ticket-board .table-wrap.ticket-table-wrap {
     overflow-x: hidden;
+    width: 100%;
+    max-width: 100%;
   }
 
   body.view-focus .kanban-columns,
@@ -6555,7 +6602,41 @@ body.view-focus .dashboard-layout {
 
   #ticketTable,
   #projectTable {
-    min-width: 0;
+    min-width: 0 !important;
+    width: 100% !important;
+    table-layout: fixed !important;
+  }
+
+  #ticketTable .ticket-col-compact,
+  #ticketTable .remarks-col,
+  #projectTable .ticket-col-compact,
+  #projectTable .remarks-col {
+    display: none !important;
+  }
+
+  #ticketTable .task-col,
+  #projectTable .task-col,
+  #ticketTable.ticket-table-can-edit .task-col,
+  #projectTable.ticket-table-can-edit .task-col,
+  body.view-focus #ticketTable .task-col,
+  body.view-focus #projectTable .task-col {
+    width: calc(100% - 92px) !important;
+    word-break: normal !important;
+    overflow-wrap: break-word !important;
+  }
+
+  #ticketTable:not(.ticket-table-can-edit) .task-col,
+  #projectTable:not(.ticket-table-can-edit) .task-col {
+    width: 100% !important;
+  }
+
+  #ticketTable .actions-col,
+  #projectTable .actions-col,
+  #ticketTable.ticket-table-can-edit .actions-col,
+  #projectTable.ticket-table-can-edit .actions-col {
+    width: 92px !important;
+    min-width: 92px !important;
+    max-width: 92px !important;
   }
 
   body.view-focus .kanban-column,
