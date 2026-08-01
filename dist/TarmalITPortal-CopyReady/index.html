@@ -6,11 +6,11 @@
     <title>Tarmal IT Portal</title>
     <link rel="icon" href="./assets/tarmal-mark.png?v=1" type="image/png">
     <link rel="apple-touch-icon" href="./assets/apple-touch-icon.png?v=1">
-    <link rel="stylesheet" href="./styles.css?v=90">
+    <link rel="stylesheet" href="./styles.css?v=91">
     <!-- auth stays blocking so requireLogin runs before app chrome paints -->
     <script src="./auth.js?v=20"></script>
     <!-- Defer main bundles so HTML can parse while ~210KB+ app.js downloads -->
-    <script src="./app.js?v=121" defer></script>
+    <script src="./app.js?v=122" defer></script>
     <script src="./assets.js?v=13" defer></script>
     <script src="./documents.js?v=10" defer></script>
     <script src="./procurement.js?v=4" defer></script>
@@ -239,6 +239,12 @@
                   <option value="">All employees</option>
                 </select>
               </label>
+              <label class="field performance-type-field">
+                <span>Type</span>
+                <select id="performanceTypeFilter">
+                  <option value="">All types</option>
+                </select>
+              </label>
             </div>
           </aside>
 
@@ -257,7 +263,10 @@
         <section class="dashboard-panel performance-period-panel" id="performancePeriodPanel">
           <div class="panel-heading performance-period-heading">
             <h2 id="performancePeriodTitle">Employee Work — Today</h2>
-            <span class="panel-total" id="performancePeriodTotal">0 tasks</span>
+            <div class="performance-period-heading-actions">
+              <button class="secondary-button performance-export-button" id="exportPerformanceButton" type="button" data-requires="exportData">Export CSV</button>
+              <span class="panel-total" id="performancePeriodTotal">0 tasks</span>
+            </div>
           </div>
           <div class="table-wrap performance-matrix-wrap">
             <table class="perf-matrix" aria-label="Employee work matrix by period">

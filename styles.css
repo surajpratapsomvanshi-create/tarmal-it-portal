@@ -1815,7 +1815,8 @@ body.sidebar-collapsed .sidebar-expand-bar {
   gap: 14px;
 }
 
-.performance-owner-field {
+.performance-owner-field,
+.performance-type-field {
   min-width: 0;
   width: 100%;
 }
@@ -1836,6 +1837,21 @@ body.sidebar-collapsed .sidebar-expand-bar {
   font-size: 16px;
   line-height: 1.2;
   font-weight: 700;
+}
+
+.performance-period-heading-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.performance-export-button {
+  padding: 4px 10px;
+  font-size: 11px;
+  line-height: 1.2;
+  white-space: nowrap;
 }
 
 .performance-period-heading .panel-total {
@@ -2011,6 +2027,32 @@ body.sidebar-collapsed .sidebar-expand-bar {
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
+}
+
+.perf-matrix-parent {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px;
+  margin: 0 0 4px;
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.perf-matrix-parent-label {
+  color: var(--muted);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.perf-matrix-parent-task {
+  color: #9f1239;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
 }
 
 .perf-matrix-task-meta {
@@ -6204,6 +6246,16 @@ body.view-focus .dashboard-layout {
 
   .performance-layout {
     flex-direction: column;
+  }
+
+  .performance-period-heading {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .performance-period-heading-actions {
+    width: 100%;
+    justify-content: space-between;
   }
 
   .filter-sidebar {

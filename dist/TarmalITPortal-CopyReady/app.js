@@ -50,6 +50,8 @@ const ownerPanelTotal = document.querySelector("#ownerPanelTotal");
 const dashboardRecentList = document.querySelector("#dashboardRecentList");
 const performanceSubtitle = document.querySelector("#performanceSubtitle");
 const performanceOwnerFilter = document.querySelector("#performanceOwnerFilter");
+const performanceTypeFilter = document.querySelector("#performanceTypeFilter");
+const exportPerformanceButton = document.querySelector("#exportPerformanceButton");
 const perfAssignedCount = document.querySelector("#perfAssignedCount");
 const perfCompletedCount = document.querySelector("#perfCompletedCount");
 const perfProgressCount = document.querySelector("#perfProgressCount");
@@ -3984,6 +3986,51 @@ function populatePerformanceOwnerFilter(tickets) {
   }
 }
 
+const PERFORMANCE_TYPE_FALLBACKS = ["Daily - Infra", "Daily - SAP", "SAP", "Infra"];
+
+function getPerformanceTypes(tickets) {
+  const types = new Set(PERFORMANCE_TYPE_FALLBACKS);
+  tickets.forEach((ticket) => {
+    const type = cleanText(ticket.Type);
+    if (type) types.add(type);
+  });
+  return [...types].sort((a, b) => a.localeCompare(b));
+}
+
+function populatePerformanceTypeFilter(tickets) {
+  if (!performanceTypeFilter) return;
+  const selected = performanceTypeFilter.value;
+  const types = getPerformanceTypes(tickets);
+  performanceTypeFilter.innerHTML = [
+    '<option value="">All types</option>',
+    ...types.map((type) => `<option value="${escapeHtml(type)}">${escapeHtml(type)}</option>`)
+  ].join("");
+  if (types.includes(selected) || selected === "") {
+    performanceTypeFilter.value = selected;
+  }
+}
+
+function filterTicketsByPerformanceType(tickets, typeValue = cleanText(performanceTypeFilter?.value)) {
+  if (!typeValue) return tickets;
+  return tickets.filter((ticket) => cleanText(ticket.Type) === typeValue);
+}
+
+function getPerformanceFilteredTickets(tickets = getValidTickets()) {
+  let result = filterTicketsByPerformancePeriod(tickets, selectedPerformancePeriod);
+  result = filterTicketsByPerformanceType(result);
+  const selectedOwner = cleanText(performanceOwnerFilter?.value);
+  if (selectedOwner) {
+    result = result.filter((ticket) => cleanText(ticket.Owner) === selectedOwner);
+  } else {
+    result = result.filter((ticket) => isValidOwnerName(ticket.Owner));
+  }
+  return sortTicketsForPeriodDisplay(result);
+}
+
+function downloadPerformanceCsv() {
+  downloadCsv(getPerformanceFilteredTickets(), "tarmal-employee-work");
+}
+
 function renderPerformanceTeamTable(tickets, owners) {
   if (!performanceTeamRows) return;
   const rows = owners
@@ -4051,12 +4098,27 @@ function renderPerformancePeriodMatrixCell(ticket, periodId) {
     `
     : "";
 
+  let parentLine = "";
+  if (isSubtaskTicket(ticket)) {
+    const parent = getParentTicket(ticket);
+    const parentTitle = cleanText(parent?.Task) || (ticket.parentSheetRow ? `Row ${ticket.parentSheetRow}` : "");
+    if (parentTitle) {
+      parentLine = `
+        <div class="perf-matrix-parent" title="Sub-task of: ${escapeHtml(parentTitle)}">
+          <span class="perf-matrix-parent-label">Sub-task of:</span>
+          <span class="perf-matrix-parent-task">${escapeHtml(parentTitle)}</span>
+        </div>
+      `;
+    }
+  }
+
   return `
     <div class="perf-matrix-task ${statusClass(ticket.Status)}${isTicketOverdue(ticket) ? " perf-matrix-overdue" : ""}">
       <div class="perf-matrix-task-head">
         <div class="perf-matrix-task-title" title="${escapeHtml(ticket.Task || "Untitled")}">${escapeHtml(ticket.Task || "Untitled")}</div>
         ${editButton}
       </div>
+      ${parentLine}
       <div class="perf-matrix-task-meta">
         <span class="status-pill ${statusClass(status)}">${escapeHtml(status)}</span>
         ${meta ? `<span class="perf-matrix-task-detail">${escapeHtml(meta)}</span>` : ""}
@@ -4199,9 +4261,15 @@ function renderPerformance(tickets) {
 
   const periodId = selectedPerformancePeriod;
   const periodLabel = getPerformancePeriodLabel(periodId);
-  const periodTickets = filterTicketsByPerformancePeriod(tickets, periodId);
-
   populatePerformanceOwnerFilter(tickets);
+  populatePerformanceTypeFilter(tickets);
+
+  const selectedType = cleanText(performanceTypeFilter?.value);
+  const periodTickets = filterTicketsByPerformanceType(
+    filterTicketsByPerformancePeriod(tickets, periodId),
+    selectedType
+  );
+
   const owners = getPerformanceOwners(tickets);
   const selectedOwner = cleanText(performanceOwnerFilter?.value);
   const scopedTickets = selectedOwner
@@ -4231,9 +4299,10 @@ function renderPerformance(tickets) {
   if (perfHighPriorityCount) perfHighPriorityCount.textContent = stats.highPriority;
   if (perfAvgCloseDays) perfAvgCloseDays.textContent = formatResolutionDays(stats.avgCloseDays);
 
+  const typeSuffix = selectedType ? ` · ${selectedType}` : "";
   performanceSubtitle.textContent = selectedOwner
-    ? `${stats.assigned} tasks for ${selectedOwner} in ${periodLabel} · ${stats.completionRate}% completed`
-    : `${scopedTickets.length} tasks across ${owners.length} employees in ${periodLabel} · ${stats.completionRate}% completed`;
+    ? `${stats.assigned} tasks for ${selectedOwner} in ${periodLabel}${typeSuffix} · ${stats.completionRate}% completed`
+    : `${scopedTickets.length} tasks across ${owners.length} employees in ${periodLabel}${typeSuffix} · ${stats.completionRate}% completed`;
 
   if (performanceTeamTotal) {
     performanceTeamTotal.textContent = `${owners.length} employee${owners.length === 1 ? "" : "s"}`;
@@ -6215,13 +6284,15 @@ refreshProjectsSheetButton?.addEventListener("click", refreshFromSheet);
 kanbanRefreshButton?.addEventListener("click", refreshFromSheet);
 exportButton?.addEventListener("click", () => downloadCsv());
 exportProjectsButton?.addEventListener("click", downloadProjectsCsv);
+exportPerformanceButton?.addEventListener("click", downloadPerformanceCsv);
 openProjectTicketCreateButton?.addEventListener("click", () => openTicketCreateModal());
 
 [kanbanSearchFilter, kanbanOwnerFilter, kanbanPriorityFilter, kanbanShowCompleted]
-  .filter(Boolean)
-  .forEach((control) => control.addEventListener("input", () => scheduleRenderTickets()));
+.filter(Boolean)
+.forEach((control) => control.addEventListener("input", () => scheduleRenderTickets()));
 
 performanceOwnerFilter?.addEventListener("change", () => scheduleRenderTickets({ immediate: true }));
+performanceTypeFilter?.addEventListener("change", () => scheduleRenderTickets({ immediate: true }));
 
 performancePeriodFilters?.querySelectorAll("[data-period]").forEach((button) => {
   button.addEventListener("click", () => {
