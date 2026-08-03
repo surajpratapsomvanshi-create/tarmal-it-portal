@@ -226,6 +226,17 @@ const KANBAN_COLUMNS = [
   { id: "other", label: "Other", statusClass: "status-other" }
 ];
 
+/* Presentation board: Completed → In progress → Not started (user order).
+   Blocked / Pending Approval sit after In progress when present. */
+const PRESENTATION_KANBAN_COLUMNS = [
+  { id: "completed", label: "Completed", statusClass: "status-completed", alwaysShow: true },
+  { id: "progress", label: "In progress", statusClass: "status-progress", alwaysShow: true },
+  { id: "blocked", label: "Blocked", statusClass: "status-blocked", alwaysShow: false },
+  { id: "approval", label: "Pending Approval", statusClass: "status-approval", alwaysShow: false },
+  { id: "pending", label: "Not started", statusClass: "status-pending", alwaysShow: true },
+  { id: "other", label: "Other", statusClass: "status-other", alwaysShow: false }
+];
+
 function isTicketOriginalOwnerBhanu(ticket) {
   const text = cleanText(ticket?.["Bhanu List"]);
   return /^bhanu/i.test(text);
@@ -5512,6 +5523,16 @@ function renderPresentationCard(ticket, index) {
   `;
 }
 
+function sortPresentationColumnTickets(tickets) {
+  return [...tickets].sort((a, b) => {
+    const aToday = isMilestoneToday(a) && isOpenTicket(a) ? 1 : 0;
+    const bToday = isMilestoneToday(b) && isOpenTicket(b) ? 1 : 0;
+    if (bToday !== aToday) return bToday - aToday;
+    return ticketMilestoneTimestamp(b) - ticketMilestoneTimestamp(a)
+      || ticketRecentTimestamp(b) - ticketRecentTimestamp(a);
+  });
+}
+
 function renderPresentationView(tickets = getValidTickets()) {
   if (!presentationDeck) return;
 
@@ -5526,11 +5547,12 @@ function renderPresentationView(tickets = getValidTickets()) {
 
   if (presentationSubtitle) {
     presentationSubtitle.textContent = marked.length
-      ? "Exclusive project set for management — status, owners, milestones, remarks, and attachments."
-      : "Star projects from the Projects tab to build an exclusive set for management — title, status, owner, milestone, remarks, and attachments.";
+      ? "Kanban by status — Completed, In progress, then Not started. Star more from Projects."
+      : "Star projects from the Projects tab to build an exclusive Kanban set for management — title, status, owner, milestone, remarks, and attachments.";
   }
 
   if (!marked.length) {
+    presentationDeck.classList.remove("presentation-kanban");
     presentationDeck.innerHTML = `
       <div class="presentation-empty">
         <p class="eyebrow">Presentation set</p>
@@ -5545,7 +5567,48 @@ function renderPresentationView(tickets = getValidTickets()) {
     return;
   }
 
-  presentationDeck.innerHTML = marked.map((ticket, index) => renderPresentationCard(ticket, index)).join("");
+  const grouped = Object.fromEntries(PRESENTATION_KANBAN_COLUMNS.map((column) => [column.id, []]));
+  marked.forEach((ticket) => {
+    const columnId = kanbanColumnId(ticket.Status);
+    if (grouped[columnId]) {
+      grouped[columnId].push(ticket);
+    } else {
+      grouped.other.push(ticket);
+    }
+  });
+
+  let slideIndex = 0;
+  const visibleColumns = PRESENTATION_KANBAN_COLUMNS.filter((column) =>
+    column.alwaysShow || (grouped[column.id] && grouped[column.id].length)
+  );
+
+  presentationDeck.classList.add("presentation-kanban");
+  presentationDeck.innerHTML = `
+    <div class="presentation-kanban-columns" role="list">
+      ${visibleColumns.map((column) => {
+        const columnTickets = sortPresentationColumnTickets(grouped[column.id] || []);
+        const cards = columnTickets.length
+          ? columnTickets.map((ticket) => {
+              const card = renderPresentationCard(ticket, slideIndex);
+              slideIndex += 1;
+              return card;
+            }).join("")
+          : '<div class="presentation-kanban-empty">No projects</div>';
+
+        return `
+          <section class="presentation-kanban-column ${column.statusClass}" role="listitem" aria-label="${escapeHtml(column.label)}">
+            <header class="presentation-kanban-column-head">
+              <h3>${escapeHtml(column.label)}</h3>
+              <span class="presentation-kanban-column-count">${columnTickets.length}</span>
+            </header>
+            <div class="presentation-kanban-column-body">
+              ${cards}
+            </div>
+          </section>
+        `;
+      }).join("")}
+    </div>
+  `;
   bindPresentationPinButtons(presentationDeck);
   bindScreenshotPreviewButtons(presentationDeck);
 }

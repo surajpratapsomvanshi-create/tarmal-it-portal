@@ -7044,13 +7044,112 @@ body.view-focus .dashboard-layout {
 }
 
 .presentation-deck {
+  display: block;
+  min-width: 0;
+}
+
+.presentation-deck.presentation-kanban {
+  overflow: visible;
+}
+
+.presentation-kanban-columns {
+  display: flex;
+  gap: 14px;
+  align-items: stretch;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  padding-bottom: 10px;
+}
+
+.presentation-kanban-column {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-  gap: 1rem;
+  grid-template-rows: auto 1fr;
+  flex: 1 1 280px;
+  width: auto;
+  min-width: 260px;
+  max-width: 420px;
+  min-height: 420px;
+  max-height: calc(100vh - 280px);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--soft);
+}
+
+.presentation-kanban-column-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
+}
+
+.presentation-kanban-column-head h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--ink-secondary);
+}
+
+.presentation-kanban-column-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  height: 24px;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: var(--soft);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.presentation-kanban-column.status-completed .presentation-kanban-column-head {
+  border-top: 4px solid #16a34a;
+}
+
+.presentation-kanban-column.status-progress .presentation-kanban-column-head {
+  border-top: 4px solid #f59e0b;
+}
+
+.presentation-kanban-column.status-blocked .presentation-kanban-column-head {
+  border-top: 4px solid #7c3aed;
+}
+
+.presentation-kanban-column.status-approval .presentation-kanban-column-head {
+  border-top: 4px solid #ea580c;
+}
+
+.presentation-kanban-column.status-pending .presentation-kanban-column-head {
+  border-top: 4px solid #ef4444;
+}
+
+.presentation-kanban-column.status-other .presentation-kanban-column-head {
+  border-top: 4px solid #64748b;
+}
+
+.presentation-kanban-column-body {
+  display: grid;
+  gap: 10px;
+  align-content: start;
+  padding: 10px;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.presentation-kanban-empty {
+  padding: 1.25rem 0.75rem;
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.85rem;
 }
 
 .presentation-empty {
-  grid-column: 1 / -1;
   border: 1px dashed var(--line-strong);
   border-radius: var(--radius-lg);
   background: var(--panel);
@@ -7074,10 +7173,10 @@ body.view-focus .dashboard-layout {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
-  min-height: 100%;
-  padding: 1.1rem 1.15rem 1.15rem;
+  min-height: 0;
+  padding: 1rem 1.05rem 1.05rem;
   border: 1px solid var(--line);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-md);
   background: var(--panel);
   box-shadow: var(--shadow-soft);
   border-top: 3px solid var(--line-strong);
@@ -7241,8 +7340,13 @@ body.view-focus .dashboard-layout {
   background: var(--amber-soft);
 }
 
+/* Accent only — never override status / milestone-today row backgrounds */
 tbody tr.presentation-marked {
-  background: linear-gradient(90deg, rgba(245, 158, 11, 0.08), transparent 42%);
+  box-shadow: inset 3px 0 0 #f59e0b;
+}
+
+tbody tr.milestone-today.presentation-marked {
+  box-shadow: inset 3px 0 0 #fbbf24;
 }
 
 body.present-mode .app-sidebar,
@@ -7269,22 +7373,36 @@ body.present-mode .presentation-hero {
   padding: 1.75rem clamp(1rem, 3vw, 2.5rem) 1.35rem;
 }
 
-body.present-mode .presentation-deck {
-  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
-  gap: 1.25rem;
+body.present-mode .presentation-kanban-column {
+  flex: 0 0 min(340px, 82vw);
+  width: min(340px, 82vw);
+  min-width: min(340px, 82vw);
+  max-width: min(380px, 90vw);
+  min-height: calc(100vh - 220px);
+  max-height: calc(100vh - 180px);
 }
 
 body.present-mode .presentation-card {
-  padding: 1.35rem 1.4rem 1.4rem;
+  padding: 1.2rem 1.25rem 1.25rem;
 }
 
 body.present-mode .presentation-card-title {
-  font-size: 1.28rem;
+  font-size: 1.2rem;
 }
 
 body.present-mode .presentation-card-remarks {
   -webkit-line-clamp: 8;
   font-size: 0.98rem;
+}
+
+@media (max-width: 900px) {
+  .presentation-kanban-column {
+    flex: 0 0 min(280px, 78vw);
+    width: min(280px, 78vw);
+    min-width: min(280px, 78vw);
+    max-width: min(280px, 78vw);
+    min-height: 360px;
+  }
 }
 
 @media (max-width: 720px) {
@@ -7299,10 +7417,6 @@ body.present-mode .presentation-card-remarks {
   .presentation-hero-actions .primary-button,
   .presentation-hero-actions .secondary-button {
     flex: 1 1 auto;
-  }
-
-  .presentation-deck {
-    grid-template-columns: 1fr;
   }
 }
 
