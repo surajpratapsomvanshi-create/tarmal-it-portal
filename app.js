@@ -123,6 +123,12 @@ const projectActionsHeader = document.querySelector("#projectActionsHeader");
 const refreshProjectsSheetButton = document.querySelector("#refreshProjectsSheetButton");
 const exportProjectsButton = document.querySelector("#exportProjectsButton");
 const openProjectTicketCreateButton = document.querySelector("#openProjectTicketCreateButton");
+const presentationDeck = document.querySelector("#presentationDeck");
+const presentationSummary = document.querySelector("#presentationSummary");
+const presentationSubtitle = document.querySelector("#presentationSubtitle");
+const enterPresentModeButton = document.querySelector("#enterPresentModeButton");
+const exitPresentModeButton = document.querySelector("#exitPresentModeButton");
+const clearPresentationMarksButton = document.querySelector("#clearPresentationMarksButton");
 const kanbanColumns = document.querySelector("#kanbanColumns");
 const kanbanSearchFilter = document.querySelector("#kanbanSearchFilter");
 const kanbanOwnerFilter = document.querySelector("#kanbanOwnerFilter");
@@ -191,6 +197,7 @@ const TAB_LABELS = {
   performance: "Performance",
   tickets: "Tickets",
   projects: "Projects",
+  presentation: "Presentation",
   procurement: "Procurement",
   kanban: "Kanban",
   "asset-register": "Register Asset",
@@ -206,6 +213,8 @@ const SIDEBAR_COLLAPSED_KEY = "tarmal-sidebar-collapsed";
 const TOPBAR_COLLAPSED_KEY = "tarmal-topbar-collapsed";
 const PERFORMANCE_FILTERS_COLLAPSED_KEY = "tarmal-performance-filters-collapsed";
 const TOOLBAR_COLLAPSED_PREFIX = "tarmal-toolbar-";
+const PRESENTATION_MARKS_KEY = "tarmal-presentation-marks";
+const PRESENTATION_TAG = "[PRESENTATION]";
 const DEFAULT_COLLAPSED_TOOLBARS = new Set(["tickets", "projects", "procurement", "kanban", "assets", "users"]);
 
 const KANBAN_COLUMNS = [
@@ -900,13 +909,73 @@ function stripScreenshotMetadata(text) {
   return kept.join("\n").trim();
 }
 
+function stripPresentationTag(text) {
+  return String(text || "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line && !/^\[PRESENTATION\]$/i.test(line))
+    .join("\n")
+    .replace(/\[PRESENTATION\]/gi, "")
+    .replace(/[ \t]{2,}/g, " ")
+    .trim();
+}
+
+function ticketHasPresentationTag(ticket) {
+  const raw = String(ticket?.Remarks || ticket?.Notes || "");
+  return /\[PRESENTATION\]/i.test(raw);
+}
+
+function appendPresentationTag(text) {
+  const cleaned = stripPresentationTag(text);
+  return cleaned ? `${cleaned}\n${PRESENTATION_TAG}` : PRESENTATION_TAG;
+}
+
+function readPresentationMarks() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(PRESENTATION_MARKS_KEY) || "[]");
+    if (!Array.isArray(saved)) return new Set();
+    return new Set(saved.map((row) => Number(row)).filter((row) => row > 0));
+  } catch (error) {
+    return new Set();
+  }
+}
+
+function writePresentationMarks(marks) {
+  const rows = [...marks].map((row) => Number(row)).filter((row) => row > 0);
+  localStorage.setItem(PRESENTATION_MARKS_KEY, JSON.stringify(rows));
+}
+
+function isPresentationMarkedLocal(ticketOrRow) {
+  const row = Number(ticketOrRow?.sheetRow ?? ticketOrRow);
+  if (!row) return false;
+  return readPresentationMarks().has(row);
+}
+
+function isPresentationMarked(ticket) {
+  if (!ticket) return false;
+  return isPresentationMarkedLocal(ticket) || ticketHasPresentationTag(ticket);
+}
+
+function setPresentationMarkLocal(sheetRow, marked) {
+  const row = Number(sheetRow);
+  if (!row) return;
+  const marks = readPresentationMarks();
+  if (marked) marks.add(row);
+  else marks.delete(row);
+  writePresentationMarks(marks);
+}
+
 function buildNotesTextForSheet(ticket) {
-  const text = stripScreenshotMetadata(getTicketRemarksText(ticket));
+  const hasPresentation = ticketHasPresentationTag(ticket) || isPresentationMarkedLocal(ticket);
+  let text = stripPresentationTag(stripScreenshotMetadata(cleanText(ticket.Remarks || ticket.Notes || "")));
   const links = dedupeScreenshotUrls([
     ...extractDriveLinksFromNotes(ticket),
     ...collectScreenshotUrlsFromHtml(ticket.NotesHtml)
       .filter((url) => isDriveScreenshotUrl(url))
   ]);
+  if (hasPresentation) {
+    text = appendPresentationTag(text);
+  }
   if (!links.length) return text;
   const linkLines = links.map((url, index) => `Screenshot ${index + 1}: ${url}`);
   return [text, ...linkLines].filter(Boolean).join("\n");
@@ -1404,7 +1473,7 @@ function getTicketScreenshots(ticket) {
 }
 
 function getTicketRemarksText(ticket) {
-  return stripScreenshotMetadata(cleanText(ticket.Remarks || ticket.Notes || ""));
+  return stripPresentationTag(stripScreenshotMetadata(cleanText(ticket.Remarks || ticket.Notes || "")));
 }
 
 function hasImportantRemarks(ticket) {
@@ -3439,9 +3508,15 @@ function setActiveTab(tabName, options = {}) {
   // Paint only the newly visible panel from cache — avoid rebuilding every table.
   if (tabName === "dashboard" || tabName === "tickets" || tabName === "projects") {
     renderTickets({ activeOnly: true, forcePanel: tabName });
+  } else if (tabName === "presentation") {
+    renderPresentationView();
   } else if (tabName === "performance" || tabName === "kanban") {
     secondaryPanelsRenderToken += 1;
     renderSecondaryTicketPanels(getValidTickets());
+  }
+
+  if (tabName !== "presentation") {
+    setPresentMode(false);
   }
 }
 
@@ -4767,6 +4842,14 @@ function ticketFromEditForm() {
     sheetRow
   }, ticketEditNotesEditor));
 
+  // Preserve durable presentation marks when remarks are edited in the modal.
+  if (isPresentationMarkedLocal(ticket) || ticketHasPresentationTag(activeEditTicket || {})) {
+    const notes = appendPresentationTag(ticket.Notes || ticket.Remarks || "");
+    ticket.Notes = notes;
+    ticket.Remarks = notes;
+    setPresentationMarkLocal(sheetRow, true);
+  }
+
   return ticket;
 }
 
@@ -5232,6 +5315,287 @@ function bindTicketEditButtons(root = rows) {
   });
 }
 
+function bindPresentationPinButtons(root) {
+  if (!root) return;
+  root.querySelectorAll(".ticket-presentation-pin-button, .presentation-card-pin").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      if (button.classList.contains("is-syncing")) return;
+      togglePresentationMark(button.dataset.sheetRow);
+    });
+  });
+}
+
+const presentationActionInFlight = new Set();
+
+async function togglePresentationMark(sheetRow) {
+  const ticket = findTicketBySheetRow(sheetRow);
+  if (!ticket) {
+    alert("Could not find the selected project.");
+    return;
+  }
+
+  if (!isProjectTypeTicket(ticket) && !(isSubtaskTicket(ticket) && getParentTicket(ticket) && isProjectTypeTicket(getParentTicket(ticket)))) {
+    alert("Only SAP / Infra project works can be included in the presentation.");
+    return;
+  }
+
+  const actionKey = milestoneActionKey(ticket);
+  if (presentationActionInFlight.has(actionKey)) return;
+  presentationActionInFlight.add(actionKey);
+
+  const nextMarked = !isPresentationMarked(ticket);
+  setPresentationMarkLocal(ticket.sheetRow, nextMarked);
+
+  const rawNotes = String(ticket.Notes || ticket.Remarks || "");
+  const nextNotes = nextMarked ? appendPresentationTag(rawNotes) : stripPresentationTag(rawNotes);
+  let updatedTicket = normalizeTicket({
+    ...ticket,
+    Notes: nextNotes,
+    Remarks: nextNotes,
+    pendingSheetSync: Date.now()
+  });
+
+  updateLocalTicket(updatedTicket);
+  renderTickets({ force: true });
+  setStatus("", nextMarked ? "Added to presentation set..." : "Removed from presentation set...");
+
+  try {
+    if (canEditTickets() && SHEET_WEB_APP_URL) {
+      if (!updatedTicket.sheetRow) {
+        const ensured = await ensureTicketSheetRow(updatedTicket);
+        if (ensured) {
+          updatedTicket = normalizeTicket({
+            ...updatedTicket,
+            sheetRow: ensured,
+            Notes: nextNotes,
+            Remarks: nextNotes,
+            pendingSheetSync: Date.now()
+          });
+          setPresentationMarkLocal(ensured, nextMarked);
+          updateLocalTicket(updatedTicket);
+        }
+      }
+
+      if (updatedTicket.sheetRow) {
+        await sendTicketUpdateToSheet(updatedTicket);
+        setStatus("online", nextMarked
+          ? "Included in presentation (saved to sheet)"
+          : "Removed from presentation (saved to sheet)");
+      } else {
+        setStatus("online", nextMarked
+          ? "Included in presentation (this browser)"
+          : "Removed from presentation (this browser)");
+      }
+    } else {
+      setStatus("online", nextMarked
+        ? "Included in presentation (this browser)"
+        : "Removed from presentation (this browser)");
+    }
+  } catch (error) {
+    setStatus("error", error?.message || "Presentation mark saved locally, but sheet sync failed");
+    console.error(error);
+  } finally {
+    presentationActionInFlight.delete(actionKey);
+    renderTickets({ force: true });
+    if (getActiveTabName() === "presentation") {
+      renderPresentationView();
+    }
+  }
+}
+
+function getPresentationTickets(tickets = getValidTickets()) {
+  const projects = getProjectTickets(tickets).filter((ticket) => !isSubtaskTicket(ticket));
+  // Keep local marks aligned with durable [PRESENTATION] tags from the sheet.
+  const marks = readPresentationMarks();
+  let marksChanged = false;
+  projects.forEach((ticket) => {
+    const row = Number(ticket.sheetRow);
+    if (!row || !ticketHasPresentationTag(ticket) || marks.has(row)) return;
+    marks.add(row);
+    marksChanged = true;
+  });
+  if (marksChanged) writePresentationMarks(marks);
+
+  return projects
+    .filter((ticket) => isPresentationMarked(ticket))
+    .sort((a, b) => {
+      const aToday = isMilestoneToday(a) && isOpenTicket(a) ? 1 : 0;
+      const bToday = isMilestoneToday(b) && isOpenTicket(b) ? 1 : 0;
+      if (bToday !== aToday) return bToday - aToday;
+      return ticketMilestoneTimestamp(b) - ticketMilestoneTimestamp(a)
+        || ticketRecentTimestamp(b) - ticketRecentTimestamp(a);
+    });
+}
+
+function renderPresentationAttachmentThumbs(ticket) {
+  const screenshots = getTicketScreenshots(ticket);
+  const labeledCount = ticketAttachmentLabelCount(ticket);
+  if (!screenshots.length && !labeledCount) {
+    return '<p class="presentation-no-attachments">No attachments</p>';
+  }
+
+  if (!screenshots.length) {
+    return `
+      <button
+        class="screenshot-preview-btn presentation-attachment-fallback"
+        type="button"
+        data-sheet-row="${ticket.sheetRow}"
+        data-screenshot-index="0"
+      >Preview attachments (${labeledCount})</button>
+    `;
+  }
+
+  const thumbs = screenshots.slice(0, 4).map((url, index) => {
+    const thumb = toScreenshotThumbUrl(url);
+    const looksPdf = /\.pdf($|\?)/i.test(url);
+    return `
+      <button
+        class="presentation-thumb screenshot-preview-btn"
+        type="button"
+        data-sheet-row="${ticket.sheetRow}"
+        data-screenshot-index="${index}"
+        aria-label="Preview attachment ${index + 1}"
+        title="Preview attachment ${index + 1}"
+      >
+        ${!looksPdf
+          ? `<img src="${escapeHtml(thumb)}" alt="" loading="lazy" decoding="async">`
+          : `<span class="presentation-thumb-fallback">PDF</span>`}
+      </button>
+    `;
+  }).join("");
+
+  const extra = screenshots.length > 4
+    ? `<button class="presentation-thumb-more screenshot-preview-btn" type="button" data-sheet-row="${ticket.sheetRow}" data-screenshot-index="4">+${screenshots.length - 4}</button>`
+    : "";
+
+  return `<div class="presentation-thumbs">${thumbs}${extra}</div>`;
+}
+
+function renderPresentationCard(ticket, index) {
+  const remarks = getTicketRemarksText(ticket);
+  const milestone = formatDate(ticket.Milestone) || "—";
+  const priorityClass = normalizePriority(ticket.Priority) === "80" ? "high" : "low";
+
+  return `
+    <article class="presentation-card ${statusClass(ticket.Status)}" data-sheet-row="${ticket.sheetRow}">
+      <header class="presentation-card-head">
+        <div class="presentation-card-kicker">
+          <span class="presentation-slide-index">${String(index + 1).padStart(2, "0")}</span>
+          ${ticket.Type ? `<span class="presentation-type">${escapeHtml(ticket.Type)}</span>` : ""}
+          <span class="priority-pill priority-${priorityClass}">${escapeHtml(formatPriorityLabel(ticket.Priority))}</span>
+        </div>
+        <button
+          class="presentation-card-pin ticket-presentation-pin-button is-pinned"
+          type="button"
+          data-sheet-row="${ticket.sheetRow}"
+          aria-pressed="true"
+          aria-label="Remove from presentation"
+          title="Remove from presentation"
+        >★</button>
+      </header>
+      <h3 class="presentation-card-title">${escapeHtml(ticket.Task || "Untitled project")}</h3>
+      <div class="presentation-card-meta">
+        <span class="status-pill ${statusClass(ticket.Status)}">${escapeHtml(ticket.Status || "Blank")}</span>
+        <span class="owner-chip">
+          <span class="owner-avatar">${escapeHtml(ownerInitials(ticket.Owner))}</span>
+          ${escapeHtml(ticket.Owner || "No owner")}
+        </span>
+        <span class="presentation-milestone">Milestone ${escapeHtml(milestone)}</span>
+      </div>
+      ${remarks ? `<p class="presentation-card-remarks">${escapeHtml(remarks)}</p>` : `<p class="presentation-card-remarks muted-text">No remarks</p>`}
+      <div class="presentation-card-attachments">
+        <span class="presentation-attachments-label">Attachments</span>
+        ${renderPresentationAttachmentThumbs(ticket)}
+      </div>
+    </article>
+  `;
+}
+
+function renderPresentationView(tickets = getValidTickets()) {
+  if (!presentationDeck) return;
+
+  const marked = getPresentationTickets(tickets);
+  const projectCount = getProjectTickets(tickets).filter((ticket) => !isSubtaskTicket(ticket)).length;
+
+  if (presentationSummary) {
+    presentationSummary.textContent = marked.length
+      ? `${marked.length} project${marked.length === 1 ? "" : "s"} in the presentation set · ${projectCount} SAP/Infra projects available`
+      : `No projects marked yet · star items on Projects (${projectCount} available)`;
+  }
+
+  if (presentationSubtitle) {
+    presentationSubtitle.textContent = marked.length
+      ? "Exclusive project set for management — status, owners, milestones, remarks, and attachments."
+      : "Star projects from the Projects tab to build an exclusive set for management — title, status, owner, milestone, remarks, and attachments.";
+  }
+
+  if (!marked.length) {
+    presentationDeck.innerHTML = `
+      <div class="presentation-empty">
+        <p class="eyebrow">Presentation set</p>
+        <h3>Nothing marked for management yet</h3>
+        <p>Open <strong>Projects</strong>, then click the ★ on SAP or Infra works you want to present.</p>
+        <button class="primary-button" type="button" data-goto-tab="projects">Go to Projects</button>
+      </div>
+    `;
+    presentationDeck.querySelectorAll("[data-goto-tab]").forEach((button) => {
+      button.addEventListener("click", () => setActiveTab(button.dataset.gotoTab));
+    });
+    return;
+  }
+
+  presentationDeck.innerHTML = marked.map((ticket, index) => renderPresentationCard(ticket, index)).join("");
+  bindPresentationPinButtons(presentationDeck);
+  bindScreenshotPreviewButtons(presentationDeck);
+}
+
+function setPresentMode(enabled) {
+  const on = Boolean(enabled);
+  document.body.classList.toggle("present-mode", on);
+  if (enterPresentModeButton) enterPresentModeButton.hidden = on;
+  if (exitPresentModeButton) exitPresentModeButton.hidden = !on;
+  if (on && getActiveTabName() !== "presentation") {
+    setActiveTab("presentation", { skipRender: true });
+    renderPresentationView();
+  }
+}
+
+function clearPresentationMarks() {
+  const tickets = getPresentationTickets();
+  if (!tickets.length) {
+    writePresentationMarks(new Set());
+    renderPresentationView();
+    setStatus("online", "Presentation set is already empty");
+    return;
+  }
+
+  if (!window.confirm(`Clear ${tickets.length} project${tickets.length === 1 ? "" : "s"} from the presentation set?`)) {
+    return;
+  }
+
+  writePresentationMarks(new Set());
+
+  if (canEditTickets() && SHEET_WEB_APP_URL) {
+    tickets.forEach((ticket) => {
+      if (!ticketHasPresentationTag(ticket)) return;
+      const nextNotes = stripPresentationTag(String(ticket.Notes || ticket.Remarks || ""));
+      const updated = normalizeTicket({
+        ...ticket,
+        Notes: nextNotes,
+        Remarks: nextNotes,
+        pendingSheetSync: Date.now()
+      });
+      updateLocalTicket(updated);
+      sendTicketUpdateToSheet(updated).catch((error) => console.error(error));
+    });
+  }
+
+  renderTickets({ force: true });
+  renderPresentationView();
+  setStatus("online", "Presentation set cleared");
+}
+
 function renderTicketTable(tickets, options = {}) {
   const bodyEl = options.bodyEl || rows;
   const tableEl = options.tableEl || ticketTable;
@@ -5241,14 +5605,15 @@ function renderTicketTable(tickets, options = {}) {
   if (!bodyEl) return;
 
   const canEdit = canEditTickets();
+  const showActions = canEdit || Boolean(options.showPresentationPin);
   if (tableEl) {
-    tableEl.classList.toggle("ticket-table-can-edit", canEdit);
+    tableEl.classList.toggle("ticket-table-can-edit", showActions);
   }
   if (actionsHeaderEl) {
-    actionsHeaderEl.hidden = !canEdit;
+    actionsHeaderEl.hidden = !showActions;
   }
 
-  const columnCount = canEdit ? 10 : 9;
+  const columnCount = showActions ? 10 : 9;
   const pageLimit = Number(options.pageLimit) > 0 ? Number(options.pageLimit) : 0;
   const loadMoreKind = options.loadMoreKind || "";
   const visibleTickets = pageLimit && tickets.length > pageLimit
@@ -5306,11 +5671,23 @@ function renderTicketTable(tickets, options = {}) {
         statusClass(ticket.Status),
         isMilestoneToday(ticket) && isOpenTicket(ticket) ? "milestone-today" : "",
         options.highlightImportantRemarks && hasImportantRemarks(ticket) ? "remarks-important" : "",
+        options.showPresentationPin && isPresentationMarked(ticket) ? "presentation-marked" : "",
         subtask ? "subtask-row" : "",
         hasChildren ? "has-subtasks" : "",
         collapsed ? "subtasks-collapsed" : "",
         parentCollapsed ? "subtask-hidden" : ""
       ].filter(Boolean).join(" ");
+
+      const presentationPinned = options.showPresentationPin && isPresentationMarked(ticket);
+      const presentationPinButton = options.showPresentationPin ? `
+            <button
+              class="ticket-presentation-pin-button${presentationPinned ? " is-pinned" : ""}"
+              type="button"
+              data-sheet-row="${ticket.sheetRow}"
+              aria-pressed="${presentationPinned ? "true" : "false"}"
+              aria-label="${presentationPinned ? "Remove from presentation" : "Include in presentation"}"
+              title="${presentationPinned ? "Remove from presentation" : "Include in presentation"}"
+            >★</button>` : "";
 
       return `
       <tr class="${rowClasses}" ${parentCollapsed ? "hidden" : ""}>
@@ -5323,10 +5700,11 @@ function renderTicketTable(tickets, options = {}) {
         <td class="ticket-col-compact ticket-col-date">${escapeHtml(formatDate(ticket["End date"]))}</td>
         <td class="ticket-col-compact ticket-col-type">${escapeHtml(ticket.Type)}</td>
         <td class="remarks-col">${renderTicketRemarksCell(ticket)}</td>
-        ${canEdit ? `
+        ${canEdit || options.showPresentationPin ? `
         <td class="actions-col">
           <div class="ticket-row-actions">
-            ${!subtask ? `
+            ${presentationPinButton}
+            ${canEdit && !subtask ? `
             <button
               class="ticket-subtask-button"
               type="button"
@@ -5334,6 +5712,7 @@ function renderTicketTable(tickets, options = {}) {
               aria-label="Add sub-task"
               title="Add sub-task"
             >+</button>` : ""}
+            ${canEdit ? `
             <button
               class="ticket-milestone-today-button${isMilestoneToday(ticket) ? " is-today" : ""}${isMilestoneTomorrow(ticket) ? " is-tomorrow" : ""}${milestoneActionInFlight.has(milestoneActionKey(ticket)) ? " is-syncing" : ""}"
               type="button"
@@ -5349,7 +5728,7 @@ function renderTicketTable(tickets, options = {}) {
               title="Edit ticket"
             >
               <span class="edit-icon" aria-hidden="true"></span>
-            </button>
+            </button>` : ""}
           </div>
         </td>` : ""}
       </tr>
@@ -5368,6 +5747,7 @@ function renderTicketTable(tickets, options = {}) {
   bodyEl.innerHTML = rowsHtml + loadMoreHtml;
 
   bindTicketEditButtons(bodyEl);
+  bindPresentationPinButtons(bodyEl);
   bindScreenshotPreviewButtons(bodyEl);
   bodyEl.querySelectorAll("[data-load-more]").forEach((button) => {
     button.addEventListener("click", () => {
@@ -5479,6 +5859,7 @@ function renderTickets(options = {}) {
   const paintDashboard = !activeOnly || activeTab === "dashboard";
   const paintTickets = !activeOnly || activeTab === "tickets";
   const paintProjects = !activeOnly || activeTab === "projects";
+  const paintPresentation = !activeOnly || activeTab === "presentation";
   const paintSecondaryNow = activeTab === "performance" || activeTab === "kanban";
 
   if (paintDashboard) {
@@ -5546,10 +5927,15 @@ function renderTickets(options = {}) {
       actionsHeaderEl: projectActionsHeader,
       emptyMessage: "No SAP or Infra project works match the current filters.",
       highlightImportantRemarks: true,
+      showPresentationPin: true,
       pageLimit: projectTableLimit,
       loadMoreKind: "projects",
       collapsePanel: "projects"
     });
+  }
+
+  if (paintPresentation) {
+    renderPresentationView(tickets);
   }
 
   if (paintSecondaryNow) {
@@ -6242,6 +6628,15 @@ tabButtons.forEach((button) => {
       }
     }
   });
+});
+
+enterPresentModeButton?.addEventListener("click", () => setPresentMode(true));
+exitPresentModeButton?.addEventListener("click", () => setPresentMode(false));
+clearPresentationMarksButton?.addEventListener("click", clearPresentationMarks);
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && document.body.classList.contains("present-mode")) {
+    setPresentMode(false);
+  }
 });
 
 document.querySelectorAll("[data-goto-tab]").forEach((button) => {

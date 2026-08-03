@@ -6,11 +6,11 @@
     <title>Tarmal IT Portal</title>
     <link rel="icon" href="./assets/tarmal-mark.png?v=1" type="image/png">
     <link rel="apple-touch-icon" href="./assets/apple-touch-icon.png?v=1">
-    <link rel="stylesheet" href="./styles.css?v=92">
+    <link rel="stylesheet" href="./styles.css?v=93">
     <!-- auth stays blocking so requireLogin runs before app chrome paints -->
     <script src="./auth.js?v=20"></script>
     <!-- Defer main bundles so HTML can parse while ~210KB+ app.js downloads -->
-    <script src="./app.js?v=122" defer></script>
+    <script src="./app.js?v=123" defer></script>
     <script src="./assets.js?v=13" defer></script>
     <script src="./documents.js?v=10" defer></script>
     <script src="./procurement.js?v=4" defer></script>
@@ -44,6 +44,9 @@
           </button>
           <button class="tab-button" type="button" data-tab="projects" data-requires="dashboard" data-short="PJ">
             <span class="tab-button-label">Projects</span>
+          </button>
+          <button class="tab-button" type="button" data-tab="presentation" data-requires="dashboard" data-short="PS">
+            <span class="tab-button-label">Presentation</span>
           </button>
           <button class="tab-button" type="button" data-tab="procurement" data-requires="dashboard" data-short="PR">
             <span class="tab-button-label">Procurement</span>
@@ -560,6 +563,32 @@
               <tbody id="projectRows"></tbody>
             </table>
           </div>
+        </section>
+      </section>
+
+      <section class="tab-panel" data-panel="presentation" aria-label="Management presentation">
+        <section class="presentation-board" aria-label="Project presentation set">
+          <div class="presentation-hero" id="presentationHero">
+            <div class="presentation-hero-glow" aria-hidden="true"></div>
+            <div class="presentation-hero-body">
+              <div class="presentation-hero-main">
+                <p class="presentation-eyebrow">Management briefing</p>
+                <h2>Project Presentation</h2>
+                <p class="presentation-subtitle" id="presentationSubtitle">
+                  Star projects from the Projects tab to build an exclusive set for management — title, status, owner, milestone, remarks, and attachments.
+                </p>
+              </div>
+              <div class="presentation-hero-actions">
+                <button class="primary-button" id="enterPresentModeButton" type="button">Present mode</button>
+                <button class="secondary-button" id="exitPresentModeButton" type="button" hidden>Exit present</button>
+                <button class="secondary-button" id="gotoProjectsFromPresentationButton" type="button" data-goto-tab="projects">Mark from Projects</button>
+                <button class="secondary-button" id="clearPresentationMarksButton" type="button">Clear set</button>
+              </div>
+            </div>
+            <p class="presentation-summary" id="presentationSummary"></p>
+          </div>
+
+          <div class="presentation-deck" id="presentationDeck" aria-live="polite"></div>
         </section>
       </section>
 
