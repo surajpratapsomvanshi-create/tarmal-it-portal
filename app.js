@@ -5931,10 +5931,20 @@ function renderTicketTable(tickets, options = {}) {
   const columnCount = showActions ? 10 : 9;
   const pageLimit = Number(options.pageLimit) > 0 ? Number(options.pageLimit) : 0;
   const loadMoreKind = options.loadMoreKind || "";
-  const visibleTickets = pageLimit && tickets.length > pageLimit
-    ? tickets.slice(0, pageLimit)
+  // milestone-open-desc: keep completed subtasks out of the table (collapsed/hidden),
+  // but still count them on the parent badge. Search can surface a matching completed child.
+  const hideCompletedSubtasks = Boolean(options.hideCompletedSubtasks);
+  const searchQuery = cleanText(options.searchQuery || "").toLowerCase();
+  const displayTickets = hideCompletedSubtasks
+    ? tickets.filter((ticket) => {
+      if (!isSubtaskTicket(ticket) || !isTicketCompleted(ticket)) return true;
+      return Boolean(searchQuery) && ticketSearchHaystack(ticket).includes(searchQuery);
+    })
     : tickets;
-  const remaining = Math.max(0, tickets.length - visibleTickets.length);
+  const visibleTickets = pageLimit && displayTickets.length > pageLimit
+    ? displayTickets.slice(0, pageLimit)
+    : displayTickets;
+  const remaining = Math.max(0, displayTickets.length - visibleTickets.length);
 
   if (!tickets.length) {
     bodyEl.innerHTML = `<tr class="empty-row"><td colspan="${columnCount}">${escapeHtml(emptyMessage)}</td></tr>`;
@@ -6227,7 +6237,9 @@ function renderTickets(options = {}) {
       pageLimit: ticketTableLimit,
       loadMoreKind: "tickets",
       collapsePanel: "tickets",
-      showPresentationPin: true
+      showPresentationPin: true,
+      hideCompletedSubtasks: sortKey === "milestone-open-desc",
+      searchQuery: ticketSearchFilter?.value || ""
     });
   }
 
@@ -6257,7 +6269,9 @@ function renderTickets(options = {}) {
       showPresentationPin: true,
       pageLimit: projectTableLimit,
       loadMoreKind: "projects",
-      collapsePanel: "projects"
+      collapsePanel: "projects",
+      hideCompletedSubtasks: projectSortKey === "milestone-open-desc",
+      searchQuery: projectSearchFilter?.value || ""
     });
   }
 
