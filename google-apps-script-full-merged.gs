@@ -652,7 +652,25 @@ function doPost(e) {
   lock.waitLock(30000);
 
   try {
-    const data = JSON.parse(e.postData.contents);
+    const raw = (e && e.postData && e.postData.contents != null)
+      ? String(e.postData.contents).replace(/^\uFEFF/, "")
+      : "";
+    if (!raw) {
+      return buildResponse_({
+        ok: false,
+        error: "Empty request body. The browser may have lost the POST on redirect — try again."
+      }, e);
+    }
+
+    let data;
+    try {
+      data = JSON.parse(raw);
+    } catch (parseError) {
+      return buildResponse_({
+        ok: false,
+        error: "Invalid JSON in request body: " + parseError.message
+      }, e);
+    }
 
     if (data.action === "syncUsers") {
       writeUsers_(data.users || []);

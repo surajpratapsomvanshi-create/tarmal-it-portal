@@ -4971,26 +4971,107 @@ function applyDriveLinksToLocalTicket(sheetRow, notesText) {
   }), { keepPendingSync: true });
 }
 
+function truncateForLog(text, max = 240) {
+  const value = String(text ?? "");
+  return value.length > max ? `${value.slice(0, max)}…` : value;
+}
+
+function looksLikeHtmlResponse(text) {
+  const head = String(text || "").trim().slice(0, 80).toLowerCase();
+  return head.startsWith("<!doctype")
+    || head.startsWith("<html")
+    || head.startsWith("<head")
+    || head.startsWith("<body")
+    || head.startsWith("<pre")
+    || head.startsWith("<div");
+}
+
+function tryParseJsonText(candidate) {
+  try {
+    return { ok: true, value: JSON.parse(candidate) };
+  } catch {
+    return { ok: false };
+  }
+}
+
+function isAppsScriptResponseShape(parsed) {
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return false;
+  if (typeof parsed.ok === "boolean") return true;
+  if (Number(parsed.sheetRow) > 0) return true;
+  if (Array.isArray(parsed.results)) return true;
+  if (Array.isArray(parsed.tickets)) return true;
+  return false;
+}
+
+/**
+ * Apps Script should return JSON via ContentService, but Google sometimes
+ * answers with HTML/JS error pages. Never let a raw SyntaxError bubble to alert().
+ */
+function parseAppsScriptResponseText(text) {
+  const raw = String(text ?? "").replace(/^\uFEFF/, "").trim();
+
+  if (!raw) {
+    throw new Error("Empty response from Apps Script. Ticket may still be saved — click Refresh.");
+  }
+
+  // Rare gateway / legacy tokens
+  if (/^(ok|success|true)$/i.test(raw)) {
+    return { ok: true, assumedOk: true };
+  }
+
+  let parsed = tryParseJsonText(raw);
+  if (parsed.ok) return parsed.value;
+
+  // Prefer a real JSON object that includes the "ok" key.
+  const okObjectMatch = raw.match(/\{\s*"ok"\s*:[\s\S]*\}/);
+  if (okObjectMatch) {
+    parsed = tryParseJsonText(okObjectMatch[0]);
+    if (parsed.ok && isAppsScriptResponseShape(parsed.value)) return parsed.value;
+  }
+
+  // Last resort: first {...} blob — still fully try/caught (never throw SyntaxError).
+  const braceMatch = raw.match(/\{[\s\S]*\}/);
+  if (braceMatch) {
+    parsed = tryParseJsonText(braceMatch[0]);
+    if (parsed.ok && isAppsScriptResponseShape(parsed.value)) return parsed.value;
+  }
+
+  console.error("Apps Script non-JSON response:", truncateForLog(raw));
+  if (looksLikeHtmlResponse(raw)) {
+    throw new Error("Sheet sync returned an HTML error page instead of JSON. Redeploy Apps Script and try again.");
+  }
+  throw new Error("Could not read a response from Apps Script. Redeploy the web app, then Refresh.");
+}
+
+function friendlySheetSyncError(error) {
+  const raw = String(error?.message || error || "").trim();
+  if (!raw) return "Saved locally, but sync failed";
+  if (/JSON|Unexpected token|Expected property|SyntaxError/i.test(raw)) {
+    return "Saved locally, but sheet sync response was invalid. Click Refresh to confirm.";
+  }
+  return raw;
+}
+
 async function postToSheetWithResponse(payload) {
+  let body;
+  try {
+    body = JSON.stringify(payload);
+  } catch (error) {
+    console.error("Ticket payload stringify failed:", error);
+    throw new Error("Could not prepare ticket data for sync (invalid notes or attachments).");
+  }
+
   const response = await fetch(SHEET_WEB_APP_URL, {
     method: "POST",
     redirect: "follow",
     headers: {
       "Content-Type": "text/plain;charset=utf-8"
     },
-    body: JSON.stringify(payload)
+    body
   });
 
   const text = await response.text();
-  try {
-    return JSON.parse(text);
-  } catch (error) {
-    const match = text.match(/\{[\s\S]*\}/);
-    if (match) {
-      return JSON.parse(match[0]);
-    }
-    throw new Error("Could not read a response from Apps Script. Redeploy the web app.");
-  }
+  return parseAppsScriptResponseText(text);
 }
 
 function updateLocalTicket(updatedTicket, options = {}) {
@@ -6745,10 +6826,11 @@ form?.addEventListener("submit", async (event) => {
     }
   } catch (error) {
     resetTicketSubmitProgress("Sync failed — saved locally");
-    const message = error?.message || "Saved locally, but sync failed";
+    const message = friendlySheetSyncError(error);
     setStatus("error", message);
-    alert(message);
     console.error(error);
+  } finally {
+    clearDuplicateTicketInFlight();
   }
 });
 

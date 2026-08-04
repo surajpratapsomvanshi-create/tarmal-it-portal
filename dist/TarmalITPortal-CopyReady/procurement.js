@@ -252,21 +252,36 @@ function readProcurementFileAsDataUrl(file) {
 }
 
 async function postProcurementRequest(payload) {
+  let body;
+  try {
+    body = JSON.stringify(payload);
+  } catch (error) {
+    console.error("Procurement payload stringify failed:", error);
+    throw new Error("Could not prepare procurement data for sync.");
+  }
+
   const response = await fetch(Auth.SHEET_WEB_APP_URL, {
     method: "POST",
     redirect: "follow",
     headers: {
       "Content-Type": "text/plain;charset=utf-8"
     },
-    body: JSON.stringify(payload)
+    body
   });
 
   const text = await response.text();
+  const raw = String(text ?? "").replace(/^\uFEFF/, "").trim();
+  if (!raw) throw new Error("Empty response from Apps Script.");
+  if (/^(ok|success|true)$/i.test(raw)) return { ok: true, assumedOk: true };
+
   try {
-    return JSON.parse(text);
+    return JSON.parse(raw);
   } catch {
-    const match = text.match(/\{[\s\S]*\}/);
-    if (match) return JSON.parse(match[0]);
+    const okMatch = raw.match(/\{\s*"ok"\s*:[\s\S]*\}/);
+    if (okMatch) {
+      try { return JSON.parse(okMatch[0]); } catch { /* fall through */ }
+    }
+    console.error("Apps Script non-JSON response:", raw.slice(0, 240));
     throw new Error("Could not read a response from Apps Script.");
   }
 }
