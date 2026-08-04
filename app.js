@@ -5307,6 +5307,13 @@ function bindTicketEditButtons(root = rows) {
       openTicketEditor(button.dataset.sheetRow);
     });
   });
+  root.querySelectorAll(".ticket-duplicate-button").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      if (button.classList.contains("is-syncing") || button.disabled) return;
+      duplicateTicket(button.dataset.sheetRow);
+    });
+  });
   root.querySelectorAll(".ticket-subtask-button").forEach((button) => {
     button.addEventListener("click", (event) => {
       event.stopPropagation();
@@ -5331,6 +5338,105 @@ function bindTicketEditButtons(root = rows) {
       renderTickets({ activeOnly: true, forcePanel: panel });
     });
   });
+}
+
+const duplicateTicketInFlight = new Set();
+
+function buildDuplicatedTicket(source) {
+  const status = cleanText(source.Status);
+  const resetCompletionStatus = isTicketCompleted(source) || isPendingApprovalStatus(status);
+  const notesText = stripPresentationTag(source.Notes || source.Remarks || "");
+  const notesHtml = stripPresentationTag(String(source.NotesHtml || ""));
+
+  return normalizeTicket({
+    Task: source.Task,
+    Priority: source.Priority,
+    Owner: source.Owner,
+    "Raised By": source["Raised By"],
+    Status: resetCompletionStatus ? "Not started" : (status || "Not started"),
+    Type: source.Type,
+    "Start date": source["Start date"],
+    "End date": "",
+    Milestone: source.Milestone,
+    parentSheetRow: Number(source.parentSheetRow) || 0,
+    Notes: notesText,
+    Remarks: notesText,
+    NotesHtml: notesHtml,
+    NotesRaw: notesText,
+    "Bhanu List": source["Bhanu List"],
+    sheetRow: 0,
+    pendingSheetSync: Date.now(),
+    createdOn: new Date().toISOString(),
+    lastUpdated: "",
+    closedOn: ""
+  });
+}
+
+async function duplicateTicket(sheetRow) {
+  if (!Auth.hasPermission("createTicket")) {
+    alert("You do not have permission to create tickets.");
+    return;
+  }
+
+  const source = findTicketBySheetRow(sheetRow);
+  if (!source) {
+    alert("Could not find the selected ticket.");
+    return;
+  }
+
+  const actionKey = milestoneActionKey(source);
+  if (duplicateTicketInFlight.has(actionKey)) return;
+  duplicateTicketInFlight.add(actionKey);
+
+  let cloned = buildDuplicatedTicket(source);
+
+  // Avoid colliding with another unsynced same Task||Owner while create sync runs.
+  const hasUnsyncedTwin = getValidTickets().some((ticket) =>
+    !Number(ticket.sheetRow)
+    && ticketIdentityKey(ticket) === ticketIdentityKey(cloned)
+  );
+  if (hasUnsyncedTwin) {
+    cloned = normalizeTicket({
+      ...cloned,
+      Task: `${cleanText(cloned.Task)} (copy)`,
+      pendingSheetSync: Date.now()
+    });
+  }
+
+  const tickets = readTickets();
+  tickets.push(cloned);
+  writeTickets(tickets);
+  renderTickets({ force: true });
+  setStatus("", "Duplicating ticket...");
+
+  try {
+    if (SHEET_WEB_APP_URL) {
+      await sendNewTicketsToSheet([cloned]);
+      renderTickets({ force: true });
+      const saved = getValidTickets().find((entry) =>
+        ticketIdentityKey(entry) === ticketIdentityKey(cloned)
+        && Number(entry.sheetRow) > 0
+      );
+      if (saved && ticketHasLocalScreenshotsOnly(saved)) {
+        setStatus("online", "Ticket duplicated — screenshots uploading in background");
+        queueBackgroundScreenshotSync([saved]).catch((error) => {
+          console.error(error);
+          setStatus("error", "Duplicate saved — screenshot upload may still be running");
+        });
+      } else {
+        setStatus("ok", "Ticket duplicated");
+      }
+    } else {
+      setStatus("", "Ticket duplicated locally. Sync is not configured.");
+    }
+  } catch (error) {
+    setStatus("error", error?.message || "Duplicated locally, but sheet sync failed");
+    console.error(error);
+    renderTickets({ force: true });
+  } finally {
+    duplicateTicketInFlight.delete(actionKey);
+    renderTickets({ force: true });
+  }
 }
 
 function bindPresentationPinButtons(root) {
@@ -5795,6 +5901,16 @@ function renderTicketTable(tickets, options = {}) {
               title="${isMilestoneToday(ticket) ? "Set milestone to tomorrow" : "Set milestone to today"}"
             >M</button>
             <button
+              class="ticket-duplicate-button${duplicateTicketInFlight.has(milestoneActionKey(ticket)) ? " is-syncing" : ""}"
+              type="button"
+              data-sheet-row="${ticket.sheetRow}"
+              aria-label="Duplicate"
+              title="Duplicate"
+              ${duplicateTicketInFlight.has(milestoneActionKey(ticket)) ? "disabled" : ""}
+            >
+              <span class="duplicate-icon" aria-hidden="true"></span>
+            </button>
+            <button
               class="ticket-edit-button"
               type="button"
               data-sheet-row="${ticket.sheetRow}"
@@ -6031,9 +6147,15 @@ function applyCreatedTicketSyncResult(localTicket, result = {}) {
   const notes = String(result.notes || "").trim();
   const sheetRow = Number(result.sheetRow) || 0;
   const hasDriveLinks = notes && extractDriveLinksFromNotes({ Notes: notes, Remarks: notes }).length > 0;
+  let matchedUnsynced = false;
 
   const tickets = readTickets().map((ticket) => {
     if (ticketIdentityKey(ticket) !== identity) return ticket;
+    // Only apply create results to unsynced local clones — never overwrite an
+    // existing sheet row that shares Task||Owner (e.g. after Duplicate).
+    if (Number(ticket.sheetRow) > 0) return ticket;
+    if (matchedUnsynced) return ticket;
+    matchedUnsynced = true;
 
     const notesHtml = hasDriveLinks
       ? buildNotesHtmlFromDriveLinks({ Notes: notes, Remarks: notes })

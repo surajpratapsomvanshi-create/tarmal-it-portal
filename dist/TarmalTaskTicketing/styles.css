@@ -2967,14 +2967,72 @@ body.sidebar-collapsed .sidebar-expand-bar {
   color: var(--blue);
 }
 
+.ticket-duplicate-button {
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  min-width: 22px;
+  min-height: 22px;
+  padding: 0;
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  background: #fff;
+  color: var(--ink-secondary);
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+}
+
+.ticket-duplicate-button:hover {
+  background: #eff6ff;
+  border-color: var(--blue);
+  color: var(--blue);
+}
+
+.ticket-duplicate-button:disabled,
+.ticket-duplicate-button.is-syncing {
+  opacity: 0.55;
+  cursor: wait;
+}
+
+.duplicate-icon {
+  position: relative;
+  display: inline-block;
+  width: 11px;
+  height: 11px;
+}
+
+.duplicate-icon::before,
+.duplicate-icon::after {
+  content: "";
+  position: absolute;
+  width: 7px;
+  height: 7px;
+  border: 1.5px solid currentColor;
+  border-radius: 1px;
+  background: transparent;
+}
+
+.duplicate-icon::before {
+  top: 0;
+  left: 0;
+}
+
+.duplicate-icon::after {
+  right: 0;
+  bottom: 0;
+  background: #fff;
+}
+
 .ticket-table .actions-col {
-  width: 6%;
-  min-width: 0;
-  max-width: none;
-  padding: 4px;
+  width: 152px;
+  min-width: 152px;
+  max-width: 168px;
+  padding: 4px 6px;
   text-align: center;
-  white-space: nowrap;
+  white-space: normal;
   vertical-align: middle;
+  overflow: visible;
 }
 
 body.modal-open {
@@ -3333,9 +3391,11 @@ body.modal-open {
 #ticketTable .ticket-row-actions,
 #projectTable .ticket-row-actions {
   display: inline-flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: center;
   gap: 3px;
+  max-width: 100%;
 }
 
 .ticket-subtask-button:hover {
@@ -3421,13 +3481,14 @@ body.modal-open {
 
 #ticketTable.ticket-table-can-edit .actions-col,
 #projectTable.ticket-table-can-edit .actions-col {
-  width: 6%;
-  min-width: 0;
-  max-width: none;
-  padding: 4px;
+  width: 152px;
+  min-width: 152px;
+  max-width: 168px;
+  padding: 4px 6px;
   text-align: center;
-  white-space: nowrap;
+  white-space: normal;
   vertical-align: middle;
+  overflow: visible;
 }
 
 #ticketTable.ticket-table-can-edit .remarks-col {
@@ -3536,6 +3597,7 @@ tbody tr.milestone-today .screenshot-preview-btn {
 
 tbody tr.milestone-today .ticket-subtask-button,
 tbody tr.milestone-today .ticket-edit-button,
+tbody tr.milestone-today .ticket-duplicate-button,
 tbody tr.milestone-today .ticket-subtask-toggle,
 tbody tr.milestone-today .ticket-milestone-today-button {
   background: rgba(255, 255, 255, 0.14);
@@ -3545,11 +3607,16 @@ tbody tr.milestone-today .ticket-milestone-today-button {
 
 tbody tr.milestone-today .ticket-subtask-button:hover,
 tbody tr.milestone-today .ticket-edit-button:hover,
+tbody tr.milestone-today .ticket-duplicate-button:hover,
 tbody tr.milestone-today .ticket-subtask-toggle:hover,
 tbody tr.milestone-today .ticket-milestone-today-button:hover {
   background: rgba(255, 255, 255, 0.26);
   border-color: rgba(255, 255, 255, 0.65);
   color: #ffffff;
+}
+
+tbody tr.milestone-today .duplicate-icon::after {
+  background: transparent;
 }
 
 tbody tr.milestone-today .ticket-subtask-count {
@@ -6351,7 +6418,7 @@ body.view-focus .dashboard-layout {
   body.view-focus #ticketTable.ticket-table-can-edit .task-col,
   body.view-focus #projectTable .task-col,
   body.view-focus #projectTable.ticket-table-can-edit .task-col {
-    width: calc(100% - 92px) !important;
+    width: calc(100% - 152px) !important;
     min-width: 0 !important;
     max-width: none !important;
     white-space: normal !important;
@@ -6369,13 +6436,20 @@ body.view-focus .dashboard-layout {
   body.view-focus #projectTable .actions-col,
   body.view-focus #ticketTable.ticket-table-can-edit .actions-col,
   body.view-focus #projectTable.ticket-table-can-edit .actions-col {
-    width: 92px !important;
-    min-width: 92px !important;
-    max-width: 92px !important;
+    width: 152px !important;
+    min-width: 152px !important;
+    max-width: 152px !important;
     padding: 4px 6px;
-    white-space: nowrap;
+    white-space: normal;
     vertical-align: middle;
     text-align: center;
+    overflow: visible;
+  }
+
+  #ticketTable .ticket-row-actions,
+  #projectTable .ticket-row-actions {
+    flex-wrap: wrap;
+    max-width: 100%;
   }
 
   #ticketTable .ticket-task-head,
@@ -6620,7 +6694,7 @@ body.view-focus .dashboard-layout {
   #projectTable.ticket-table-can-edit .task-col,
   body.view-focus #ticketTable .task-col,
   body.view-focus #projectTable .task-col {
-    width: calc(100% - 92px) !important;
+    width: calc(100% - 152px) !important;
     word-break: normal !important;
     overflow-wrap: break-word !important;
   }
@@ -6634,9 +6708,11 @@ body.view-focus .dashboard-layout {
   #projectTable .actions-col,
   #ticketTable.ticket-table-can-edit .actions-col,
   #projectTable.ticket-table-can-edit .actions-col {
-    width: 92px !important;
-    min-width: 92px !important;
-    max-width: 92px !important;
+    width: 152px !important;
+    min-width: 152px !important;
+    max-width: 152px !important;
+    white-space: normal;
+    overflow: visible;
   }
 
   body.view-focus .kanban-column,
