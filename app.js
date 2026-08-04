@@ -2464,6 +2464,13 @@ function isProjectTypeTicket(ticket) {
   return isExactSapType(ticket?.Type) || isExactInfraType(ticket?.Type);
 }
 
+function isPresentationEligible(ticket) {
+  if (isProjectTypeTicket(ticket)) return true;
+  if (!isSubtaskTicket(ticket)) return false;
+  const parent = getParentTicket(ticket);
+  return Boolean(parent && isProjectTypeTicket(parent));
+}
+
 function getProjectTickets(tickets = getValidTickets()) {
   const byRow = new Map();
   tickets.forEach((ticket) => {
@@ -5346,7 +5353,7 @@ async function togglePresentationMark(sheetRow) {
     return;
   }
 
-  if (!isProjectTypeTicket(ticket) && !(isSubtaskTicket(ticket) && getParentTicket(ticket) && isProjectTypeTicket(getParentTicket(ticket)))) {
+  if (!isPresentationEligible(ticket)) {
     alert("Only SAP / Infra project works can be included in the presentation.");
     return;
   }
@@ -5542,13 +5549,13 @@ function renderPresentationView(tickets = getValidTickets()) {
   if (presentationSummary) {
     presentationSummary.textContent = marked.length
       ? `${marked.length} project${marked.length === 1 ? "" : "s"} in the presentation set · ${projectCount} SAP/Infra projects available`
-      : `No projects marked yet · star items on Projects (${projectCount} available)`;
+      : `No projects marked yet · star SAP/Infra on Tickets or Projects (${projectCount} available)`;
   }
 
   if (presentationSubtitle) {
     presentationSubtitle.textContent = marked.length
-      ? "Kanban by status — Completed, In progress, then Not started. Star more from Projects."
-      : "Star projects from the Projects tab to build an exclusive Kanban set for management — title, status, owner, milestone, remarks, and attachments.";
+      ? "Kanban by status — Completed, In progress, then Not started. Star more from Tickets or Projects."
+      : "Star SAP/Infra works from Tickets or Projects to build an exclusive Kanban set for management — title, status, owner, milestone, remarks, and attachments.";
   }
 
   if (!marked.length) {
@@ -5557,8 +5564,11 @@ function renderPresentationView(tickets = getValidTickets()) {
       <div class="presentation-empty">
         <p class="eyebrow">Presentation set</p>
         <h3>Nothing marked for management yet</h3>
-        <p>Open <strong>Projects</strong>, then click the ★ on SAP or Infra works you want to present.</p>
-        <button class="primary-button" type="button" data-goto-tab="projects">Go to Projects</button>
+        <p>Open <strong>Tickets</strong> or <strong>Projects</strong>, then click the ★ on SAP or Infra works you want to present.</p>
+        <div class="presentation-empty-actions">
+          <button class="primary-button" type="button" data-goto-tab="tickets">Go to Tickets</button>
+          <button class="secondary-button" type="button" data-goto-tab="projects">Go to Projects</button>
+        </div>
       </div>
     `;
     presentationDeck.querySelectorAll("[data-goto-tab]").forEach((button) => {
@@ -5734,15 +5744,16 @@ function renderTicketTable(tickets, options = {}) {
         statusClass(ticket.Status),
         isMilestoneToday(ticket) && isOpenTicket(ticket) ? "milestone-today" : "",
         options.highlightImportantRemarks && hasImportantRemarks(ticket) ? "remarks-important" : "",
-        options.showPresentationPin && isPresentationMarked(ticket) ? "presentation-marked" : "",
+        options.showPresentationPin && isPresentationEligible(ticket) && isPresentationMarked(ticket) ? "presentation-marked" : "",
         subtask ? "subtask-row" : "",
         hasChildren ? "has-subtasks" : "",
         collapsed ? "subtasks-collapsed" : "",
         parentCollapsed ? "subtask-hidden" : ""
       ].filter(Boolean).join(" ");
 
-      const presentationPinned = options.showPresentationPin && isPresentationMarked(ticket);
-      const presentationPinButton = options.showPresentationPin ? `
+      const showPresentationPinForRow = Boolean(options.showPresentationPin) && isPresentationEligible(ticket);
+      const presentationPinned = showPresentationPinForRow && isPresentationMarked(ticket);
+      const presentationPinButton = showPresentationPinForRow ? `
             <button
               class="ticket-presentation-pin-button${presentationPinned ? " is-pinned" : ""}"
               type="button"
@@ -5963,7 +5974,8 @@ function renderTickets(options = {}) {
     renderTicketTable(filteredTickets, {
       pageLimit: ticketTableLimit,
       loadMoreKind: "tickets",
-      collapsePanel: "tickets"
+      collapsePanel: "tickets",
+      showPresentationPin: true
     });
   }
 

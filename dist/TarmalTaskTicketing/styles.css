@@ -7169,6 +7169,13 @@ body.view-focus .dashboard-layout {
   color: var(--muted);
 }
 
+.presentation-empty-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  justify-content: center;
+}
+
 .presentation-card {
   display: flex;
   flex-direction: column;
