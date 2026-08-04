@@ -4784,10 +4784,19 @@ function openTicketCreateModal() {
   form?.elements.Task?.focus();
 }
 
+const duplicateTicketInFlight = new Set();
+
+function clearDuplicateTicketInFlight({ rerender = true } = {}) {
+  if (!duplicateTicketInFlight.size) return;
+  duplicateTicketInFlight.clear();
+  if (rerender) renderTickets({ force: true, activeOnly: true });
+}
+
 function closeTicketCreateModal() {
   if (!ticketCreateModal) return;
   ticketCreateModal.hidden = true;
   resetTicketCreateParent();
+  clearDuplicateTicketInFlight();
   if (ticketEditModal?.hidden && screenshotPreviewModal?.hidden) {
     document.body.classList.remove("modal-open");
   }
@@ -5338,41 +5347,115 @@ function bindTicketEditButtons(root = rows) {
   });
 }
 
-const duplicateTicketInFlight = new Set();
-
-function buildDuplicatedTicket(source) {
-  const status = cleanText(source.Status);
-  const resetCompletionStatus = isTicketCompleted(source) || isPendingApprovalStatus(status);
-  const notesText = stripPresentationTag(source.Notes || source.Remarks || "");
-  const notesHtml = stripPresentationTag(String(source.NotesHtml || ""));
-
-  return normalizeTicket({
-    Task: source.Task,
-    Priority: source.Priority,
-    Owner: source.Owner,
-    "Raised By": source["Raised By"],
-    Status: resetCompletionStatus ? "Not started" : (status || "Not started"),
-    Type: source.Type,
-    "Start date": source["Start date"],
-    "End date": "",
-    Milestone: source.Milestone,
-    parentSheetRow: Number(source.parentSheetRow) || 0,
-    Notes: notesText,
-    Remarks: notesText,
-    NotesHtml: notesHtml,
-    NotesRaw: notesText,
-    "Bhanu List": source["Bhanu List"],
-    sheetRow: 0,
-    pendingSheetSync: Date.now(),
-    createdOn: new Date().toISOString(),
-    lastUpdated: "",
-    closedOn: ""
-  });
+function duplicateStatusForCreateForm(source) {
+  const status = cleanText(source?.Status);
+  if (!status || isTicketCompleted(source) || isPendingApprovalStatus(status)) {
+    return "Not started";
+  }
+  return status;
 }
 
-async function duplicateTicket(sheetRow) {
+function setTicketCreateSelectValue(fieldName, value) {
+  const field = form?.elements?.[fieldName];
+  if (!field) return;
+  const text = String(value ?? "").trim();
+  if (!text) return;
+  const option = [...field.options].find((entry) =>
+    entry.value === text || entry.textContent === text
+  );
+  if (option) {
+    field.value = option.value;
+    return;
+  }
+  // Fall back for statuses that exist on the sheet but not on the create form.
+  if (fieldName === "Status") field.value = "Not started";
+}
+
+function selectTicketFormOwners(owners = []) {
+  if (!ticketFormOwnerPanel) return;
+  populateTicketFormOwners();
+  clearTicketFormOwners();
+  const wanted = new Set(
+    owners
+      .map((owner) => cleanText(owner))
+      .filter(isSelectableTicketOwner)
+      .map((owner) => owner.toLowerCase())
+  );
+  if (!wanted.size) {
+    updateTicketFormOwnerLabel();
+    return;
+  }
+  ticketFormOwnerPanel.querySelectorAll("input[type='checkbox']").forEach((input) => {
+    input.checked = wanted.has(String(input.value || "").trim().toLowerCase());
+  });
+  updateTicketFormOwnerLabel();
+}
+
+function applyTicketCreateParentFromSource(source) {
+  const parentRow = Number(source?.parentSheetRow) || 0;
+  if (!parentRow) {
+    resetTicketCreateParent();
+    updateTicketFormOwnerLabel();
+    return;
+  }
+  const parent = getParentTicket(source) || findTicketBySheetRow(parentRow);
+  if (ticketFormParentSheetRow) ticketFormParentSheetRow.value = String(parentRow);
+  if (ticketCreateParentContext) ticketCreateParentContext.hidden = false;
+  if (ticketCreateParentLabel) {
+    ticketCreateParentLabel.textContent = parent?.Task || `Row ${parentRow}`;
+  }
+  if (ticketFormSubmitLabel) ticketFormSubmitLabel.textContent = "Create Sub-task";
+}
+
+function populateTicketCreateFormFromSource(source) {
+  if (!form || !source) return;
+
+  form.reset();
+  clearTicketNotesEditor(ticketNotesEditor, ticketNotesInput);
+  clearTicketFormOwners();
+  resetSurajTicketCreateTracking();
+
+  form.elements.Task.value = source.Task || "";
+  setTicketCreateSelectValue("Priority", normalizePriority(source.Priority));
+  setTicketCreateSelectValue("Status", duplicateStatusForCreateForm(source));
+  if (form.elements["Raised By"]) {
+    form.elements["Raised By"].value = source["Raised By"] || "";
+  }
+  setTicketCreateSelectValue("Type", source.Type || "Daily - Infra");
+  setDateFieldValue(form, "Start date", source["Start date"]);
+  if (form.elements["Start date"] && !form.elements["Start date"].value) {
+    form.elements["Start date"].valueAsDate = new Date();
+  }
+  setDateFieldValue(form, "End date", source["End date"]);
+  setDateFieldValue(form, "Milestone", source.Milestone);
+
+  const notesText = stripPresentationTag(source.Notes || source.Remarks || "");
+  const notesHtml = stripPresentationTag(String(source.NotesHtml || ""));
+  setTicketNotesEditorContent(ticketNotesEditor, ticketNotesInput, {
+    Notes: notesText,
+    Remarks: notesText,
+    NotesHtml: notesHtml
+  });
+
+  selectTicketFormOwners([source.Owner].filter(Boolean));
+  applyTicketCreateParentFromSource(source);
+
+  // Keep Suraj auto-defaults from overwriting the copied Type/Milestone.
+  ticketCreateTypeTouched = true;
+  ticketCreateMilestoneTouched = true;
+  if (ownersIncludeSuraj()) {
+    surajCreateDefaultsActive = true;
+  }
+}
+
+/** Opens New Ticket create form prefilled from source — does not save until Submit. */
+function duplicateTicket(sheetRow) {
   if (!Auth.hasPermission("createTicket")) {
     alert("You do not have permission to create tickets.");
+    return;
+  }
+  if (!ticketCreateModal || !form) {
+    alert("Could not open the new ticket form.");
     return;
   }
 
@@ -5384,57 +5467,16 @@ async function duplicateTicket(sheetRow) {
 
   const actionKey = milestoneActionKey(source);
   if (duplicateTicketInFlight.has(actionKey)) return;
+  clearDuplicateTicketInFlight({ rerender: false });
   duplicateTicketInFlight.add(actionKey);
+  renderTickets({ force: true, activeOnly: true });
 
-  let cloned = buildDuplicatedTicket(source);
-
-  // Avoid colliding with another unsynced same Task||Owner while create sync runs.
-  const hasUnsyncedTwin = getValidTickets().some((ticket) =>
-    !Number(ticket.sheetRow)
-    && ticketIdentityKey(ticket) === ticketIdentityKey(cloned)
-  );
-  if (hasUnsyncedTwin) {
-    cloned = normalizeTicket({
-      ...cloned,
-      Task: `${cleanText(cloned.Task)} (copy)`,
-      pendingSheetSync: Date.now()
-    });
-  }
-
-  const tickets = readTickets();
-  tickets.push(cloned);
-  writeTickets(tickets);
-  renderTickets({ force: true });
-  setStatus("", "Duplicating ticket...");
-
-  try {
-    if (SHEET_WEB_APP_URL) {
-      await sendNewTicketsToSheet([cloned]);
-      renderTickets({ force: true });
-      const saved = getValidTickets().find((entry) =>
-        ticketIdentityKey(entry) === ticketIdentityKey(cloned)
-        && Number(entry.sheetRow) > 0
-      );
-      if (saved && ticketHasLocalScreenshotsOnly(saved)) {
-        setStatus("online", "Ticket duplicated — screenshots uploading in background");
-        queueBackgroundScreenshotSync([saved]).catch((error) => {
-          console.error(error);
-          setStatus("error", "Duplicate saved — screenshot upload may still be running");
-        });
-      } else {
-        setStatus("ok", "Ticket duplicated");
-      }
-    } else {
-      setStatus("", "Ticket duplicated locally. Sync is not configured.");
-    }
-  } catch (error) {
-    setStatus("error", error?.message || "Duplicated locally, but sheet sync failed");
-    console.error(error);
-    renderTickets({ force: true });
-  } finally {
-    duplicateTicketInFlight.delete(actionKey);
-    renderTickets({ force: true });
-  }
+  setActiveTab("tickets");
+  populateTicketCreateFormFromSource(source);
+  ticketCreateModal.hidden = false;
+  document.body.classList.add("modal-open");
+  form.elements.Task?.focus();
+  setStatus("", "Review the duplicated ticket, then Submit to create it.");
 }
 
 function bindPresentationPinButtons(root) {
