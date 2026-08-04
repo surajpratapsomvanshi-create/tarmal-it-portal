@@ -2465,10 +2465,8 @@ function isProjectTypeTicket(ticket) {
 }
 
 function isPresentationEligible(ticket) {
-  if (isProjectTypeTicket(ticket)) return true;
-  if (!isSubtaskTicket(ticket)) return false;
-  const parent = getParentTicket(ticket);
-  return Boolean(parent && isProjectTypeTicket(parent));
+  // ★ / presentation set: exact Type SAP or Infra only (not Daily - SAP / Daily - Infra).
+  return isProjectTypeTicket(ticket);
 }
 
 function getProjectTickets(tickets = getValidTickets()) {
@@ -5529,8 +5527,15 @@ async function togglePresentationMark(sheetRow) {
 }
 
 function getPresentationTickets(tickets = getValidTickets()) {
-  const projects = getProjectTickets(tickets).filter((ticket) => !isSubtaskTicket(ticket));
-  // Keep local marks aligned with durable [PRESENTATION] tags from the sheet.
+  // Presentation set: top-level exact SAP/Infra only (never Daily variants or other types).
+  const projects = tickets.filter((ticket) => isProjectTypeTicket(ticket) && !isSubtaskTicket(ticket));
+  const byRow = new Map();
+  tickets.forEach((ticket) => {
+    const row = Number(ticket.sheetRow);
+    if (row) byRow.set(row, ticket);
+  });
+
+  // Keep local marks aligned with durable [PRESENTATION] tags; drop marks on non-project types.
   const marks = readPresentationMarks();
   let marksChanged = false;
   projects.forEach((ticket) => {
@@ -5539,6 +5544,14 @@ function getPresentationTickets(tickets = getValidTickets()) {
     marks.add(row);
     marksChanged = true;
   });
+  for (const row of [...marks]) {
+    const ticket = byRow.get(row);
+    if (!ticket) continue;
+    if (!isProjectTypeTicket(ticket) || isSubtaskTicket(ticket)) {
+      marks.delete(row);
+      marksChanged = true;
+    }
+  }
   if (marksChanged) writePresentationMarks(marks);
 
   return projects
