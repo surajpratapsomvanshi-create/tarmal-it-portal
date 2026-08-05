@@ -4629,19 +4629,22 @@ function normalizeSubtaskCollapsePanel(panel) {
   return panel === "projects" ? "projects" : "tickets";
 }
 
-/** Default when no saved preference: tickets expanded, projects collapsed. */
-function defaultSubtaskParentCollapsed(panel) {
-  return normalizeSubtaskCollapsePanel(panel) === "projects";
+/** Default when no saved preference: tickets expanded, projects collapsed.
+ *  Parents with any completed subtask default collapsed so those children stay
+ *  hidden until the user expands. */
+function defaultSubtaskParentCollapsed(panel, options = {}) {
+  if (normalizeSubtaskCollapsePanel(panel) === "projects") return true;
+  return Boolean(options.hasCompletedChild);
 }
 
-function isSubtaskParentCollapsed(sheetRow, panel = "tickets") {
+function isSubtaskParentCollapsed(sheetRow, panel = "tickets", options = {}) {
   const scope = normalizeSubtaskCollapsePanel(panel);
   const state = readCollapsedSubtaskParents()[scope] || {};
   const key = String(sheetRow);
   if (Object.prototype.hasOwnProperty.call(state, key)) {
     return Boolean(state[key]);
   }
-  return defaultSubtaskParentCollapsed(scope);
+  return defaultSubtaskParentCollapsed(scope, options);
 }
 
 function setSubtaskParentCollapsed(sheetRow, collapsed, panel = "tickets") {
@@ -5421,8 +5424,8 @@ function bindTicketEditButtons(root = rows) {
       const parentRow = Number(button.dataset.sheetRow);
       if (!parentRow) return;
       const panel = normalizeSubtaskCollapsePanel(button.dataset.collapsePanel || "tickets");
-      const nextCollapsed = !isSubtaskParentCollapsed(parentRow, panel);
-      setSubtaskParentCollapsed(parentRow, nextCollapsed, panel);
+      const currentlyExpanded = button.getAttribute("aria-expanded") !== "false";
+      setSubtaskParentCollapsed(parentRow, currentlyExpanded, panel);
       renderTickets({ activeOnly: true, forcePanel: panel });
     });
   });
@@ -5931,20 +5934,6 @@ function renderTicketTable(tickets, options = {}) {
   const columnCount = showActions ? 10 : 9;
   const pageLimit = Number(options.pageLimit) > 0 ? Number(options.pageLimit) : 0;
   const loadMoreKind = options.loadMoreKind || "";
-  // milestone-open-desc: keep completed subtasks out of the table (collapsed/hidden),
-  // but still count them on the parent badge. Search can surface a matching completed child.
-  const hideCompletedSubtasks = Boolean(options.hideCompletedSubtasks);
-  const searchQuery = cleanText(options.searchQuery || "").toLowerCase();
-  const displayTickets = hideCompletedSubtasks
-    ? tickets.filter((ticket) => {
-      if (!isSubtaskTicket(ticket) || !isTicketCompleted(ticket)) return true;
-      return Boolean(searchQuery) && ticketSearchHaystack(ticket).includes(searchQuery);
-    })
-    : tickets;
-  const visibleTickets = pageLimit && displayTickets.length > pageLimit
-    ? displayTickets.slice(0, pageLimit)
-    : displayTickets;
-  const remaining = Math.max(0, displayTickets.length - visibleTickets.length);
 
   if (!tickets.length) {
     bodyEl.innerHTML = `<tr class="empty-row"><td colspan="${columnCount}">${escapeHtml(emptyMessage)}</td></tr>`;
@@ -5952,12 +5941,33 @@ function renderTicketTable(tickets, options = {}) {
   }
 
   const childCounts = new Map();
+  const parentsWithCompletedChildren = new Set();
   tickets.forEach((ticket) => {
     if (!isSubtaskTicket(ticket)) return;
     const parentRow = Number(ticket.parentSheetRow);
     if (!parentRow) return;
     childCounts.set(parentRow, (childCounts.get(parentRow) || 0) + 1);
+    if (isTicketCompleted(ticket)) parentsWithCompletedChildren.add(parentRow);
   });
+
+  const collapseOptionsFor = (sheetRow) => ({
+    hasCompletedChild: parentsWithCompletedChildren.has(Number(sheetRow))
+  });
+  const isChildHiddenByCollapse = (ticket) => {
+    if (!isSubtaskTicket(ticket)) return false;
+    return isSubtaskParentCollapsed(
+      Number(ticket.parentSheetRow),
+      collapsePanel,
+      collapseOptionsFor(ticket.parentSheetRow)
+    );
+  };
+
+  // Keep completed children in the grouped list; only omit collapsed rows from the page.
+  const displayTickets = tickets.filter((ticket) => !isChildHiddenByCollapse(ticket));
+  const visibleTickets = pageLimit && displayTickets.length > pageLimit
+    ? displayTickets.slice(0, pageLimit)
+    : displayTickets;
+  const remaining = Math.max(0, displayTickets.length - visibleTickets.length);
 
   const rowsHtml = visibleTickets
     .map((ticket) => {
@@ -5966,8 +5976,12 @@ function renderTicketTable(tickets, options = {}) {
       const parentRow = Number(ticket.sheetRow);
       const childCount = childCounts.get(parentRow) || 0;
       const hasChildren = !subtask && childCount > 0;
-      const collapsed = hasChildren && isSubtaskParentCollapsed(parentRow, collapsePanel);
-      const parentCollapsed = subtask && isSubtaskParentCollapsed(Number(ticket.parentSheetRow), collapsePanel);
+      const collapsed = hasChildren && isSubtaskParentCollapsed(parentRow, collapsePanel, collapseOptionsFor(parentRow));
+      const parentCollapsed = subtask && isSubtaskParentCollapsed(
+        Number(ticket.parentSheetRow),
+        collapsePanel,
+        collapseOptionsFor(ticket.parentSheetRow)
+      );
 
       let taskCell = "";
       if (subtask) {
@@ -6237,9 +6251,7 @@ function renderTickets(options = {}) {
       pageLimit: ticketTableLimit,
       loadMoreKind: "tickets",
       collapsePanel: "tickets",
-      showPresentationPin: true,
-      hideCompletedSubtasks: sortKey === "milestone-open-desc",
-      searchQuery: ticketSearchFilter?.value || ""
+      showPresentationPin: true
     });
   }
 
@@ -6269,9 +6281,7 @@ function renderTickets(options = {}) {
       showPresentationPin: true,
       pageLimit: projectTableLimit,
       loadMoreKind: "projects",
-      collapsePanel: "projects",
-      hideCompletedSubtasks: projectSortKey === "milestone-open-desc",
-      searchQuery: projectSearchFilter?.value || ""
+      collapsePanel: "projects"
     });
   }
 
