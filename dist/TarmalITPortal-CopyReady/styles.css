@@ -7141,7 +7141,8 @@ body.view-focus .dashboard-layout {
 
 .presentation-kanban-column {
   display: grid;
-  grid-template-rows: auto 1fr;
+  /* minmax(0, 1fr) lets the body shrink and scroll instead of crushing cards */
+  grid-template-rows: auto minmax(0, 1fr);
   flex: 1 1 280px;
   width: auto;
   min-width: 260px;
@@ -7210,10 +7211,12 @@ body.view-focus .dashboard-layout {
 }
 
 .presentation-kanban-column-body {
-  display: grid;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
   gap: 10px;
-  align-content: start;
   padding: 10px;
+  min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
 }
@@ -7256,13 +7259,17 @@ body.view-focus .dashboard-layout {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
-  min-height: 0;
+  /* Never shrink below content — min-height:0 inside a capped column caused overlap */
+  flex: 0 0 auto;
+  height: auto;
+  min-height: min-content;
   padding: 1rem 1.05rem 1.05rem;
   border: 1px solid var(--line);
   border-radius: var(--radius-md);
   background: var(--panel);
   box-shadow: var(--shadow-soft);
   border-top: 3px solid var(--line-strong);
+  overflow: visible;
 }
 
 .presentation-card.status-progress { border-top-color: var(--blue); }
@@ -7465,7 +7472,15 @@ body.present-mode .presentation-kanban-column {
   max-height: calc(100vh - 180px);
 }
 
+body.present-mode .presentation-kanban-column-body {
+  min-height: 0;
+  overflow-y: auto;
+}
+
 body.present-mode .presentation-card {
+  flex: 0 0 auto;
+  height: auto;
+  min-height: min-content;
   padding: 1.2rem 1.25rem 1.25rem;
 }
 
