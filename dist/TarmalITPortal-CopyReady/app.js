@@ -21,9 +21,13 @@ const TABLE_PAGE_SIZE = 80;
 const TABLE_PAGE_STEP = 80;
 const EXCLUDED_TICKET_OWNERS = new Set(["Bhanu", "Noorali"]);
 const HIERARCHY_KEY = "tarmal-user-hierarchy";
-const SUBTASK_COLLAPSE_KEY = "tarmal-subtask-collapsed";
+/** v2 invalidates pre-fix expanded prefs that kept completed subtasks visible. */
+const SUBTASK_COLLAPSE_KEY = "tarmal-subtask-collapsed-v2";
+const SUBTASK_COLLAPSE_KEY_LEGACY = "tarmal-subtask-collapsed";
 let lastTicketSearchQueryForExpand = null;
 let lastProjectSearchQueryForExpand = null;
+/** Parents the user expanded this session to reveal completed children (survives re-renders). */
+const sessionExpandedCompletedParents = { tickets: new Set(), projects: new Set() };
 const FALLBACK_HIERARCHY = [
   { user: "Suraj", manager: "", email: "sap@tarmalsteel.com" },
   { user: "Sushil", manager: "Suraj", email: "sushilpatil3760@gmail.com" },
@@ -4599,8 +4603,20 @@ function getParentTicket(ticket) {
   return parentRow ? findTicketBySheetRow(parentRow) : null;
 }
 
+/** Drop legacy collapse map once so old "expanded" entries cannot unhide completed children. */
+function purgeLegacySubtaskCollapsePrefs() {
+  try {
+    if (localStorage.getItem(SUBTASK_COLLAPSE_KEY_LEGACY) != null) {
+      localStorage.removeItem(SUBTASK_COLLAPSE_KEY_LEGACY);
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
 /** Panel-specific collapse prefs: { tickets: { row: bool }, projects: { row: bool } }. Legacy flat { row: true } migrates to tickets. */
 function readCollapsedSubtaskParents() {
+  purgeLegacySubtaskCollapsePrefs();
   try {
     const parsed = JSON.parse(localStorage.getItem(SUBTASK_COLLAPSE_KEY) || "{}");
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
@@ -4637,25 +4653,57 @@ function defaultSubtaskParentCollapsed(panel, options = {}) {
   return Boolean(options.hasCompletedChild);
 }
 
+/**
+ * Collapse state for a parent row.
+ * Option D: parents with ≥1 completed child start collapsed (▸). Expand shows all
+ * children including completed; collapse hides them again. Stale localStorage
+ * "expanded" from before v2 is ignored via key migration + session expand set.
+ */
 function isSubtaskParentCollapsed(sheetRow, panel = "tickets", options = {}) {
   const scope = normalizeSubtaskCollapsePanel(panel);
-  const state = readCollapsedSubtaskParents()[scope] || {};
   const key = String(sheetRow);
+  const row = Number(sheetRow);
+  const hasCompletedChild = Boolean(options.hasCompletedChild);
+
+  if (hasCompletedChild) {
+    // Explicit expand this session wins (toggle sets this before re-render).
+    if (sessionExpandedCompletedParents[scope]?.has(row)) return false;
+    const state = readCollapsedSubtaskParents()[scope] || {};
+    // Only honor a stored expand (false) under the v2 key — never inherit legacy expanded.
+    if (Object.prototype.hasOwnProperty.call(state, key)) {
+      return Boolean(state[key]);
+    }
+    return true;
+  }
+
+  const state = readCollapsedSubtaskParents()[scope] || {};
   if (Object.prototype.hasOwnProperty.call(state, key)) {
     return Boolean(state[key]);
   }
   return defaultSubtaskParentCollapsed(scope, options);
 }
 
-function setSubtaskParentCollapsed(sheetRow, collapsed, panel = "tickets") {
+function setSubtaskParentCollapsed(sheetRow, collapsed, panel = "tickets", options = {}) {
   const scope = normalizeSubtaskCollapsePanel(panel);
   const all = readCollapsedSubtaskParents();
   const state = { ...(all[scope] || {}) };
   const key = String(sheetRow);
+  const row = Number(sheetRow);
+  const nextCollapsed = Boolean(collapsed);
   // Always persist explicit preference so panel defaults only apply when unset.
-  state[key] = Boolean(collapsed);
+  state[key] = nextCollapsed;
   all[scope] = state;
   localStorage.setItem(SUBTASK_COLLAPSE_KEY, JSON.stringify(all));
+
+  if (!sessionExpandedCompletedParents[scope]) {
+    sessionExpandedCompletedParents[scope] = new Set();
+  }
+  if (nextCollapsed) {
+    sessionExpandedCompletedParents[scope].delete(row);
+  } else {
+    // Remember explicit expands so completed children stay visible after re-render.
+    sessionExpandedCompletedParents[scope].add(row);
+  }
 }
 
 function getChildSubtasks(parentSheetRow, tickets) {
@@ -5425,7 +5473,9 @@ function bindTicketEditButtons(root = rows) {
       if (!parentRow) return;
       const panel = normalizeSubtaskCollapsePanel(button.dataset.collapsePanel || "tickets");
       const currentlyExpanded = button.getAttribute("aria-expanded") !== "false";
-      setSubtaskParentCollapsed(parentRow, currentlyExpanded, panel);
+      const hasCompletedChild = button.dataset.hasCompletedChild === "1";
+      // currentlyExpanded → user is collapsing; !currentlyExpanded → expanding (reveal completed).
+      setSubtaskParentCollapsed(parentRow, currentlyExpanded, panel, { hasCompletedChild });
       renderTickets({ activeOnly: true, forcePanel: panel });
     });
   });
@@ -5942,6 +5992,15 @@ function renderTicketTable(tickets, options = {}) {
 
   const childCounts = new Map();
   const parentsWithCompletedChildren = new Set();
+  // Prefer the rows in this table; also scan the full sheet so a completed child
+  // still force-collapses the parent even if filters momentarily omit it.
+  const markCompletedParents = (list) => {
+    (Array.isArray(list) ? list : []).forEach((ticket) => {
+      if (!isSubtaskTicket(ticket) || !isTicketCompleted(ticket)) return;
+      const parentRow = Number(ticket.parentSheetRow);
+      if (parentRow) parentsWithCompletedChildren.add(parentRow);
+    });
+  };
   tickets.forEach((ticket) => {
     if (!isSubtaskTicket(ticket)) return;
     const parentRow = Number(ticket.parentSheetRow);
@@ -5949,6 +6008,7 @@ function renderTicketTable(tickets, options = {}) {
     childCounts.set(parentRow, (childCounts.get(parentRow) || 0) + 1);
     if (isTicketCompleted(ticket)) parentsWithCompletedChildren.add(parentRow);
   });
+  markCompletedParents(typeof getValidTickets === "function" ? getValidTickets() : null);
 
   const collapseOptionsFor = (sheetRow) => ({
     hasCompletedChild: parentsWithCompletedChildren.has(Number(sheetRow))
@@ -5963,6 +6023,7 @@ function renderTicketTable(tickets, options = {}) {
   };
 
   // Keep completed children in the grouped list; only omit collapsed rows from the page.
+  // Collapsed parents (including force-collapsed when they have completed children) hide all kids.
   const displayTickets = tickets.filter((ticket) => !isChildHiddenByCollapse(ticket));
   const visibleTickets = pageLimit && displayTickets.length > pageLimit
     ? displayTickets.slice(0, pageLimit)
@@ -5976,6 +6037,7 @@ function renderTicketTable(tickets, options = {}) {
       const parentRow = Number(ticket.sheetRow);
       const childCount = childCounts.get(parentRow) || 0;
       const hasChildren = !subtask && childCount > 0;
+      const hasCompletedChild = hasChildren && parentsWithCompletedChildren.has(parentRow);
       const collapsed = hasChildren && isSubtaskParentCollapsed(parentRow, collapsePanel, collapseOptionsFor(parentRow));
       const parentCollapsed = subtask && isSubtaskParentCollapsed(
         Number(ticket.parentSheetRow),
@@ -5994,6 +6056,7 @@ function renderTicketTable(tickets, options = {}) {
               type="button"
               data-sheet-row="${parentRow}"
               data-collapse-panel="${collapsePanel}"
+              data-has-completed-child="${hasCompletedChild ? "1" : "0"}"
               aria-expanded="${collapsed ? "false" : "true"}"
               aria-label="${collapsed ? "Expand" : "Collapse"} ${childCount} sub-task${childCount === 1 ? "" : "s"}"
               title="${collapsed ? "Show" : "Hide"} sub-tasks"
