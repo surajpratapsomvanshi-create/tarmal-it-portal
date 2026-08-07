@@ -4009,6 +4009,16 @@ function getTicketCompletionError(ticket) {
   return "End date is required before marking a ticket as Completed.";
 }
 
+/** When the user selects Status = Completed, default End date to today (overwrite). */
+function onTicketStatusChangeForEndDate(event) {
+  const statusField = event?.target;
+  if (!statusField || statusClass(statusField.value) !== "status-completed") return;
+  const formElement = statusField.form;
+  const endDateField = formElement?.elements?.["End date"];
+  if (!endDateField) return;
+  endDateField.value = getTodayDateValue();
+}
+
 function isTicketOverdue(ticket) {
   if (isTicketCompleted(ticket)) return false;
   const endDate = parseTicketDate(ticket["End date"]);
@@ -7224,6 +7234,8 @@ form?.elements.Milestone?.addEventListener("change", () => {
 form?.elements.Milestone?.addEventListener("input", () => {
   ticketCreateMilestoneTouched = true;
 });
+form?.elements?.Status?.addEventListener("change", onTicketStatusChangeForEndDate);
+ticketEditForm?.elements?.Status?.addEventListener("change", onTicketStatusChangeForEndDate);
 
 if (form?.elements["Start date"]) {
 form.elements["Start date"].valueAsDate = new Date();
