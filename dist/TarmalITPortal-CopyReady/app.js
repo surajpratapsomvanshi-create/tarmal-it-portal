@@ -1,8 +1,10 @@
 const SHEET_WEB_APP_URL = Auth.SHEET_WEB_APP_URL;
 
 const LOCAL_KEY = "tarmal-ticket-drafts";
+const LOCAL_BACKUP_KEY = "tarmal-ticket-drafts-backup";
 const DELETED_TICKETS_KEY = "tarmal-deleted-tickets";
 const USERS_KEY = "tarmal-users";
+const TICKETS_BROADCAST_CHANNEL = "tarmal-ticket-drafts-bc";
 const form = document.querySelector("#ticketForm");
 const ticketFormOwnerPanel = document.querySelector("#ticketFormOwnerPanel");
 const ticketFormOwnerTrigger = document.querySelector("#ticketFormOwnerTrigger");
@@ -16,6 +18,10 @@ const DEFAULT_TICKET_OWNERS = ["Suraj", "Sushil", "Dishon"];
 const DEFAULT_TICKET_SORT = "milestone-open-desc";
 const CLEARED_TICKET_SORT = "recent";
 const PENDING_SYNC_TTL_MS = 180000;
+const UNSYNCED_LOCAL_RETENTION_MS = 600000;
+const SOFT_DELETED_STATUS = "Deleted";
+const BUSY_RETRY_ATTEMPTS = 3;
+const BUSY_RETRY_DELAY_MS = 1200;
 /** Initial DOM rows for ticket/project tables — keeps first paint fast with 700+ tickets. */
 const TABLE_PAGE_SIZE = 80;
 const TABLE_PAGE_STEP = 80;
@@ -615,28 +621,109 @@ const sampleTickets = [
 ];
 
 let ticketsMemoryCache = null;
+let ticketEditSubmitInFlight = false;
+let ticketsBroadcastChannel = null;
+
+function createTicketId() {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `t-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function createSubmissionId() {
+  return `s-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function emptyTicketsFallback() {
+  // Never inject demo samples when a live sheet URL is configured.
+  return SHEET_WEB_APP_URL ? [] : sampleTickets.map((ticket) => ({ ...ticket }));
+}
+
+function parseTicketsJson(raw) {
+  const parsed = JSON.parse(raw);
+  return Array.isArray(parsed) ? parsed : null;
+}
 
 function readTickets() {
   if (ticketsMemoryCache) return ticketsMemoryCache;
 
   const saved = localStorage.getItem(LOCAL_KEY);
   if (!saved) {
-    ticketsMemoryCache = sampleTickets;
+    ticketsMemoryCache = emptyTicketsFallback();
     return ticketsMemoryCache;
   }
 
   try {
-    ticketsMemoryCache = JSON.parse(saved);
+    const parsed = parseTicketsJson(saved);
+    if (!parsed) {
+      throw new Error("Ticket drafts were not an array.");
+    }
+    ticketsMemoryCache = parsed;
     return ticketsMemoryCache;
-  } catch {
-    ticketsMemoryCache = sampleTickets;
+  } catch (primaryError) {
+    console.warn("Corrupt ticket drafts; trying backup.", primaryError);
+    try {
+      const backup = localStorage.getItem(LOCAL_BACKUP_KEY);
+      if (backup) {
+        const parsedBackup = parseTicketsJson(backup);
+        if (parsedBackup) {
+          ticketsMemoryCache = parsedBackup;
+          return ticketsMemoryCache;
+        }
+      }
+    } catch (backupError) {
+      console.warn("Ticket drafts backup unreadable.", backupError);
+    }
+    ticketsMemoryCache = emptyTicketsFallback();
     return ticketsMemoryCache;
   }
 }
 
-function writeTickets(tickets) {
+function writeTickets(tickets, options = {}) {
   ticketsMemoryCache = tickets;
-  localStorage.setItem(LOCAL_KEY, JSON.stringify(tickets));
+  const json = JSON.stringify(tickets);
+  try {
+    const previous = localStorage.getItem(LOCAL_KEY);
+    if (previous && previous !== json) {
+      localStorage.setItem(LOCAL_BACKUP_KEY, previous);
+    }
+  } catch (error) {
+    console.warn("Could not write ticket drafts backup.", error);
+  }
+  localStorage.setItem(LOCAL_KEY, json);
+  if (!options.skipBroadcast) {
+    try {
+      ticketsBroadcastChannel?.postMessage({ type: "tickets-updated", at: Date.now() });
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+function invalidateTicketsMemoryCache() {
+  ticketsMemoryCache = null;
+}
+
+function initTicketsCrossTabSync() {
+  window.addEventListener("storage", (event) => {
+    if (event.key !== LOCAL_KEY && event.key !== LOCAL_BACKUP_KEY) return;
+    invalidateTicketsMemoryCache();
+    scheduleRenderTickets({ immediate: true });
+  });
+
+  if (typeof BroadcastChannel === "function") {
+    try {
+      ticketsBroadcastChannel = new BroadcastChannel(TICKETS_BROADCAST_CHANNEL);
+      ticketsBroadcastChannel.addEventListener("message", (event) => {
+        if (event?.data?.type !== "tickets-updated") return;
+        invalidateTicketsMemoryCache();
+        scheduleRenderTickets({ immediate: true });
+      });
+    } catch (error) {
+      console.warn("BroadcastChannel unavailable for ticket sync.", error);
+    }
+  }
 }
 
 function cleanText(value) {
@@ -1094,6 +1181,23 @@ function ticketIdentityKey(ticket) {
   return `${cleanText(ticket.Task)}||${cleanText(ticket.Owner)}`;
 }
 
+function ticketStableId(ticket) {
+  return cleanText(ticket?.ticketId || ticket?.TicketId || "");
+}
+
+function ticketsMatchIdentity(left, right) {
+  if (!left || !right) return false;
+  const leftId = ticketStableId(left);
+  const rightId = ticketStableId(right);
+  if (leftId && rightId) return leftId === rightId;
+  return ticketIdentityKey(left) === ticketIdentityKey(right);
+}
+
+function normalizeNotesForCompare(ticket) {
+  const raw = String(ticket?.Notes || ticket?.Remarks || "");
+  return cleanText(stripPresentationTag(stripScreenshotMetadata(raw)));
+}
+
 function readDeletedTicketTombstones() {
   try {
     const saved = localStorage.getItem(DELETED_TICKETS_KEY);
@@ -1109,16 +1213,19 @@ function writeDeletedTicketTombstones(entries) {
     DELETED_TICKETS_KEY,
     JSON.stringify(
       entries
-        .filter((entry) => entry && (entry.key || entry.sheetRow))
+        .filter((entry) => entry && (entry.key || entry.ticketId))
         .slice(-200)
     )
   );
 }
 
-function markDeletedTicketTombstone({ sheetRow, task, owner }) {
+function markDeletedTicketTombstone({ sheetRow, task, owner, ticketId = "" }) {
   const entries = readDeletedTicketTombstones();
   entries.push({
+    // Keep sheetRow only for diagnostics — never match tombstones by row alone
+    // (deleteRow / soft-delete successors can occupy the same number).
     sheetRow: Number(sheetRow) || 0,
+    ticketId: cleanText(ticketId),
     key: ticketIdentityKey({ Task: task, Owner: owner }),
     at: Date.now()
   });
@@ -1126,12 +1233,12 @@ function markDeletedTicketTombstone({ sheetRow, task, owner }) {
 }
 
 function isDeletedTicketTombstone(ticket) {
-  const row = Number(ticket.sheetRow);
   const key = ticketIdentityKey(ticket);
+  const ticketId = ticketStableId(ticket);
   const cutoff = Date.now() - 86400000;
   return readDeletedTicketTombstones().some((entry) => {
     if ((entry.at || 0) < cutoff) return false;
-    if (row && Number(entry.sheetRow) === row) return true;
+    if (ticketId && entry.ticketId && entry.ticketId === ticketId) return true;
     if (key && entry.key === key) return true;
     return false;
   });
@@ -1139,11 +1246,11 @@ function isDeletedTicketTombstone(ticket) {
 
 function reconcileDeletedTicketTombstones(remoteTickets) {
   const remoteKeys = new Set(remoteTickets.map(ticketIdentityKey));
-  const remoteRows = new Set(remoteTickets.map((ticket) => Number(ticket.sheetRow)).filter(Boolean));
+  const remoteIds = new Set(remoteTickets.map(ticketStableId).filter(Boolean));
   const stillNeeded = readDeletedTicketTombstones().filter((entry) => {
     if (Date.now() - (entry.at || 0) > 86400000) return false;
+    if (entry.ticketId && remoteIds.has(entry.ticketId)) return true;
     if (entry.key && remoteKeys.has(entry.key)) return true;
-    if (entry.sheetRow && remoteRows.has(Number(entry.sheetRow))) return true;
     return false;
   });
   writeDeletedTicketTombstones(stillNeeded);
@@ -1244,9 +1351,12 @@ function mergeRemoteTicketsWithLocal(remoteTickets) {
   const remote = Array.isArray(remoteTickets) ? remoteTickets : [];
   const localTickets = readTickets();
   const localBySheetRow = new Map();
+  const localByTicketId = new Map();
   localTickets.forEach((ticket) => {
     const row = Number(ticket.sheetRow);
     if (row) localBySheetRow.set(row, ticket);
+    const id = ticketStableId(ticket);
+    if (id) localByTicketId.set(id, ticket);
   });
 
   if (!remote.length) {
@@ -1258,25 +1368,31 @@ function mergeRemoteTicketsWithLocal(remoteTickets) {
 
   const merged = remote
     .filter((ticket) => !isDeletedTicketTombstone(ticket))
+    .filter((ticket) => cleanText(ticket.Status) !== SOFT_DELETED_STATUS)
     .map((ticket, index) => mergeTicketFromSheet({
     ...ticket,
     sheetRow: ticket.sheetRow ?? index + 2
-  }, index, localBySheetRow));
+  }, index, localBySheetRow, localByTicketId));
   const mergedKeys = new Set(merged.map(ticketIdentityKey));
+  const mergedIds = new Set(merged.map(ticketStableId).filter(Boolean));
   const now = Date.now();
 
   localTickets.forEach((local) => {
     if (!cleanText(local.Task)) return;
+    if (cleanText(local.Status) === SOFT_DELETED_STATUS) return;
+    const id = ticketStableId(local);
+    if (id && mergedIds.has(id)) return;
     const key = ticketIdentityKey(local);
-    if (mergedKeys.has(key)) return;
+    if (!id && mergedKeys.has(key)) return;
 
     const pending = Number(local.pendingSheetSync) || 0;
-    const isRecentPending = pending && (now - pending < 600000);
+    const isRecentPending = pending && (now - pending < UNSYNCED_LOCAL_RETENTION_MS);
     const isUnsynced = !Number(local.sheetRow);
     if (!isRecentPending && !isUnsynced) return;
 
     merged.push(normalizeTicket(local));
     mergedKeys.add(key);
+    if (id) mergedIds.add(id);
   });
 
   return merged;
@@ -1284,8 +1400,8 @@ function mergeRemoteTicketsWithLocal(remoteTickets) {
 
 function ticketCoreFieldsMatch(local, remote) {
   if (!local || !remote) return false;
-  const localNotes = cleanText(local.Notes || local.Remarks);
-  const remoteNotes = cleanText(remote.Notes || remote.Remarks);
+  const localNotes = normalizeNotesForCompare(local);
+  const remoteNotes = normalizeNotesForCompare(remote);
   return cleanText(local.Task) === cleanText(remote.Task)
     && cleanText(String(local.Priority ?? "")) === cleanText(String(remote.Priority ?? ""))
     && cleanText(local.Owner) === cleanText(remote.Owner)
@@ -1296,15 +1412,25 @@ function ticketCoreFieldsMatch(local, remote) {
     && ticketDatesMatch(local["Start date"], remote["Start date"])
     && ticketDatesMatch(local["End date"], remote["End date"])
     && localNotes === remoteNotes
+    && cleanText(local["Bhanu List"]) === cleanText(remote["Bhanu List"])
     && Number(local.parentSheetRow || 0) === Number(remote.parentSheetRow || 0);
 }
 
-function mergeTicketFromSheet(remoteTicket, index, localBySheetRow = null) {
+function mergeTicketFromSheet(remoteTicket, index, localBySheetRow = null, localByTicketId = null) {
   const sheetRow = remoteTicket.sheetRow ?? index + 2;
   const rowKey = Number(sheetRow);
-  const local = localBySheetRow
-    ? localBySheetRow.get(rowKey)
-    : readTickets().find((ticket) => Number(ticket.sheetRow) === rowKey);
+  const remoteId = ticketStableId(remoteTicket);
+  let local = null;
+  if (remoteId && localByTicketId?.has(remoteId)) {
+    local = localByTicketId.get(remoteId);
+  } else if (localBySheetRow) {
+    local = localBySheetRow.get(rowKey);
+  } else {
+    local = readTickets().find((ticket) => {
+      if (remoteId && ticketStableId(ticket) === remoteId) return true;
+      return Number(ticket.sheetRow) === rowKey;
+    });
+  }
   const notesRaw = [remoteTicket.Notes, remoteTicket.Remarks].filter(Boolean).join("\n");
   const screenshotUrls = dedupeScreenshotUrls([
     ...collectTicketScreenshotUrls({ ...remoteTicket, NotesRaw: notesRaw }),
@@ -1334,12 +1460,17 @@ function mergeTicketFromSheet(remoteTicket, index, localBySheetRow = null) {
     Milestone: local.Milestone,
     parentSheetRow: local.parentSheetRow,
     Notes: local.Notes,
-    Remarks: local.Remarks
+    Remarks: local.Remarks,
+    "Bhanu List": local["Bhanu List"],
+    ticketId: local.ticketId || remoteTicket.ticketId,
+    submissionId: local.submissionId,
+    lastUpdated: local.lastUpdated
   } : {};
 
   return normalizeTicket({
     ...remoteTicket,
     ...preserveFields,
+    ticketId: preserveFields.ticketId || remoteTicket.ticketId || local?.ticketId || "",
     sheetRow,
     NotesRaw: preservePendingEdits
       ? String(local.Notes || local.Remarks || notesRaw || "")
@@ -1385,6 +1516,7 @@ async function autoUploadTicketScreenshots(ticket) {
       sheetRow: ticket.sheetRow,
       Task: ticket.Task,
       Owner: ticket.Owner,
+      ticketId: ticketStableId(ticket) || undefined,
       Notes: notesBase,
       Remarks: notesBase,
       attachments
@@ -1764,8 +1896,7 @@ function buildScreenshotUploadPayload(ticket) {
 function buildTicketSheetPayload(ticket, options = {}) {
   const attachments = extractNoteAttachments(ticket.NotesHtml || "");
   const notesText = buildNotesTextForSheet(ticket);
-  // On create, skip Drive uploads in the critical-path POST; screenshots
-  // upload in the background after the ticket row exists.
+  // Skip Drive uploads in the critical-path POST; screenshots upload after the row write.
   const includeAttachments = options.deferAttachments !== true;
 
   const payload = {
@@ -1781,7 +1912,11 @@ function buildTicketSheetPayload(ticket, options = {}) {
     parentSheetRow: Number(ticket.parentSheetRow) || 0,
     Notes: notesText,
     Remarks: notesText,
-    "Bhanu List": ticket["Bhanu List"]
+    "Bhanu List": ticket["Bhanu List"],
+    ticketId: ticketStableId(ticket) || undefined,
+    submissionId: cleanText(ticket.submissionId) || undefined,
+    lastUpdated: cleanText(ticket.lastUpdated) || undefined,
+    expectedStatus: cleanText(ticket.expectedStatus || ticket.lastKnownStatus) || undefined
   };
 
   if (ticket.sheetRow) {
@@ -2048,6 +2183,8 @@ function normalizeTicket(ticket) {
     NotesRaw: notesRaw,
     ScreenshotUrls: screenshotUrls,
     "Bhanu List": cleanText(ticket["Bhanu List"]),
+    ticketId: cleanText(ticket.ticketId || ticket.TicketId || ticket["Ticket ID"] || ""),
+    submissionId: cleanText(ticket.submissionId || ""),
     sheetRow: Number(ticket.sheetRow) || 0,
     pendingSheetSync: Number(ticket.pendingSheetSync) || 0,
     createdOn: ticket.createdOn || "",
@@ -2784,7 +2921,7 @@ function getValidTickets() {
   return applyTicketVisibilityFilter(
     readTickets()
       .map(normalizeTicket)
-      .filter((ticket) => ticket.Task)
+      .filter((ticket) => ticket.Task && cleanText(ticket.Status) !== SOFT_DELETED_STATUS)
   );
 }
 
@@ -4956,7 +5093,9 @@ function ticketFromEditForm() {
   const sheetRow = resolveEditingSheetRow(data, activeEditTicket || {});
   const ticket = normalizeTicket(applyTicketNotesToPayload({
     ...ticketFromFormData(data),
-    sheetRow
+    sheetRow,
+    ticketId: ticketStableId(activeEditTicket) || createTicketId(),
+    lastUpdated: cleanText(activeEditTicket?.lastUpdated) || ""
   }, ticketEditNotesEditor));
 
   // Preserve durable presentation marks when remarks are edited in the modal.
@@ -4996,8 +5135,14 @@ function coalesceSyncValue(...values) {
 }
 
 function applyTicketSyncResult(sheetRow, result = {}, expected = {}) {
-  const ticket = findTicketBySheetRow(sheetRow);
+  const ticket = findTicketBySheetRow(sheetRow) || (ticketStableId(expected)
+    ? getValidTickets().find((entry) => ticketStableId(entry) === ticketStableId(expected))
+    : null);
   if (!ticket) return;
+
+  if (result.conflict || result.stale) {
+    setStatus("error", result.error || "Ticket was updated elsewhere — refresh and try again.");
+  }
 
   const notes = result.notes !== undefined ? String(result.notes).trim() : ticket.Notes;
   const sheetLinks = extractDriveLinksFromNotes({ Notes: notes, Remarks: notes });
@@ -5015,7 +5160,7 @@ function applyTicketSyncResult(sheetRow, result = {}, expected = {}) {
     }
   }
 
-  const hasExpectedUpdate = Boolean(expected.sheetRow);
+  const hasExpectedUpdate = Boolean(expected.sheetRow) || Boolean(ticketStableId(expected));
   const milestone = hasExpectedUpdate
     ? String(expected.Milestone ?? "").trim()
     : coalesceSyncValue(result.milestone, ticket.Milestone);
@@ -5027,19 +5172,50 @@ function applyTicketSyncResult(sheetRow, result = {}, expected = {}) {
     : coalesceSyncValue(result.endDate, ticket["End date"]);
 
   const syncedStatus = reconcileSyncedTicketStatus(ticket, result, expected);
-
-  // Refresh pendingSheetSync timestamp so the next sheet GET cannot overwrite with a
-  // stale row before Apps Script has fully settled. Merge clears pending once remote matches.
-  updateLocalTicket(normalizeTicket({
+  const serverLastUpdated = cleanText(result.lastUpdated) || cleanText(ticket.lastUpdated);
+  const nextTicket = normalizeTicket({
     ...ticket,
+    ...expected,
     Status: syncedStatus,
     Milestone: milestone,
     "Start date": startDate,
     "End date": endDate,
     Notes: notes || ticket.Notes,
     Remarks: notes || ticket.Remarks,
-    NotesHtml: notesHtml
-  }));
+    NotesHtml: notesHtml,
+    ticketId: cleanText(result.ticketId) || ticketStableId(ticket) || ticketStableId(expected),
+    sheetRow: Number(result.sheetRow) || Number(sheetRow) || ticket.sheetRow,
+    lastUpdated: serverLastUpdated
+  });
+
+  // Clear pending when server fields already match; do not blindly renew TTL on every ack.
+  const remoteSnapshot = normalizeTicket({
+    ...nextTicket,
+    Status: syncedStatus || nextTicket.Status,
+    Notes: notes || nextTicket.Notes,
+    Remarks: notes || nextTicket.Remarks,
+    "Bhanu List": expected["Bhanu List"] ?? nextTicket["Bhanu List"],
+    Milestone: coalesceSyncValue(result.milestone, nextTicket.Milestone),
+    "Start date": coalesceSyncValue(result.startDate, nextTicket["Start date"]),
+    "End date": coalesceSyncValue(result.endDate, nextTicket["End date"])
+  });
+  const matched = ticketCoreFieldsMatch(nextTicket, remoteSnapshot);
+  updateLocalTicket(nextTicket, { clearPendingSync: matched });
+}
+
+function mergeDriveLinksIntoLocalNotes(ticket, notesText) {
+  const links = extractDriveLinksFromNotes({ Notes: notesText, Remarks: notesText });
+  if (!links.length) return null;
+  const localRemarks = stripScreenshotMetadata(ticket.Notes || ticket.Remarks || "");
+  const linkBlock = links
+    .map((url, index) => `Screenshot ${index + 1}: ${url}`)
+    .join("\n");
+  const mergedText = localRemarks ? `${localRemarks}\n${linkBlock}` : linkBlock;
+  const notesHtml = buildNotesHtmlFromParts(
+    localRemarks,
+    links.map((url) => ({ src: url, driveUrl: url }))
+  );
+  return { notes: mergedText, notesHtml };
 }
 
 function applyDriveLinksToLocalTicket(sheetRow, notesText) {
@@ -5051,12 +5227,29 @@ function applyDriveLinksToLocalTicket(sheetRow, notesText) {
   const ticket = findTicketBySheetRow(sheetRow);
   if (!ticket) return;
 
+  const localRemarks = normalizeNotesForCompare(ticket);
+  const remoteRemarks = normalizeNotesForCompare({ Notes: notes, Remarks: notes });
+  const remarksDiverge = Boolean(localRemarks) && Boolean(remoteRemarks) && localRemarks !== remoteRemarks;
+  const pending = Number(ticket.pendingSheetSync) || 0;
+
+  if (remarksDiverge || pending > 0) {
+    const merged = mergeDriveLinksIntoLocalNotes(ticket, notes);
+    if (!merged) return;
+    updateLocalTicket(normalizeTicket({
+      ...ticket,
+      Notes: merged.notes,
+      Remarks: merged.notes,
+      NotesHtml: merged.notesHtml || ticket.NotesHtml
+    }), { keepPendingSync: true });
+    return;
+  }
+
   updateLocalTicket(normalizeTicket({
     ...ticket,
     Notes: notes,
     Remarks: notes,
     NotesHtml: buildNotesHtmlFromDriveLinks({ Notes: notes, Remarks: notes })
-  }), { keepPendingSync: true });
+  }), { clearPendingSync: true });
 }
 
 function truncateForLog(text, max = 240) {
@@ -5137,10 +5330,17 @@ function friendlySheetSyncError(error) {
   if (/JSON|Unexpected token|Expected property|SyntaxError/i.test(raw)) {
     return "Saved locally, but sheet sync response was invalid. Click Refresh to confirm.";
   }
+  if (/busy|lock|try again shortly/i.test(raw)) {
+    return "Sheet is busy saving another change — retrying shortly.";
+  }
   return raw;
 }
 
-async function postToSheetWithResponse(payload) {
+function sleepMs(ms) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+async function postToSheetWithResponse(payload, options = {}) {
   let body;
   try {
     body = JSON.stringify(payload);
@@ -5149,25 +5349,48 @@ async function postToSheetWithResponse(payload) {
     throw new Error("Could not prepare ticket data for sync (invalid notes or attachments).");
   }
 
-  const response = await fetch(SHEET_WEB_APP_URL, {
-    method: "POST",
-    redirect: "follow",
-    headers: {
-      "Content-Type": "text/plain;charset=utf-8"
-    },
-    body
-  });
+  const maxAttempts = Number(options.retries) > 0 ? Number(options.retries) : BUSY_RETRY_ATTEMPTS;
+  let lastError = null;
 
-  const text = await response.text();
-  return parseAppsScriptResponseText(text);
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    const response = await fetch(SHEET_WEB_APP_URL, {
+      method: "POST",
+      redirect: "follow",
+      headers: {
+        "Content-Type": "text/plain;charset=utf-8"
+      },
+      body
+    });
+
+    const text = await response.text();
+    const parsed = parseAppsScriptResponseText(text);
+    if (parsed?.busy || /busy|lock timed out|could not obtain lock/i.test(String(parsed?.error || ""))) {
+      lastError = new Error(parsed?.error || "Sheet is busy. Try again shortly.");
+      if (attempt < maxAttempts) {
+        await sleepMs(BUSY_RETRY_DELAY_MS * attempt);
+        continue;
+      }
+      throw lastError;
+    }
+    return parsed;
+  }
+
+  throw lastError || new Error("Sheet sync failed.");
 }
 
 function updateLocalTicket(updatedTicket, options = {}) {
+  const targetRow = Number(updatedTicket.sheetRow) || 0;
+  const targetId = ticketStableId(updatedTicket);
+  let matched = false;
+
   const tickets = readTickets().map((ticket) => {
-    const sameRow = Number(updatedTicket.sheetRow)
-      && Number(ticket.sheetRow) === Number(updatedTicket.sheetRow);
-    const sameIdentity = ticketIdentityKey(ticket) === ticketIdentityKey(updatedTicket);
-    if (!sameRow && !sameIdentity) return ticket;
+    const sameRow = targetRow && Number(ticket.sheetRow) === targetRow;
+    const sameTicketId = targetId && ticketStableId(ticket) === targetId;
+    // Prefer stable sheetRow / ticketId. Never fan out by Task||Owner alone (rename hazard).
+    const shouldUpdate = sameRow || sameTicketId
+      || (!targetRow && !targetId && ticketsMatchIdentity(ticket, updatedTicket) && !Number(ticket.sheetRow));
+    if (!shouldUpdate) return ticket;
+    matched = true;
 
     let pendingSheetSync = Date.now();
     if (options.clearPendingSync) pendingSheetSync = 0;
@@ -5176,9 +5399,19 @@ function updateLocalTicket(updatedTicket, options = {}) {
     return normalizeTicket({
       ...ticket,
       ...updatedTicket,
+      ticketId: targetId || ticketStableId(ticket) || createTicketId(),
       pendingSheetSync
     });
   });
+
+  if (!matched && cleanText(updatedTicket.Task)) {
+    tickets.push(normalizeTicket({
+      ...updatedTicket,
+      ticketId: targetId || createTicketId(),
+      pendingSheetSync: options.clearPendingSync ? 0 : Date.now()
+    }));
+  }
+
   writeTickets(tickets);
 }
 
@@ -5201,7 +5434,8 @@ async function deleteTicketFromSheet(sheetRow, task = "", owner = "") {
     action: "deleteTicket",
     sheetRow: Number(sheetRow),
     Task: task,
-    Owner: owner
+    Owner: owner,
+    ticketId: ticketStableId(activeEditTicket || {}) || undefined
   });
 
   if (!result?.ok) {
@@ -5295,12 +5529,17 @@ async function executeTicketDelete() {
 
     setStatus("", "Deleting task...");
     await deleteTicketFromSheet(sheetRow, task, owner);
-    markDeletedTicketTombstone({ sheetRow, task, owner });
+    markDeletedTicketTombstone({
+      sheetRow,
+      task,
+      owner,
+      ticketId: ticketStableId(activeEditTicket || {})
+    });
     removeLocalTicket(sheetRow);
     removeLocalTicketByIdentity(task, owner);
     resetTicketDeleteUi();
     closeTicketEditor();
-    await refreshFromSheet({ skipScreenshotSync: true });
+    await refreshFromSheet({ skipScreenshotSync: true, force: true });
     setStatus("online", "Task deleted");
     renderTickets();
   } catch (error) {
@@ -5326,12 +5565,15 @@ async function sendTicketUpdateToSheet(ticket) {
     return { synced: false };
   }
 
-  const result = await postToSheetWithResponse(buildTicketSheetPayload(ticket));
+  const result = await postToSheetWithResponse(buildTicketSheetPayload(ticket, { deferAttachments: true }));
   if (!result?.ok) {
+    if (result?.conflict || result?.stale) {
+      throw new Error(result?.error || "Ticket was updated elsewhere. Refresh and try again.");
+    }
     throw new Error(result?.error || "Ticket update failed.");
   }
 
-  if (result?.ok && ticket.sheetRow) {
+  if (result?.ok && (ticket.sheetRow || ticketStableId(ticket))) {
     applyTicketSyncResult(ticket.sheetRow, result, ticket);
   } else if (result.notes && ticket.sheetRow) {
     applyDriveLinksToLocalTicket(ticket.sheetRow, result.notes);
@@ -6230,11 +6472,18 @@ function renderTicketTable(tickets, options = {}) {
   });
 }
 
-function buildTicketsFromForm(selectedOwners = null) {
+function buildTicketsFromForm(selectedOwners = null, options = {}) {
   const owners = (selectedOwners || getNewTicketOwners()).filter(isSelectableTicketOwner);
   const data = new FormData(form);
   const basePayload = applyTicketNotesToPayload(ticketFromFormData(data), ticketNotesEditor);
-  return owners.map((owner) => normalizeTicket({ ...basePayload, Owner: cleanText(owner) }));
+  const submissionId = cleanText(options.submissionId) || createSubmissionId();
+  return owners.map((owner) => normalizeTicket({
+    ...basePayload,
+    Owner: cleanText(owner),
+    ticketId: createTicketId(),
+    submissionId,
+    lastUpdated: new Date().toISOString()
+  }));
 }
 
 function ticketsFromForm() {
@@ -6421,13 +6670,18 @@ function renderTickets(options = {}) {
 
 function applyCreatedTicketSyncResult(localTicket, result = {}) {
   const identity = ticketIdentityKey(localTicket);
+  const localId = ticketStableId(localTicket);
+  const submissionId = cleanText(localTicket.submissionId);
   const notes = String(result.notes || "").trim();
   const sheetRow = Number(result.sheetRow) || 0;
   const hasDriveLinks = notes && extractDriveLinksFromNotes({ Notes: notes, Remarks: notes }).length > 0;
   let matchedUnsynced = false;
 
   const tickets = readTickets().map((ticket) => {
-    if (ticketIdentityKey(ticket) !== identity) return ticket;
+    const sameSubmission = submissionId && cleanText(ticket.submissionId) === submissionId;
+    const sameId = localId && ticketStableId(ticket) === localId;
+    const sameIdentity = !localId && !submissionId && ticketIdentityKey(ticket) === identity;
+    if (!sameSubmission && !sameId && !sameIdentity) return ticket;
     // Only apply create results to unsynced local clones — never overwrite an
     // existing sheet row that shares Task||Owner (e.g. after Duplicate).
     if (Number(ticket.sheetRow) > 0) return ticket;
@@ -6438,9 +6692,10 @@ function applyCreatedTicketSyncResult(localTicket, result = {}) {
       ? buildNotesHtmlFromDriveLinks({ Notes: notes, Remarks: notes })
       : ticket.NotesHtml;
 
-    return normalizeTicket({
+    const next = normalizeTicket({
       ...ticket,
       sheetRow: sheetRow || ticket.sheetRow,
+      ticketId: cleanText(result.ticketId) || ticketStableId(ticket) || localId,
       Status: reconcileSyncedTicketStatus(ticket, result),
       Notes: notes || ticket.Notes,
       Remarks: notes || ticket.Remarks,
@@ -6448,7 +6703,21 @@ function applyCreatedTicketSyncResult(localTicket, result = {}) {
       Milestone: result.milestone || ticket.Milestone,
       "Start date": result.startDate || ticket["Start date"],
       "End date": result.endDate || ticket["End date"],
-      pendingSheetSync: sheetRow ? 0 : ticket.pendingSheetSync
+      lastUpdated: cleanText(result.lastUpdated) || ticket.lastUpdated
+    });
+
+    // Keep pending until core fields (incl. Status / Notes) match remote ack.
+    const remoteSnapshot = normalizeTicket({
+      ...next,
+      Status: cleanText(result.status) || next.Status,
+      Notes: notes || next.Notes,
+      Remarks: notes || next.Remarks
+    });
+    const matched = sheetRow > 0 && ticketCoreFieldsMatch(next, remoteSnapshot)
+      && !ticketHasLocalScreenshotsOnly(next);
+    return normalizeTicket({
+      ...next,
+      pendingSheetSync: matched ? 0 : (ticket.pendingSheetSync || Date.now())
     });
   });
 
@@ -6511,16 +6780,31 @@ async function sendNewTicketsToSheet(tickets, onProgress) {
       tickets: tickets.map((ticket) => buildTicketSheetPayload(ticket, createOptions))
     });
 
-    if (!result?.ok) {
+    if (!result?.ok && !Array.isArray(result?.results)) {
       throw new Error(result?.error || "Ticket submit failed.");
     }
 
-    (result.results || []).forEach((item, index) => {
+    const items = Array.isArray(result.results) ? result.results : [];
+    let successCount = 0;
+    let failCount = 0;
+    items.forEach((item, index) => {
+      if (item?.ok === false) {
+        failCount += 1;
+        outcomes.push(item);
+        return;
+      }
       applyCreatedTicketSyncResult(tickets[index], item);
       uploadedTotal += Number(item?.uploadedCount) || 0;
       outcomes.push(item);
+      successCount += 1;
     });
     onProgress?.(tickets.length - 1, tickets.length);
+    if (!successCount && failCount) {
+      throw new Error(result?.error || items.find((item) => item?.error)?.error || "Ticket submit failed.");
+    }
+    if (failCount) {
+      setStatus("error", `Saved ${successCount} of ${tickets.length} tickets — retry failed ones`);
+    }
   } else {
     const ticket = tickets[0];
     if (!cleanText(ticket.Owner)) {
@@ -6808,6 +7092,8 @@ function downloadProjectsCsv() {
 
 form?.addEventListener("submit", async (event) => {
   event.preventDefault();
+  if (form.classList.contains("ticket-form-submitting")) return;
+
   const allowedOwners = new Set(getVisibleOwnerNames().map((name) => name.toLowerCase()));
   const selectedOwners = getNewTicketOwners()
     .filter(isSelectableTicketOwner)
@@ -6819,9 +7105,33 @@ form?.addEventListener("submit", async (event) => {
     return;
   }
 
-  const ticketsToCreate = buildTicketsFromForm(selectedOwners).map((ticket) =>
-    normalizeTicket(applyCompletionApprovalPreview({ ...ticket, pendingSheetSync: Date.now() }))
+  const submissionId = createSubmissionId();
+  // Re-submit of the same failed create: reuse existing pending locals with this form's
+  // identity instead of pushing more clones. Match by submissionId stamped on first attempt.
+  const existingPending = readTickets().filter((ticket) =>
+    !Number(ticket.sheetRow)
+    && selectedOwners.some((owner) => ticketIdentityKey(ticket) === ticketIdentityKey({ Task: String(new FormData(form).get("Task") || ""), Owner: owner }))
+    && Number(ticket.pendingSheetSync) > 0
   );
+
+  let ticketsToCreate;
+  if (existingPending.length && existingPending.length === selectedOwners.length) {
+    ticketsToCreate = existingPending.map((ticket) => normalizeTicket({
+      ...ticket,
+      submissionId: ticket.submissionId || submissionId,
+      ticketId: ticketStableId(ticket) || createTicketId(),
+      pendingSheetSync: Date.now()
+    }));
+    writeTickets(readTickets().map((ticket) => {
+      const replacement = ticketsToCreate.find((entry) => ticketStableId(entry) === ticketStableId(ticket)
+        || (!ticketStableId(entry) && ticketsMatchIdentity(entry, ticket) && !Number(ticket.sheetRow)));
+      return replacement || ticket;
+    }));
+  } else {
+    ticketsToCreate = buildTicketsFromForm(selectedOwners, { submissionId }).map((ticket) =>
+      normalizeTicket(applyCompletionApprovalPreview({ ...ticket, pendingSheetSync: Date.now() }))
+    );
+  }
 
   const completionError = ticketsToCreate.map(getTicketCompletionError).find(Boolean);
   if (completionError) {
@@ -6832,9 +7142,16 @@ form?.addEventListener("submit", async (event) => {
   startTicketSubmitProgress("Saving tickets locally...");
   await yieldToUi();
 
-  const tickets = readTickets();
-  ticketsToCreate.forEach((ticket) => tickets.push(ticket));
-  writeTickets(tickets);
+  if (!(existingPending.length && existingPending.length === selectedOwners.length)) {
+    const tickets = readTickets();
+    ticketsToCreate.forEach((ticket) => {
+      const already = tickets.some((entry) => ticketStableId(entry) === ticketStableId(ticket)
+        || (cleanText(entry.submissionId) && cleanText(entry.submissionId) === cleanText(ticket.submissionId)
+          && ticketsMatchIdentity(entry, ticket)));
+      if (!already) tickets.push(ticket);
+    });
+    writeTickets(tickets);
+  }
   renderTickets();
   setTicketSubmitProgress(22, "Tickets saved locally");
   await yieldToUi();
@@ -6871,7 +7188,10 @@ form?.addEventListener("submit", async (event) => {
       closeTicketCreateModal();
 
       const needsBackgroundScreenshots = ticketsToCreate.some((ticket) => {
-        const saved = getValidTickets().find((entry) => ticketIdentityKey(entry) === ticketIdentityKey(ticket));
+        const saved = getValidTickets().find((entry) =>
+          (ticketStableId(ticket) && ticketStableId(entry) === ticketStableId(ticket))
+          || ticketIdentityKey(entry) === ticketIdentityKey(ticket)
+        );
         return saved && ticketHasLocalScreenshotsOnly(saved);
       });
 
@@ -6884,7 +7204,10 @@ form?.addEventListener("submit", async (event) => {
       } else if (ticketsToCreate.length > 1) {
         setStatus("ok", `Created ${ticketsToCreate.length} tickets`);
       } else if (ticketsToCreate.some((ticket) => {
-        const saved = getValidTickets().find((entry) => ticketIdentityKey(entry) === ticketIdentityKey(ticket));
+        const saved = getValidTickets().find((entry) =>
+          (ticketStableId(ticket) && ticketStableId(entry) === ticketStableId(ticket))
+          || ticketIdentityKey(entry) === ticketIdentityKey(ticket)
+        );
         return saved && isPendingApprovalStatus(saved.Status);
       })) {
         setStatus("online", "Ticket created — sent for manager approval");
@@ -6917,6 +7240,9 @@ ticketEditForm?.addEventListener("submit", async (event) => {
     alert("You do not have permission to edit tickets.");
     return;
   }
+  if (ticketEditSubmitInFlight || ticketEditForm.classList.contains("ticket-form-submitting")) {
+    return;
+  }
 
   const updatedTicket = ticketFromEditForm();
   if (!isOwnerVisibleToCurrentUser(updatedTicket.Owner)) {
@@ -6927,6 +7253,23 @@ ticketEditForm?.addEventListener("submit", async (event) => {
   const completionError = getTicketCompletionError(updatedTicket);
   if (completionError) {
     alert(completionError);
+    return;
+  }
+
+  // Protect Completed → Not started / casual reopen (manager confirm).
+  const priorStatus = cleanText(activeEditTicket?.Status);
+  const nextStatus = cleanText(updatedTicket.Status);
+  if (/^completed$/i.test(priorStatus) && nextStatus && !/^completed$/i.test(nextStatus) && !/^pending approval$/i.test(nextStatus)) {
+    if (!canCurrentUserApproveTicket(activeEditTicket || updatedTicket)) {
+      if (!confirm("This task is Completed. Reopening it will undo completion. Continue?")) {
+        return;
+      }
+    }
+  }
+
+  // Stale Pending Approval must not overwrite a manager Completed already on the sheet.
+  if (/^pending approval$/i.test(nextStatus) && /^completed$/i.test(priorStatus)) {
+    alert("This task is already Completed. Refresh and reopen the editor before changing status.");
     return;
   }
 
@@ -6942,10 +7285,25 @@ ticketEditForm?.addEventListener("submit", async (event) => {
     ticketEditSheetRow.value = String(updatedTicket.sheetRow);
   }
 
-  const sheetTicket = { ...updatedTicket };
-  const localTicket = applyCompletionApprovalPreview(updatedTicket);
+  const sheetTicket = {
+    ...updatedTicket,
+    ticketId: ticketStableId(updatedTicket) || ticketStableId(activeEditTicket) || createTicketId(),
+    expectedStatus: priorStatus || nextStatus,
+    lastKnownStatus: priorStatus || nextStatus,
+    lastUpdated: cleanText(activeEditTicket?.lastUpdated) || cleanText(updatedTicket.lastUpdated) || new Date().toISOString()
+  };
+  const localTicket = applyCompletionApprovalPreview({
+    ...updatedTicket,
+    ticketId: sheetTicket.ticketId,
+    lastUpdated: new Date().toISOString()
+  });
+
+  ticketEditSubmitInFlight = true;
+  ticketEditForm.classList.add("ticket-form-submitting");
+  const saveButton = ticketEditForm.querySelector('button[type="submit"]');
+  if (saveButton) saveButton.disabled = true;
+
   updateLocalTicket(localTicket);
-  closeTicketEditor();
   renderTickets();
 
   try {
@@ -6953,10 +7311,16 @@ ticketEditForm?.addEventListener("submit", async (event) => {
     if (extractNoteAttachments(updatedTicket.NotesHtml || "").length) {
       await verifyDriveUploadAfterSave(updatedTicket.sheetRow);
     }
+    closeTicketEditor();
     renderTickets();
   } catch (error) {
     setStatus("error", "Saved locally, but update failed");
     console.error(error);
+    alert(`${friendlySheetSyncError(error)}\n\nThe editor will stay open so you can retry.`);
+  } finally {
+    ticketEditSubmitInFlight = false;
+    ticketEditForm.classList.remove("ticket-form-submitting");
+    if (saveButton) saveButton.disabled = false;
   }
 });
 
@@ -7083,11 +7447,23 @@ ticketCreateModal?.addEventListener("click", (event) => {
   }
 });
 
+async function confirmManualSheetRefresh() {
+  if (!hasRecentPendingTicketSync()) return true;
+  return confirm(
+    "You have recent unsynced ticket edits. Refreshing now may replace them with sheet data if the save has not finished.\n\nContinue with Refresh?"
+  );
+}
+
+async function handleManualSheetRefresh() {
+  if (!(await confirmManualSheetRefresh())) return false;
+  return refreshFromSheet();
+}
+
 refreshUsersButton?.addEventListener("click", refreshUsersFromSheet);
 
-refreshSheetButton?.addEventListener("click", refreshFromSheet);
-refreshProjectsSheetButton?.addEventListener("click", refreshFromSheet);
-kanbanRefreshButton?.addEventListener("click", refreshFromSheet);
+refreshSheetButton?.addEventListener("click", () => { handleManualSheetRefresh(); });
+refreshProjectsSheetButton?.addEventListener("click", () => { handleManualSheetRefresh(); });
+kanbanRefreshButton?.addEventListener("click", () => { handleManualSheetRefresh(); });
 exportButton?.addEventListener("click", () => downloadCsv());
 exportProjectsButton?.addEventListener("click", downloadProjectsCsv);
 exportPerformanceButton?.addEventListener("click", downloadPerformanceCsv);
@@ -7244,6 +7620,7 @@ initTicketNotesEditor(ticketNotesEditor, ticketNotesInput);
 initTicketNotesEditor(ticketEditNotesEditor, ticketEditNotesInput);
 initTicketFormOwnerSelect();
 hideTicketSubmitProgress();
+initTicketsCrossTabSync();
 initChromeCollapse();
 initTopbarCollapse();
 initPerformanceFilterSidebar();

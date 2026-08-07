@@ -79,8 +79,12 @@ const COLUMN_ALIASES = {
   milestone: ["milestone", "milestone date", "mile stone"],
   notes: ["notes", "remarks", "remark", "comment", "comments"],
   bhanuList: ["bhanu list", "bhanulist"],
-  parentSheetRow: ["parent sheet row", "parent row", "parent task row", "parent task"]
+  parentSheetRow: ["parent sheet row", "parent row", "parent task row", "parent task"],
+  ticketId: ["ticket id", "ticketid", "ticket uuid"]
 };
+
+const SOFT_DELETED_STATUS_ = "Deleted";
+const TICKET_ID_HEADER_ = "Ticket ID";
 
 const ATTACHMENTS_FOLDER_NAME = "Tarmal Ticket Screenshots";
 const ATTACHMENTS_FOLDER_ID_KEY = "ATTACHMENTS_FOLDER_ID";
@@ -649,7 +653,20 @@ function processDeferredPostSaveWork() {
 
 function doPost(e) {
   const lock = LockService.getScriptLock();
-  lock.waitLock(30000);
+  var lockAcquired = false;
+  try {
+    lockAcquired = lock.tryLock(30000);
+  } catch (lockError) {
+    lockAcquired = false;
+  }
+
+  if (!lockAcquired) {
+    return buildResponse_({
+      ok: false,
+      busy: true,
+      error: "Sheet is busy saving another change. Try again shortly."
+    }, e);
+  }
 
   try {
     const raw = (e && e.postData && e.postData.contents != null)
@@ -709,7 +726,7 @@ function doPost(e) {
       } catch (postDeleteError) {
         Logger.log(postDeleteError);
       }
-      return buildResponse_({ ok: true, sheetRow: result.sheetRow }, e);
+      return buildResponse_({ ok: true, sheetRow: result.sheetRow, softDeleted: true }, e);
     }
 
     if (data.action === "updateTicket") {
@@ -719,9 +736,6 @@ function doPost(e) {
         error: result.approvalEmailError || ""
       };
       try {
-        // Approval for THIS ticket was already attempted in updateTicket_.
-        // Defer full-sheet audit/projects (and a batch approval scan only if
-        // this update left approval pending without a sent email).
         scheduleDeferredPostSaveWork_({
           audit: true,
           projects: true,
@@ -731,7 +745,9 @@ function doPost(e) {
         Logger.log(postUpdateError);
       }
       return buildResponse_({
-        ok: true,
+        ok: result.ok !== false,
+        conflict: result.conflict === true,
+        stale: result.stale === true,
         notes: result.notes,
         milestone: result.milestone,
         startDate: result.startDate,
@@ -741,21 +757,28 @@ function doPost(e) {
         parentRemarkAppended: result.parentRemarkAppended === true,
         parentSheetRow: result.parentSheetRow || 0,
         status: result.status || "",
+        ticketId: result.ticketId || "",
+        lastUpdated: result.lastUpdated || "",
         approvalPending: result.approvalPending === true,
         approvalSentTo: approvalEmailResult.to || result.approvalSentTo || "",
         approvalEmailError: approvalEmailResult.error || result.approvalEmailError || "",
         approvalMessage: result.approvalMessage || "",
         approved: result.approved === true,
+        error: result.error || "",
         deferredPostSave: true
       }, e);
     }
 
     if (data.action === "uploadAttachments") {
+      // Release the script lock before Drive uploads so concurrent waiters are not blocked.
+      lock.releaseLock();
+      lockAcquired = false;
       const result = uploadTicketAttachmentsOnly_(data);
       return buildResponse_({
         ok: true,
         notes: result.notes,
-        uploadedCount: result.uploadedCount
+        uploadedCount: result.uploadedCount,
+        ticketId: result.ticketId || ""
       }, e);
     }
 
@@ -765,16 +788,29 @@ function doPost(e) {
         throw new Error("No tickets provided.");
       }
 
-      // Write rows (+ per-ticket approval email) then return immediately.
-      // Audit, Projects sync, and pending owner emails run via deferred trigger.
-      const results = items.map((ticketData) => appendTicket_(ticketData));
+      const results = items.map(function(ticketData) {
+        try {
+          const item = appendTicket_(ticketData);
+          item.ok = true;
+          return item;
+        } catch (itemError) {
+          Logger.log(itemError);
+          return {
+            ok: false,
+            error: String(itemError.message || itemError),
+            ticketId: String(ticketData.ticketId || ""),
+            submissionId: String(ticketData.submissionId || "")
+          };
+        }
+      });
+      const successCount = results.filter(function(item) { return item.ok !== false; }).length;
       try {
         scheduleDeferredPostSaveWork_({
           audit: true,
           projects: true,
           taskEmails: true,
           approvalEmails: results.some(function(item) {
-            return item.approvalPending === true && !item.approvalSentTo;
+            return item.ok !== false && item.approvalPending === true && !item.approvalSentTo;
           })
         });
       } catch (postAppendError) {
@@ -782,10 +818,11 @@ function doPost(e) {
       }
 
       return buildResponse_({
-        ok: true,
-        count: results.length,
+        ok: successCount > 0,
+        count: successCount,
         results: results,
-        deferredPostSave: true
+        deferredPostSave: true,
+        error: successCount === 0 ? "All ticket creates failed." : ""
       }, e);
     }
 
@@ -814,6 +851,8 @@ function doPost(e) {
       endDate: appendResult.endDate,
       uploadedCount: appendResult.uploadedCount,
       status: appendResult.status || "",
+      ticketId: appendResult.ticketId || "",
+      lastUpdated: appendResult.lastUpdated || "",
       approvalPending: appendResult.approvalPending === true,
       approvalSentTo: appendResult.approvalSentTo || "",
       approvalMessage: appendResult.approvalMessage || "",
@@ -823,7 +862,9 @@ function doPost(e) {
   } catch (error) {
     return buildResponse_({ ok: false, error: error.message }, e);
   } finally {
-    lock.releaseLock();
+    if (lockAcquired) {
+      try { lock.releaseLock(); } catch (releaseError) { Logger.log(releaseError); }
+    }
   }
 }
 
@@ -846,9 +887,9 @@ function readTickets_() {
   for (let i = 0; i < values.length; i++) {
     const sheetRow = i + 2;
     const ticket = rowToTicket_(values[i], columnMap, sheetRow);
-    if (String(ticket.Task || "").trim()) {
-      tickets.push(attachTicketAudit_(ticket, auditMap));
-    }
+    if (!String(ticket.Task || "").trim()) continue;
+    if (isSoftDeletedStatus_(ticket.Status)) continue;
+    tickets.push(attachTicketAudit_(ticket, auditMap));
   }
 
   return tickets;
@@ -869,7 +910,8 @@ function getTicketFieldValues_(data) {
     milestone: milestone,
     notes: data.Notes || data.Remarks || "",
     bhanuList: data["Bhanu List"] || "",
-    parentSheetRow: Number(data.parentSheetRow || data["Parent Sheet Row"]) || ""
+    parentSheetRow: Number(data.parentSheetRow || data["Parent Sheet Row"]) || "",
+    ticketId: String(data.ticketId || data.TicketId || data["Ticket ID"] || "").trim()
   };
 }
 
@@ -885,7 +927,8 @@ const COLUMN_FALLBACK_INDICES_ = {
   milestone: 8,
   notes: 9,
   bhanuList: 10,
-  parentSheetRow: 11
+  parentSheetRow: 11,
+  ticketId: 12
 };
 
 function resolveColumnIndex_(columnMap, key) {
@@ -909,7 +952,8 @@ function applyTicketFieldsToRow_(row, columnMap, fields) {
     milestone: fields.milestone,
     notes: fields.notes,
     bhanuList: fields.bhanuList,
-    parentSheetRow: fields.parentSheetRow || ""
+    parentSheetRow: fields.parentSheetRow || "",
+    ticketId: fields.ticketId || ""
   };
 
   let requiredLength = row.length;
@@ -921,7 +965,11 @@ function applyTicketFieldsToRow_(row, columnMap, fields) {
 
   Object.keys(assignments).forEach((key) => {
     const index = resolveColumnIndex_(columnMap, key);
-    if (index >= 0) row[index] = assignments[key];
+    if (index >= 0) {
+      // Do not blank an existing ticketId with an empty incoming value.
+      if (key === "ticketId" && !assignments[key] && row[index]) return;
+      row[index] = assignments[key];
+    }
   });
 
   return row;
@@ -1016,16 +1064,53 @@ function ensureTasksApprovalEmailColumn_(sheet) {
   return headers.length - 1;
 }
 
+function ensureTasksTicketIdColumn_(sheet) {
+  const sheetInfo = getTasksSheetHeaders_(sheet);
+  const headers = sheetInfo.headers.slice();
+  const columnMap = buildColumnMap_(headers);
+  if (columnMap.ticketId >= 0) return columnMap;
+
+  headers.push(TICKET_ID_HEADER_);
+  sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+  return buildColumnMap_(headers);
+}
+
 function ensureTasksColumns_(sheet) {
   const columnMap = ensureTasksMilestoneColumn_(sheet);
   ensureTasksApprovalEmailColumn_(sheet);
-  return ensureTasksParentColumn_(sheet);
+  ensureTasksParentColumn_(sheet);
+  return ensureTasksTicketIdColumn_(sheet);
 }
 
 function shouldAppendSubtaskCompletion_(oldStatus, ticket) {
   const parentRow = Number(ticket.parentSheetRow || ticket["Parent Sheet Row"]);
   if (!parentRow || parentRow < 2) return false;
   return !isCompletedStatus(oldStatus) && isCompletedStatus(ticket.Status);
+}
+
+function assertRowIdentityMatch_(ticket, data, sheetRow) {
+  const expectedTicketId = String(data.ticketId || data.TicketId || data["Ticket ID"] || "").trim();
+  const actualTicketId = String(ticket.ticketId || "").trim();
+  if (expectedTicketId && actualTicketId && expectedTicketId !== actualTicketId) {
+    throw new Error("Ticket row " + sheetRow + " does not match ticketId. Refresh and try again.");
+  }
+
+  const expectedTask = String(data.Task || "").trim();
+  const expectedOwner = String(data.Owner || "").trim();
+  if (expectedTask && normalizeTicketIdentity_(ticket.Task) !== normalizeTicketIdentity_(expectedTask)) {
+    throw new Error("Ticket row " + sheetRow + " does not match the selected task. Refresh and try again.");
+  }
+  if (expectedOwner && normalizeTicketIdentity_(ticket.Owner) !== normalizeTicketIdentity_(expectedOwner)) {
+    throw new Error("Ticket row " + sheetRow + " does not match the selected owner. Refresh and try again.");
+  }
+}
+
+function createTicketId_() {
+  return Utilities.getUuid();
+}
+
+function nowIsoStamp_() {
+  return Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd'T'HH:mm:ss");
 }
 
 function appendSubtaskCompletionToParent_(sheet, columnMap, subtask) {
@@ -1038,6 +1123,14 @@ function appendSubtaskCompletionToParent_(sheet, columnMap, subtask) {
 
   const parentRowValues = sheet.getRange(parentRow, 1, 1, sheetInfo.lastColumn).getValues()[0];
   const parent = rowToTicket_(parentRowValues, columnMap, parentRow);
+  if (isSoftDeletedStatus_(parent.Status)) return false;
+
+  // Prefer parent ticketId when provided; otherwise require Task match when available.
+  const expectedParentTask = String(subtask.parentTask || "").trim();
+  if (expectedParentTask && normalizeTicketIdentity_(parent.Task) !== normalizeTicketIdentity_(expectedParentTask)) {
+    throw new Error("Parent sheet row " + parentRow + " does not match the parent task. Refresh and try again.");
+  }
+
   const dateStr = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd");
   const summary = stripScreenshotMetadata_(subtask.Notes || subtask.Remarks || subtask.Task || "");
   const appendLine = "[Sub-task completed " + dateStr + "] " + String(subtask.Task || "Sub-task").trim()
@@ -1049,6 +1142,10 @@ function appendSubtaskCompletionToParent_(sheet, columnMap, subtask) {
   return true;
 }
 
+function isSoftDeletedStatus_(status) {
+  return normalizeTicketIdentity_(status) === normalizeTicketIdentity_(SOFT_DELETED_STATUS_);
+}
+
 function buildTicketSyncResult_(data, enriched, fields, sheetRow, workflow) {
   const result = {
     notes: String(enriched.Notes || enriched.Remarks || "").trim(),
@@ -1057,6 +1154,8 @@ function buildTicketSyncResult_(data, enriched, fields, sheetRow, workflow) {
     endDate: formatTicketFieldDate_(data["End date"]) || formatTicketFieldDate_(fields.endDate),
     uploadedCount: (data.attachments || []).length,
     status: fields.status || "",
+    ticketId: fields.ticketId || data.ticketId || "",
+    lastUpdated: nowIsoStamp_(),
     approvalPending: isPendingApprovalStatus_(fields.status),
     approvalSentTo: "",
     approvalMessage: workflow && workflow.message ? workflow.message : "",
@@ -1149,14 +1248,105 @@ function sendApprovalEmailIfNeeded_(data, savedTicket, workflow, sheet, sheetRow
 function writeTicketToSheetRow_(sheet, sheetRow, data) {
   const sheetInfo = getTasksSheetHeaders_(sheet);
   const columnMap = ensureTasksColumns_(sheet);
-  const lastColumn = Math.max(sheetInfo.lastColumn, columnMap.milestone >= 0 ? columnMap.milestone + 1 : sheetInfo.lastColumn);
+  const lastColumn = Math.max(sheetInfo.lastColumn, COLUMN_FALLBACK_INDICES_.ticketId + 1);
   const existingRow = sheet.getRange(sheetRow, 1, 1, lastColumn).getValues()[0].slice();
   const oldTicket = rowToTicket_(existingRow, columnMap, sheetRow);
+  assertRowIdentityMatch_(oldTicket, data, sheetRow);
+  if (isSoftDeletedStatus_(oldTicket.Status)) {
+    throw new Error("Ticket row " + sheetRow + " was deleted. Refresh and try again.");
+  }
+
+  // Merge incoming Notes with existing screenshot links so updates cannot wipe Drive URLs.
+  const notesIndex = resolveColumnIndex_(columnMap, "notes");
+  if (notesIndex >= 0) {
+    const existingNotes = String(existingRow[notesIndex] || "").trim();
+    data = Object.assign({}, data, {
+      Notes: mergeScreenshotNotes_(existingNotes, data.Notes || data.Remarks || ""),
+      Remarks: mergeScreenshotNotes_(existingNotes, data.Remarks || data.Notes || "")
+    });
+  }
+
+  if (!data.ticketId && oldTicket.ticketId) {
+    data = Object.assign({}, data, { ticketId: oldTicket.ticketId });
+  }
+  if (!data.ticketId) {
+    data = Object.assign({}, data, { ticketId: createTicketId_() });
+  }
+
   const oldStatus = oldTicket.Status;
   const prepared = prepareTicketSave_(data, oldTicket);
   const enriched = prepared.enriched;
   const fields = prepared.fields;
   const workflow = prepared.workflow;
+
+  // Stale Pending Approval must not undo manager Completed.
+  if (isCompletedStatus(oldStatus) && isPendingApprovalStatus_(fields.status)) {
+    return {
+      ok: false,
+      conflict: true,
+      stale: true,
+      error: "Ticket is already Completed. Refresh and try again.",
+      notes: String(oldTicket.Notes || "").trim(),
+      milestone: oldTicket.Milestone || "",
+      startDate: oldTicket["Start date"] || "",
+      endDate: oldTicket["End date"] || "",
+      uploadedCount: 0,
+      datesPersisted: true,
+      parentRemarkAppended: false,
+      parentSheetRow: 0,
+      status: oldStatus,
+      ticketId: oldTicket.ticketId || "",
+      lastUpdated: oldTicket.lastUpdated || "",
+      approvalPending: false,
+      approvalSentTo: "",
+      approvalEmailError: "",
+      approvalMessage: "Stale Pending Approval overwrite blocked.",
+      approved: false
+    };
+  }
+
+  // Completed → Not started / reopen requires manager (or explicit expectedStatus Completed).
+  if (isCompletedStatus(oldStatus) && !isCompletedStatus(fields.status) && !isPendingApprovalStatus_(fields.status)) {
+    const actorName = resolveActorName_(data);
+    const actorEmail = resolveActorEmail_(data);
+    const maps = readUserMasterMaps_();
+    if (!canUserApproveCompletion_(actorName, actorEmail, fields.owner || oldTicket.Owner, maps)) {
+      const expected = String(data.expectedStatus || data.lastKnownStatus || "").trim();
+      if (!isCompletedStatus(expected)) {
+        return {
+          ok: false,
+          conflict: true,
+          stale: true,
+          error: "Only the owner's manager can reopen a Completed task. Refresh and try again.",
+          notes: String(oldTicket.Notes || "").trim(),
+          milestone: oldTicket.Milestone || "",
+          startDate: oldTicket["Start date"] || "",
+          endDate: oldTicket["End date"] || "",
+          uploadedCount: 0,
+          datesPersisted: true,
+          parentRemarkAppended: false,
+          parentSheetRow: 0,
+          status: oldStatus,
+          ticketId: oldTicket.ticketId || "",
+          lastUpdated: oldTicket.lastUpdated || "",
+          approvalPending: false,
+          approvalSentTo: "",
+          approvalEmailError: "",
+          approvalMessage: "Completed reopen blocked.",
+          approved: false
+        };
+      }
+    }
+  }
+
+  // Soft lastUpdated conflict check.
+  const clientLastUpdated = String(data.lastUpdated || "").trim();
+  const serverLastUpdated = String(oldTicket.lastUpdated || "").trim();
+  if (clientLastUpdated && serverLastUpdated && clientLastUpdated !== serverLastUpdated) {
+    // Allow write but flag conflict so client can surface a message; last writer still wins
+    // after identity checks. Prefer adopting server stamp on response.
+  }
+
   const row = existingRow.slice();
   applyTicketFieldsToRow_(row, columnMap, fields);
   sheet.getRange(sheetRow, 1, 1, lastColumn).setValues([row]);
@@ -1178,8 +1368,11 @@ function writeTicketToSheetRow_(sheet, sheetRow, data) {
   }
 
   const approvalEmailResult = sendApprovalEmailIfNeeded_(data, savedTicket, workflow, sheet, sheetRow);
+  const lastUpdated = nowIsoStamp_();
 
   return {
+    ok: true,
+    conflict: Boolean(clientLastUpdated && serverLastUpdated && clientLastUpdated !== serverLastUpdated),
     notes: String(savedTicket.Notes || savedTicket.Remarks || enriched.Notes || enriched.Remarks || "").trim(),
     milestone: savedTicket.Milestone || expectedMilestone,
     startDate: savedTicket["Start date"] || expectedStart,
@@ -1189,6 +1382,8 @@ function writeTicketToSheetRow_(sheet, sheetRow, data) {
     parentRemarkAppended: parentRemarkAppended,
     parentSheetRow: parentSheetRow,
     status: savedTicket.Status,
+    ticketId: savedTicket.ticketId || fields.ticketId || "",
+    lastUpdated: lastUpdated,
     approvalPending: isPendingApprovalStatus_(savedTicket.Status),
     approvalSentTo: approvalEmailResult.to || "",
     approvalEmailError: approvalEmailResult.error || "",
@@ -1213,7 +1408,7 @@ function uploadTicketAttachmentsOnly_(data) {
   }
 
   const sheetInfo = getTasksSheetHeaders_(sheet);
-  const columnMap = buildColumnMap_(sheetInfo.headers);
+  const columnMap = ensureTasksColumns_(sheet);
   const notesIndex = columnMap.notes;
 
   if (notesIndex < 0) {
@@ -1221,6 +1416,12 @@ function uploadTicketAttachmentsOnly_(data) {
   }
 
   const row = sheet.getRange(sheetRow, 1, 1, sheetInfo.lastColumn).getValues()[0].slice();
+  const existingTicket = rowToTicket_(row, columnMap, sheetRow);
+  assertRowIdentityMatch_(existingTicket, data, sheetRow);
+  if (isSoftDeletedStatus_(existingTicket.Status)) {
+    throw new Error("Ticket row " + sheetRow + " was deleted. Refresh and try again.");
+  }
+
   const existingNotes = String(row[notesIndex] || "").trim();
   const mergedInput = Object.assign({}, data, {
     Notes: mergeScreenshotNotes_(existingNotes, data.Notes || data.Remarks || "")
@@ -1232,7 +1433,8 @@ function uploadTicketAttachmentsOnly_(data) {
 
   return {
     notes: notes,
-    uploadedCount: (data.attachments || []).length
+    uploadedCount: (data.attachments || []).length,
+    ticketId: existingTicket.ticketId || ""
   };
 }
 
@@ -1260,6 +1462,9 @@ function appendTicket_(data) {
 
   const sheetInfo = getTasksSheetHeaders_(sheet);
   const columnMap = ensureTasksColumns_(sheet);
+  if (!data.ticketId) {
+    data = Object.assign({}, data, { ticketId: createTicketId_() });
+  }
   const prepared = prepareTicketSave_(data, null);
   const enriched = prepared.enriched;
   const fields = prepared.fields;
@@ -1267,8 +1472,11 @@ function appendTicket_(data) {
   if (!fields.owner) {
     throw new Error("Owner is required for each ticket.");
   }
+  if (!fields.ticketId) {
+    fields.ticketId = data.ticketId || createTicketId_();
+  }
 
-  const row = new Array(Math.max(sheetInfo.lastColumn, COLUMN_FALLBACK_INDICES_.parentSheetRow + 1)).fill("");
+  const row = new Array(Math.max(sheetInfo.lastColumn, COLUMN_FALLBACK_INDICES_.ticketId + 1)).fill("");
   applyTicketFieldsToRow_(row, columnMap, fields);
   sheet.appendRow(row);
   const sheetRow = sheet.getLastRow();
@@ -1281,6 +1489,8 @@ function appendTicket_(data) {
   }
 
   const result = buildTicketSyncResult_(data, enriched, fields, sheetRow, workflow);
+  result.ticketId = savedTicket.ticketId || fields.ticketId || "";
+  result.lastUpdated = nowIsoStamp_();
   const approvalEmailResult = sendApprovalEmailIfNeeded_(data, savedTicket, workflow, sheet, sheetRow);
   result.approvalSentTo = approvalEmailResult.to || "";
   result.approvalEmailError = approvalEmailResult.error || "";
@@ -1340,25 +1550,28 @@ function deleteTicket_(data) {
   }
 
   const sheetInfo = getTasksSheetHeaders_(sheet);
-  const columnMap = buildColumnMap_(sheetInfo.headers);
-  const row = sheet.getRange(sheetRow, 1, 1, sheetInfo.lastColumn).getValues()[0];
+  const columnMap = ensureTasksColumns_(sheet);
+  const row = sheet.getRange(sheetRow, 1, 1, sheetInfo.lastColumn).getValues()[0].slice();
   const ticket = rowToTicket_(row, columnMap, sheetRow);
-  const expectedTask = String(data.Task || "").trim();
-  const expectedOwner = String(data.Owner || "").trim();
+  assertRowIdentityMatch_(ticket, data, sheetRow);
 
-  if (expectedTask && normalizeTicketIdentity_(ticket.Task) !== normalizeTicketIdentity_(expectedTask)) {
-    throw new Error(`Ticket row ${sheetRow} does not match the selected task. Refresh and try again.`);
+  // Soft-delete: mark Status=Deleted so later rows keep stable sheetRow numbers.
+  const statusIndex = resolveColumnIndex_(columnMap, "status");
+  if (statusIndex < 0) {
+    throw new Error('Missing "Status" column in Tasks sheet.');
   }
-
-  if (expectedOwner && normalizeTicketIdentity_(ticket.Owner) !== normalizeTicketIdentity_(expectedOwner)) {
-    throw new Error(`Ticket row ${sheetRow} does not match the selected owner. Refresh and try again.`);
+  row[statusIndex] = SOFT_DELETED_STATUS_;
+  sheet.getRange(sheetRow, 1, 1, sheetInfo.lastColumn).setValues([row]);
+  try {
+    sheet.hideRows(sheetRow);
+  } catch (hideError) {
+    Logger.log(hideError);
   }
 
   const taskKey = buildTaskKey(ticket.Task, ticket.Owner);
-  sheet.deleteRow(sheetRow);
   removeTaskAuditEntry_(taskKey);
 
-  return { sheetRow: sheetRow, task: ticket.Task, owner: ticket.Owner };
+  return { sheetRow: sheetRow, task: ticket.Task, owner: ticket.Owner, ticketId: ticket.ticketId || "" };
 }
 
 function readTaskAuditMap_() {
@@ -1763,6 +1976,7 @@ function rowToTicket_(row, columnMap, sheetRow) {
   const notes = String(readCell_(row, columnMap.notes, 9) || "").trim();
   const bhanuList = String(readCell_(row, columnMap.bhanuList, 10) || "").trim();
   const remarks = notes || (/^bhanu$/i.test(bhanuList) ? "" : bhanuList);
+  const ticketId = String(readCell_(row, columnMap.ticketId, 12) || "").trim();
 
   return {
     Task: readCell_(row, columnMap.task, 0) || "",
@@ -1778,6 +1992,7 @@ function rowToTicket_(row, columnMap, sheetRow) {
     Remarks: remarks,
     "Bhanu List": bhanuList,
     parentSheetRow: Number(readCell_(row, columnMap.parentSheetRow, 11)) || 0,
+    ticketId: ticketId,
     sheetRow: sheetRow
   };
 }
