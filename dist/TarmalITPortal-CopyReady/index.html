@@ -10,7 +10,7 @@
     <!-- auth stays blocking so requireLogin runs before app chrome paints -->
     <script src="./auth.js?v=20"></script>
     <!-- Defer main bundles so HTML can parse while ~210KB+ app.js downloads -->
-    <script src="./app.js?v=132" defer></script>
+    <script src="./app.js?v=133" defer></script>
     <script src="./assets.js?v=13" defer></script>
     <script src="./documents.js?v=11" defer></script>
     <script src="./procurement.js?v=5" defer></script>
@@ -1091,8 +1091,8 @@
               <label class="field">
                 <span>Status</span>
                 <select name="Status" required>
-                  <option>Not started</option>
-                  <option selected>In progress</option>
+                  <option selected>Not started</option>
+                  <option>In progress</option>
                   <option>Completed</option>
                   <option>Blocked</option>
                 </select>

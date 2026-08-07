@@ -4832,6 +4832,9 @@ function openTicketCreateModal() {
   resetSurajTicketCreateTracking();
   applyDefaultTicketFormOwner();
   applySurajTicketCreateDefaults({ force: true });
+  if (form?.elements?.Status) {
+    form.elements.Status.value = "Not started";
+  }
   form?.elements.Task?.focus();
 }
 
