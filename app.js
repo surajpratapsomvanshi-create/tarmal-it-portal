@@ -21,12 +21,13 @@ const TABLE_PAGE_SIZE = 80;
 const TABLE_PAGE_STEP = 80;
 const EXCLUDED_TICKET_OWNERS = new Set(["Bhanu", "Noorali"]);
 const HIERARCHY_KEY = "tarmal-user-hierarchy";
-/** v2 invalidates pre-fix expanded prefs that kept completed subtasks visible. */
-const SUBTASK_COLLAPSE_KEY = "tarmal-subtask-collapsed-v2";
+/** v3: parents stay expanded by default; completed children hide until show-completed. */
+const SUBTASK_COLLAPSE_KEY = "tarmal-subtask-collapsed-v3";
 const SUBTASK_COLLAPSE_KEY_LEGACY = "tarmal-subtask-collapsed";
+const SUBTASK_COLLAPSE_KEY_V2 = "tarmal-subtask-collapsed-v2";
 let lastTicketSearchQueryForExpand = null;
 let lastProjectSearchQueryForExpand = null;
-/** Parents the user expanded this session to reveal completed children (survives re-renders). */
+/** Parents where the user chose to show completed children this session (survives re-renders). */
 const sessionExpandedCompletedParents = { tickets: new Set(), projects: new Set() };
 const FALLBACK_HIERARCHY = [
   { user: "Suraj", manager: "", email: "sap@tarmalsteel.com" },
@@ -191,7 +192,6 @@ const screenshotPreviewPrev = document.querySelector("#screenshotPreviewPrev");
 const screenshotPreviewNext = document.querySelector("#screenshotPreviewNext");
 const closeScreenshotPreviewButton = document.querySelector("#closeScreenshotPreviewButton");
 const screenshotPreviewNotice = document.querySelector("#screenshotPreviewNotice");
-const attachmentsFolderLink = document.querySelector("#attachmentsFolderLink");
 
 let screenshotPreviewState = { urls: [], index: 0, title: "", eyebrow: "Attachment" };
 let activeEditTicket = null;
@@ -1434,7 +1434,6 @@ async function syncPendingScreenshotsToDrive(tickets = getValidTickets()) {
   screenshotSyncInProgress = false;
 
   if (uploaded) {
-    await refreshAttachmentsFolderLink();
     renderTickets();
     setStatus("online", `Saved ${uploaded} screenshot${uploaded === 1 ? "" : "s"} to Google Drive`);
   } else if (failed) {
@@ -1453,7 +1452,6 @@ async function verifyDriveUploadAfterSave(sheetRow) {
   if (ticketHasLocalScreenshotsOnly(ticket)) {
     const result = await autoUploadTicketScreenshots(ticket);
     if (result.ok && !result.skipped) {
-      await refreshAttachmentsFolderLink();
       renderTickets();
       return true;
     }
@@ -1462,7 +1460,6 @@ async function verifyDriveUploadAfterSave(sheetRow) {
     const refreshed = findTicketBySheetRow(sheetRow);
     if (refreshed && ticketNotesIncludeDriveLinks(refreshed)) {
       setStatus("online", "Screenshot saved to Google Drive");
-      await refreshAttachmentsFolderLink();
       renderTickets();
       return true;
     }
@@ -1473,7 +1470,6 @@ async function verifyDriveUploadAfterSave(sheetRow) {
 
   if (ticketNotesIncludeDriveLinks(ticket)) {
     setStatus("online", "Screenshot saved to Google Drive");
-    await refreshAttachmentsFolderLink();
   }
 
   return true;
@@ -3249,13 +3245,21 @@ function autoExpandParentsForNewSearch(searchQuery, tickets, scope = "tickets") 
   else lastTicketSearchQueryForExpand = query;
 
   const parentRowsWithChildren = new Set();
+  const parentsWithMatchedCompletedChild = new Set();
   tickets.forEach((ticket) => {
     if (!isSubtaskTicket(ticket)) return;
     const parentRow = Number(ticket.parentSheetRow);
-    if (parentRow) parentRowsWithChildren.add(parentRow);
+    if (!parentRow) return;
+    parentRowsWithChildren.add(parentRow);
+    if (isTicketCompleted(ticket) && ticketSearchHaystack(ticket).includes(query)) {
+      parentsWithMatchedCompletedChild.add(parentRow);
+    }
   });
   parentRowsWithChildren.forEach((parentRow) => {
     setSubtaskParentCollapsed(parentRow, false, scope);
+    if (parentsWithMatchedCompletedChild.has(parentRow)) {
+      setSessionShowCompletedSubtasks(parentRow, true, scope);
+    }
   });
 }
 
@@ -4621,11 +4625,14 @@ function getParentTicket(ticket) {
   return parentRow ? findTicketBySheetRow(parentRow) : null;
 }
 
-/** Drop legacy collapse map once so old "expanded" entries cannot unhide completed children. */
+/** Drop legacy collapse maps so v2 force-collapse prefs cannot hide open children. */
 function purgeLegacySubtaskCollapsePrefs() {
   try {
     if (localStorage.getItem(SUBTASK_COLLAPSE_KEY_LEGACY) != null) {
       localStorage.removeItem(SUBTASK_COLLAPSE_KEY_LEGACY);
+    }
+    if (localStorage.getItem(SUBTASK_COLLAPSE_KEY_V2) != null) {
+      localStorage.removeItem(SUBTASK_COLLAPSE_KEY_V2);
     }
   } catch {
     /* ignore */
@@ -4663,45 +4670,45 @@ function normalizeSubtaskCollapsePanel(panel) {
   return panel === "projects" ? "projects" : "tickets";
 }
 
-/** Default when no saved preference: tickets expanded, projects collapsed.
- *  Parents with any completed subtask default collapsed so those children stay
- *  hidden until the user expands. */
-function defaultSubtaskParentCollapsed(panel, options = {}) {
-  if (normalizeSubtaskCollapsePanel(panel) === "projects") return true;
-  return Boolean(options.hasCompletedChild);
+/** Default when no saved preference: tickets expanded, projects collapsed. */
+function defaultSubtaskParentCollapsed(panel) {
+  return normalizeSubtaskCollapsePanel(panel) === "projects";
+}
+
+/** Whether this session is showing completed children for a parent. */
+function isSessionShowingCompletedSubtasks(sheetRow, panel = "tickets") {
+  const scope = normalizeSubtaskCollapsePanel(panel);
+  const row = Number(sheetRow);
+  return Boolean(row && sessionExpandedCompletedParents[scope]?.has(row));
+}
+
+function setSessionShowCompletedSubtasks(sheetRow, show, panel = "tickets") {
+  const scope = normalizeSubtaskCollapsePanel(panel);
+  const row = Number(sheetRow);
+  if (!row) return;
+  if (!sessionExpandedCompletedParents[scope]) {
+    sessionExpandedCompletedParents[scope] = new Set();
+  }
+  if (show) sessionExpandedCompletedParents[scope].add(row);
+  else sessionExpandedCompletedParents[scope].delete(row);
 }
 
 /**
  * Collapse state for a parent row.
- * Option D: parents with ≥1 completed child start collapsed (▸). Expand shows all
- * children including completed; collapse hides them again. Stale localStorage
- * "expanded" from before v2 is ignored via key migration + session expand set.
+ * Tickets default expanded (open children visible); completed children are filtered
+ * separately via session show-completed until the user reveals them.
  */
-function isSubtaskParentCollapsed(sheetRow, panel = "tickets", options = {}) {
+function isSubtaskParentCollapsed(sheetRow, panel = "tickets") {
   const scope = normalizeSubtaskCollapsePanel(panel);
   const key = String(sheetRow);
-  const row = Number(sheetRow);
-  const hasCompletedChild = Boolean(options.hasCompletedChild);
-
-  if (hasCompletedChild) {
-    // Explicit expand this session wins (toggle sets this before re-render).
-    if (sessionExpandedCompletedParents[scope]?.has(row)) return false;
-    const state = readCollapsedSubtaskParents()[scope] || {};
-    // Only honor a stored expand (false) under the v2 key — never inherit legacy expanded.
-    if (Object.prototype.hasOwnProperty.call(state, key)) {
-      return Boolean(state[key]);
-    }
-    return true;
-  }
-
   const state = readCollapsedSubtaskParents()[scope] || {};
   if (Object.prototype.hasOwnProperty.call(state, key)) {
     return Boolean(state[key]);
   }
-  return defaultSubtaskParentCollapsed(scope, options);
+  return defaultSubtaskParentCollapsed(scope);
 }
 
-function setSubtaskParentCollapsed(sheetRow, collapsed, panel = "tickets", options = {}) {
+function setSubtaskParentCollapsed(sheetRow, collapsed, panel = "tickets") {
   const scope = normalizeSubtaskCollapsePanel(panel);
   const all = readCollapsedSubtaskParents();
   const state = { ...(all[scope] || {}) };
@@ -4713,15 +4720,18 @@ function setSubtaskParentCollapsed(sheetRow, collapsed, panel = "tickets", optio
   all[scope] = state;
   localStorage.setItem(SUBTASK_COLLAPSE_KEY, JSON.stringify(all));
 
-  if (!sessionExpandedCompletedParents[scope]) {
-    sessionExpandedCompletedParents[scope] = new Set();
-  }
+  // Collapsing clears show-completed; expanding does not auto-reveal completed kids.
   if (nextCollapsed) {
-    sessionExpandedCompletedParents[scope].delete(row);
-  } else {
-    // Remember explicit expands so completed children stay visible after re-render.
-    sessionExpandedCompletedParents[scope].add(row);
+    setSessionShowCompletedSubtasks(row, false, scope);
   }
+}
+
+/** Hide completed subtasks while parent is expanded but show-completed is off. */
+function isCompletedSubtaskHidden(ticket, panel) {
+  if (!isSubtaskTicket(ticket) || !isTicketCompleted(ticket)) return false;
+  const parentRow = Number(ticket.parentSheetRow);
+  if (!parentRow) return false;
+  return !isSessionShowingCompletedSubtasks(parentRow, panel);
 }
 
 function getChildSubtasks(parentSheetRow, tickets) {
@@ -5489,10 +5499,21 @@ function bindTicketEditButtons(root = rows) {
       const parentRow = Number(button.dataset.sheetRow);
       if (!parentRow) return;
       const panel = normalizeSubtaskCollapsePanel(button.dataset.collapsePanel || "tickets");
-      const currentlyExpanded = button.getAttribute("aria-expanded") !== "false";
+      const currentlyCollapsed = button.getAttribute("aria-expanded") === "false";
       const hasCompletedChild = button.dataset.hasCompletedChild === "1";
-      // currentlyExpanded → user is collapsing; !currentlyExpanded → expanding (reveal completed).
-      setSubtaskParentCollapsed(parentRow, currentlyExpanded, panel, { hasCompletedChild });
+      const showingCompleted = button.dataset.showCompleted === "1";
+
+      if (currentlyCollapsed) {
+        // Expand → open children only (completed stay hidden until next click).
+        setSubtaskParentCollapsed(parentRow, false, panel);
+        setSessionShowCompletedSubtasks(parentRow, false, panel);
+      } else if (hasCompletedChild && !showingCompleted) {
+        // Partial expand → reveal completed children.
+        setSessionShowCompletedSubtasks(parentRow, true, panel);
+      } else {
+        // Full expand (or no completed kids) → collapse all children.
+        setSubtaskParentCollapsed(parentRow, true, panel);
+      }
       renderTickets({ activeOnly: true, forcePanel: panel });
     });
   });
@@ -6009,8 +6030,8 @@ function renderTicketTable(tickets, options = {}) {
 
   const childCounts = new Map();
   const parentsWithCompletedChildren = new Set();
-  // Prefer the rows in this table; also scan the full sheet so a completed child
-  // still force-collapses the parent even if filters momentarily omit it.
+  // Prefer the rows in this table; also scan the full sheet so completed-child
+  // badges stay accurate even if filters momentarily omit a child.
   const markCompletedParents = (list) => {
     (Array.isArray(list) ? list : []).forEach((ticket) => {
       if (!isSubtaskTicket(ticket) || !isTicketCompleted(ticket)) return;
@@ -6027,20 +6048,15 @@ function renderTicketTable(tickets, options = {}) {
   });
   markCompletedParents(typeof getValidTickets === "function" ? getValidTickets() : null);
 
-  const collapseOptionsFor = (sheetRow) => ({
-    hasCompletedChild: parentsWithCompletedChildren.has(Number(sheetRow))
-  });
   const isChildHiddenByCollapse = (ticket) => {
     if (!isSubtaskTicket(ticket)) return false;
-    return isSubtaskParentCollapsed(
-      Number(ticket.parentSheetRow),
-      collapsePanel,
-      collapseOptionsFor(ticket.parentSheetRow)
-    );
+    const parentRow = Number(ticket.parentSheetRow);
+    if (isSubtaskParentCollapsed(parentRow, collapsePanel)) return true;
+    if (isCompletedSubtaskHidden(ticket, collapsePanel)) return true;
+    return false;
   };
 
-  // Keep completed children in the grouped list; only omit collapsed rows from the page.
-  // Collapsed parents (including force-collapsed when they have completed children) hide all kids.
+  // Open children stay visible while expanded; completed kids need show-completed.
   const displayTickets = tickets.filter((ticket) => !isChildHiddenByCollapse(ticket));
   const visibleTickets = pageLimit && displayTickets.length > pageLimit
     ? displayTickets.slice(0, pageLimit)
@@ -6055,12 +6071,22 @@ function renderTicketTable(tickets, options = {}) {
       const childCount = childCounts.get(parentRow) || 0;
       const hasChildren = !subtask && childCount > 0;
       const hasCompletedChild = hasChildren && parentsWithCompletedChildren.has(parentRow);
-      const collapsed = hasChildren && isSubtaskParentCollapsed(parentRow, collapsePanel, collapseOptionsFor(parentRow));
+      const collapsed = hasChildren && isSubtaskParentCollapsed(parentRow, collapsePanel);
+      const showingCompleted = hasChildren && isSessionShowingCompletedSubtasks(parentRow, collapsePanel);
       const parentCollapsed = subtask && isSubtaskParentCollapsed(
         Number(ticket.parentSheetRow),
-        collapsePanel,
-        collapseOptionsFor(ticket.parentSheetRow)
+        collapsePanel
       );
+
+      let toggleTitle = "Hide sub-tasks";
+      let toggleAria = `Collapse ${childCount} sub-task${childCount === 1 ? "" : "s"}`;
+      if (collapsed) {
+        toggleTitle = "Show sub-tasks";
+        toggleAria = `Expand ${childCount} sub-task${childCount === 1 ? "" : "s"}`;
+      } else if (hasCompletedChild && !showingCompleted) {
+        toggleTitle = "Show completed sub-tasks";
+        toggleAria = `Show completed sub-tasks (${childCount} total)`;
+      }
 
       let taskCell = "";
       if (subtask) {
@@ -6074,9 +6100,10 @@ function renderTicketTable(tickets, options = {}) {
               data-sheet-row="${parentRow}"
               data-collapse-panel="${collapsePanel}"
               data-has-completed-child="${hasCompletedChild ? "1" : "0"}"
+              data-show-completed="${showingCompleted ? "1" : "0"}"
               aria-expanded="${collapsed ? "false" : "true"}"
-              aria-label="${collapsed ? "Expand" : "Collapse"} ${childCount} sub-task${childCount === 1 ? "" : "s"}"
-              title="${collapsed ? "Show" : "Hide"} sub-tasks"
+              aria-label="${toggleAria}"
+              title="${toggleTitle}"
             >${collapsed ? "▸" : "▾"}</button>
             <span class="ticket-parent-task">${escapeHtml(ticket.Task)}</span>
             <span class="ticket-subtask-count">${childCount}</span>
@@ -6430,7 +6457,6 @@ async function queueBackgroundScreenshotSync(tickets) {
   }
 
   renderTickets();
-  await refreshAttachmentsFolderLink();
 }
 
 async function sendToSheet(ticket, options = {}) {
@@ -6586,16 +6612,6 @@ async function refreshFromSheet(options = {}) {
     }
     if (!options.silent) setStatus("online", `Loaded ${tickets.length} tickets`);
 
-    if (!options.skipAttachmentsFolder) {
-      // Folder link is non-critical — never block ticket paint on Drive metadata.
-      const folderPromise = refreshAttachmentsFolderLink();
-      if (!options.deferAttachmentsFolder) {
-        await folderPromise;
-      } else {
-        folderPromise.catch((error) => console.error(error));
-      }
-    }
-
     if (!options.skipScreenshotSync) {
       const syncPromise = syncPendingScreenshotsToDrive(getValidTickets());
       if (options.deferScreenshotSync) {
@@ -6646,7 +6662,6 @@ async function autoRefreshTickets() {
   try {
     await refreshFromSheet({
       skipScreenshotSync: true,
-      skipAttachmentsFolder: true,
       deferSecondary: true,
       silent: true
     });
@@ -6679,7 +6694,6 @@ async function softRefreshAfterLocalPaint() {
     const [ticketsOk] = await Promise.all([
       refreshFromSheet({
         skipScreenshotSync: true,
-        skipAttachmentsFolder: true,
         deferSecondary: true,
         silent: true
       }),
@@ -6689,7 +6703,6 @@ async function softRefreshAfterLocalPaint() {
       const count = getValidTickets().length;
       setStatus("online", count ? `Loaded ${count} tickets` : "Synced");
       scheduleIdleWork(() => {
-        refreshAttachmentsFolderLink().catch((error) => console.error(error));
         syncPendingScreenshotsToDrive(getValidTickets()).catch((error) => console.error(error));
       }, 2500);
     } else {
@@ -6700,65 +6713,6 @@ async function softRefreshAfterLocalPaint() {
     console.error(error);
   } finally {
     bootRefreshInProgress = false;
-  }
-}
-
-function loadAttachmentsFolderInfo() {
-  return new Promise((resolve, reject) => {
-    if (!SHEET_WEB_APP_URL) {
-      reject(new Error("Sync is not configured."));
-      return;
-    }
-
-    const callbackName = `handleAttachmentsFolder_${Date.now()}`;
-    const script = document.createElement("script");
-    const separator = SHEET_WEB_APP_URL.includes("?") ? "&" : "?";
-    const cleanup = () => {
-      delete window[callbackName];
-      script.remove();
-    };
-
-    window[callbackName] = (payload) => {
-      cleanup();
-      if (!payload || payload.ok === false) {
-        if (payload?.needsDriveAuth) {
-          setStatus("error", "Drive permission needed — run setupDriveAccess in Apps Script");
-        }
-        reject(new Error(payload?.error || "Could not load screenshots folder."));
-        return;
-      }
-      resolve(payload.folder || null);
-    };
-
-    script.onerror = () => {
-      cleanup();
-      reject(new Error("Could not load screenshots folder."));
-    };
-
-    script.src = `${SHEET_WEB_APP_URL}${separator}resource=attachmentsFolder&callback=${callbackName}`;
-    document.body.appendChild(script);
-  });
-}
-
-async function refreshAttachmentsFolderLink() {
-  if (!attachmentsFolderLink || !SHEET_WEB_APP_URL) return;
-
-  try {
-    const folder = await loadAttachmentsFolderInfo();
-    if (!folder?.url) {
-      attachmentsFolderLink.hidden = true;
-      return;
-    }
-
-    attachmentsFolderLink.href = folder.url;
-    attachmentsFolderLink.textContent = folder.fileCount
-      ? `Screenshots Folder (${folder.fileCount})`
-      : "Screenshots Folder";
-    attachmentsFolderLink.title = `Open "${folder.name}" in Google Drive — same location as spreadsheet "${folder.spreadsheetName}" (inside: ${folder.parentName})`;
-    attachmentsFolderLink.hidden = false;
-  } catch (error) {
-    attachmentsFolderLink.hidden = true;
-    console.error(error);
   }
 }
 
