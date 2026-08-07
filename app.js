@@ -15,7 +15,7 @@ const ticketSubmitProgressFill = document.querySelector("#ticketSubmitProgressFi
 const DEFAULT_TICKET_OWNERS = ["Suraj", "Sushil", "Dishon"];
 const DEFAULT_TICKET_SORT = "milestone-open-desc";
 const CLEARED_TICKET_SORT = "recent";
-const PENDING_SYNC_TTL_MS = 120000;
+const PENDING_SYNC_TTL_MS = 180000;
 /** Initial DOM rows for ticket/project tables — keeps first paint fast with 700+ tickets. */
 const TABLE_PAGE_SIZE = 80;
 const TABLE_PAGE_STEP = 80;
@@ -1282,6 +1282,23 @@ function mergeRemoteTicketsWithLocal(remoteTickets) {
   return merged;
 }
 
+function ticketCoreFieldsMatch(local, remote) {
+  if (!local || !remote) return false;
+  const localNotes = cleanText(local.Notes || local.Remarks);
+  const remoteNotes = cleanText(remote.Notes || remote.Remarks);
+  return cleanText(local.Task) === cleanText(remote.Task)
+    && cleanText(String(local.Priority ?? "")) === cleanText(String(remote.Priority ?? ""))
+    && cleanText(local.Owner) === cleanText(remote.Owner)
+    && cleanText(local["Raised By"]) === cleanText(remote["Raised By"])
+    && cleanText(local.Status) === cleanText(remote.Status)
+    && cleanText(local.Type) === cleanText(remote.Type)
+    && ticketDatesMatch(local.Milestone, remote.Milestone)
+    && ticketDatesMatch(local["Start date"], remote["Start date"])
+    && ticketDatesMatch(local["End date"], remote["End date"])
+    && localNotes === remoteNotes
+    && Number(local.parentSheetRow || 0) === Number(remote.parentSheetRow || 0);
+}
+
 function mergeTicketFromSheet(remoteTicket, index, localBySheetRow = null) {
   const sheetRow = remoteTicket.sheetRow ?? index + 2;
   const rowKey = Number(sheetRow);
@@ -1298,13 +1315,12 @@ function mergeTicketFromSheet(remoteTicket, index, localBySheetRow = null) {
     screenshotUrls
   );
 
-  const remoteDatesMatchLocal = local
-    && ticketDatesMatch(local.Milestone, remoteTicket.Milestone)
-    && ticketDatesMatch(local["Start date"], remoteTicket["Start date"])
-    && ticketDatesMatch(local["End date"], remoteTicket["End date"]);
   const pending = Number(local?.pendingSheetSync) || 0;
   const isRecentPending = pending > 0 && (Date.now() - pending < PENDING_SYNC_TTL_MS);
-  const preservePendingEdits = isRecentPending && local && !remoteDatesMatchLocal;
+  // Prefer local edits for ANY field while a sync is in flight — not only when dates differ.
+  // Otherwise Status/Owner/Task/remarks updates flash on screen, then a refresh restores stale sheet data.
+  const remoteCaughtUp = Boolean(local) && ticketCoreFieldsMatch(local, remoteTicket);
+  const preservePendingEdits = Boolean(local) && isRecentPending && !remoteCaughtUp;
 
   const preserveFields = preservePendingEdits ? {
     Task: local.Task,
@@ -1325,7 +1341,9 @@ function mergeTicketFromSheet(remoteTicket, index, localBySheetRow = null) {
     ...remoteTicket,
     ...preserveFields,
     sheetRow,
-    NotesRaw: notesRaw,
+    NotesRaw: preservePendingEdits
+      ? String(local.Notes || local.Remarks || notesRaw || "")
+      : notesRaw,
     NotesHtml: notesHtml,
     ScreenshotUrls: screenshotUrls,
     pendingSheetSync: preservePendingEdits ? pending : 0
@@ -4988,14 +5006,10 @@ function applyTicketSyncResult(sheetRow, result = {}, expected = {}) {
     ? String(expected["End date"] ?? "").trim()
     : coalesceSyncValue(result.endDate, ticket["End date"]);
 
-  const sheetConfirmed = Boolean(result.datesPersisted) || (
-    hasExpectedUpdate
-    && ticketDatesMatch(result.milestone, expected.Milestone)
-    && ticketDatesMatch(result.startDate, expected["Start date"])
-    && ticketDatesMatch(result.endDate, expected["End date"])
-  );
   const syncedStatus = reconcileSyncedTicketStatus(ticket, result, expected);
 
+  // Refresh pendingSheetSync timestamp so the next sheet GET cannot overwrite with a
+  // stale row before Apps Script has fully settled. Merge clears pending once remote matches.
   updateLocalTicket(normalizeTicket({
     ...ticket,
     Status: syncedStatus,
@@ -5005,7 +5019,7 @@ function applyTicketSyncResult(sheetRow, result = {}, expected = {}) {
     Notes: notes || ticket.Notes,
     Remarks: notes || ticket.Remarks,
     NotesHtml: notesHtml
-  }), { clearPendingSync: sheetConfirmed });
+  }));
 }
 
 function applyDriveLinksToLocalTicket(sheetRow, notesText) {
@@ -6612,11 +6626,20 @@ function isAnyModalOpen() {
   );
 }
 
+function hasRecentPendingTicketSync() {
+  const now = Date.now();
+  return getValidTickets().some((ticket) => {
+    const pending = Number(ticket.pendingSheetSync) || 0;
+    return pending > 0 && (now - pending < PENDING_SYNC_TTL_MS);
+  });
+}
+
 async function autoRefreshTickets() {
   if (!SHEET_WEB_APP_URL) return;
   if (document.hidden) return;
   if (autoRefreshInProgress || bootRefreshInProgress) return;
   if (isAnyModalOpen()) return;
+  if (hasRecentPendingTicketSync()) return;
   if (lastSheetRefreshAt && (Date.now() - lastSheetRefreshAt) < AUTO_REFRESH_MIN_GAP_MS) return;
 
   autoRefreshInProgress = true;
