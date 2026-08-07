@@ -2744,13 +2744,6 @@ body.sidebar-collapsed .sidebar-expand-bar {
   text-decoration: none;
 }
 
-.attachments-folder-link {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  text-decoration: none;
-}
-
 .primary-button,
 .secondary-button,
 .icon-button {

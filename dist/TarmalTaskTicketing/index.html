@@ -6,7 +6,7 @@
     <title>Tarmal IT Portal</title>
     <link rel="icon" href="./assets/tarmal-mark.png?v=1" type="image/png">
     <link rel="apple-touch-icon" href="./assets/apple-touch-icon.png?v=1">
-    <link rel="stylesheet" href="./styles.css?v=98">
+    <link rel="stylesheet" href="./styles.css?v=99">
     <!-- auth stays blocking so requireLogin runs before app chrome paints -->
     <script src="./auth.js?v=20"></script>
     <!-- Defer main bundles so HTML can parse while ~210KB+ app.js downloads -->
@@ -371,7 +371,6 @@
                 <div class="board-actions">
                   <button class="primary-button" id="openTicketCreateButton" type="button" data-requires="createTicket">+ New Ticket</button>
                   <button class="secondary-button" id="refreshSheetButton" type="button" data-requires="syncSheet">Refresh</button>
-                  <a class="secondary-button attachments-folder-link" id="attachmentsFolderLink" href="#" target="_blank" rel="noopener noreferrer" hidden>Screenshots Folder</a>
                   <button class="secondary-button" id="exportButton" type="button" data-requires="exportData">Export CSV</button>
                   <button class="secondary-button danger" id="clearLocalButton" type="button">Clear Local</button>
                   <button class="secondary-button toolbar-collapse-btn" type="button">Hide filters</button>
