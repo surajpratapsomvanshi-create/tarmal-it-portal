@@ -680,6 +680,8 @@ function readTickets() {
   }
 }
 
+let ticketsWriteEpoch = 0;
+
 function writeTickets(tickets, options = {}) {
   ticketsMemoryCache = tickets;
   const json = JSON.stringify(tickets);
@@ -692,9 +694,10 @@ function writeTickets(tickets, options = {}) {
     console.warn("Could not write ticket drafts backup.", error);
   }
   localStorage.setItem(LOCAL_KEY, json);
+  const epoch = ++ticketsWriteEpoch;
   if (!options.skipBroadcast) {
     try {
-      ticketsBroadcastChannel?.postMessage({ type: "tickets-updated", at: Date.now() });
+      ticketsBroadcastChannel?.postMessage({ type: "tickets-updated", at: Date.now(), epoch });
     } catch {
       /* ignore */
     }
@@ -717,6 +720,9 @@ function initTicketsCrossTabSync() {
       ticketsBroadcastChannel = new BroadcastChannel(TICKETS_BROADCAST_CHANNEL);
       ticketsBroadcastChannel.addEventListener("message", (event) => {
         if (event?.data?.type !== "tickets-updated") return;
+        // Ignore our own write — invalidating here races in-flight saves and can
+        // re-render from a stale merge that landed in localStorage microseconds later.
+        if (Number(event?.data?.epoch) === ticketsWriteEpoch) return;
         invalidateTicketsMemoryCache();
         scheduleRenderTickets({ immediate: true });
       });
@@ -1177,6 +1183,13 @@ function ticketDatesMatch(left, right) {
   return a === b;
 }
 
+function canonicalizeTicketDate(value) {
+  const sanitized = sanitizeDateField(value);
+  if (!sanitized) return "";
+  const key = normalizeDateKey(sanitized);
+  return /^\d{4}-\d{2}-\d{2}$/.test(key) ? key : sanitized;
+}
+
 function ticketIdentityKey(ticket) {
   return `${cleanText(ticket.Task)}||${cleanText(ticket.Owner)}`;
 }
@@ -1398,22 +1411,105 @@ function mergeRemoteTicketsWithLocal(remoteTickets) {
   return merged;
 }
 
+const PENDING_SYNC_FIELD_KEYS = [
+  "Task",
+  "Priority",
+  "Owner",
+  "Raised By",
+  "Status",
+  "Type",
+  "Start date",
+  "End date",
+  "Milestone",
+  "Notes",
+  "Remarks",
+  "Bhanu List",
+  "parentSheetRow"
+];
+
+function ticketFieldMatches(field, local, remote) {
+  if (!local || !remote) return false;
+  switch (field) {
+    case "Task":
+      return cleanText(local.Task) === cleanText(remote.Task);
+    case "Priority":
+      return normalizePriority(local.Priority) === normalizePriority(remote.Priority);
+    case "Owner":
+      return cleanText(local.Owner) === cleanText(remote.Owner);
+    case "Raised By":
+      return cleanText(local["Raised By"]) === cleanText(remote["Raised By"]);
+    case "Status":
+      return cleanText(local.Status) === cleanText(remote.Status);
+    case "Type":
+      return cleanText(local.Type) === cleanText(remote.Type);
+    case "Start date":
+      return ticketDatesMatch(local["Start date"], remote["Start date"]);
+    case "End date":
+      return ticketDatesMatch(local["End date"], remote["End date"]);
+    case "Milestone":
+      return ticketDatesMatch(local.Milestone, remote.Milestone);
+    case "Notes":
+    case "Remarks":
+      return normalizeNotesForCompare(local) === normalizeNotesForCompare(remote);
+    case "Bhanu List":
+      return cleanText(local["Bhanu List"]) === cleanText(remote["Bhanu List"]);
+    case "parentSheetRow":
+      return Number(local.parentSheetRow || 0) === Number(remote.parentSheetRow || 0);
+    default:
+      return cleanText(local[field]) === cleanText(remote[field]);
+  }
+}
+
 function ticketCoreFieldsMatch(local, remote) {
   if (!local || !remote) return false;
-  const localNotes = normalizeNotesForCompare(local);
-  const remoteNotes = normalizeNotesForCompare(remote);
-  return cleanText(local.Task) === cleanText(remote.Task)
-    && cleanText(String(local.Priority ?? "")) === cleanText(String(remote.Priority ?? ""))
-    && cleanText(local.Owner) === cleanText(remote.Owner)
-    && cleanText(local["Raised By"]) === cleanText(remote["Raised By"])
-    && cleanText(local.Status) === cleanText(remote.Status)
-    && cleanText(local.Type) === cleanText(remote.Type)
-    && ticketDatesMatch(local.Milestone, remote.Milestone)
-    && ticketDatesMatch(local["Start date"], remote["Start date"])
-    && ticketDatesMatch(local["End date"], remote["End date"])
-    && localNotes === remoteNotes
-    && cleanText(local["Bhanu List"]) === cleanText(remote["Bhanu List"])
-    && Number(local.parentSheetRow || 0) === Number(remote.parentSheetRow || 0);
+  return PENDING_SYNC_FIELD_KEYS.every((field) => {
+    if (field === "Remarks") return true; // covered by Notes compare
+    return ticketFieldMatches(field, local, remote);
+  });
+}
+
+function normalizePendingFieldsList(fields) {
+  if (!Array.isArray(fields)) return [];
+  const allowed = new Set(PENDING_SYNC_FIELD_KEYS);
+  const seen = new Set();
+  const out = [];
+  fields.forEach((field) => {
+    const key = String(field || "").trim();
+    if (!key || !allowed.has(key) || seen.has(key)) return;
+    seen.add(key);
+    out.push(key);
+    if (key === "Notes" && !seen.has("Remarks")) {
+      seen.add("Remarks");
+      out.push("Remarks");
+    }
+    if (key === "Remarks" && !seen.has("Notes")) {
+      seen.add("Notes");
+      out.push("Notes");
+    }
+  });
+  return out;
+}
+
+function diffPendingTicketFields(before, after) {
+  if (!after) return [];
+  if (!before) return PENDING_SYNC_FIELD_KEYS.slice();
+  return PENDING_SYNC_FIELD_KEYS.filter((field) => {
+    if (field === "Remarks") return false;
+    return !ticketFieldMatches(field, before, after);
+  });
+}
+
+function stillPendingTicketFields(local, remote, pendingFields) {
+  // null/undefined = legacy pending without a field list → protect every differing field.
+  // Explicit [] = nothing left to protect.
+  if (Array.isArray(pendingFields) && pendingFields.length === 0) return [];
+  const tracked = pendingFields == null
+    ? PENDING_SYNC_FIELD_KEYS.filter((field) => field !== "Remarks")
+    : normalizePendingFieldsList(pendingFields);
+  return tracked.filter((field) => {
+    if (field === "Remarks") return false;
+    return !ticketFieldMatches(field, local, remote);
+  });
 }
 
 function mergeTicketFromSheet(remoteTicket, index, localBySheetRow = null, localByTicketId = null) {
@@ -1443,41 +1539,53 @@ function mergeTicketFromSheet(remoteTicket, index, localBySheetRow = null, local
 
   const pending = Number(local?.pendingSheetSync) || 0;
   const isRecentPending = pending > 0 && (Date.now() - pending < PENDING_SYNC_TTL_MS);
-  // Prefer local edits for ANY field while a sync is in flight — not only when dates differ.
-  // Otherwise Status/Owner/Task/remarks updates flash on screen, then a refresh restores stale sheet data.
-  const remoteCaughtUp = Boolean(local) && ticketCoreFieldsMatch(local, remoteTicket);
-  const preservePendingEdits = Boolean(local) && isRecentPending && !remoteCaughtUp;
+  // Per-field pending: only keep local values that still differ from remote for fields
+  // this client actually edited. Matching fields take remote so a Notes/Bhanu mismatch
+  // cannot resurrect a stale Milestone/Status/Owner forever.
+  const rawPendingFields = local?.pendingFields;
+  const remainingPendingFields = (Boolean(local) && isRecentPending)
+    ? stillPendingTicketFields(
+      local,
+      remoteTicket,
+      Array.isArray(rawPendingFields) ? normalizePendingFieldsList(rawPendingFields) : null
+    )
+    : [];
+  const preservePendingEdits = remainingPendingFields.length > 0;
 
-  const preserveFields = preservePendingEdits ? {
-    Task: local.Task,
-    Priority: local.Priority,
-    Owner: local.Owner,
-    "Raised By": local["Raised By"],
-    Status: local.Status,
-    Type: local.Type,
-    "Start date": local["Start date"],
-    "End date": local["End date"],
-    Milestone: local.Milestone,
-    parentSheetRow: local.parentSheetRow,
-    Notes: local.Notes,
-    Remarks: local.Remarks,
-    "Bhanu List": local["Bhanu List"],
-    ticketId: local.ticketId || remoteTicket.ticketId,
-    submissionId: local.submissionId,
-    lastUpdated: local.lastUpdated
-  } : {};
+  const preserveFields = {};
+  if (preservePendingEdits) {
+    const preserveKeys = new Set(remainingPendingFields);
+    if (preserveKeys.has("Notes")) preserveKeys.add("Remarks");
+    PENDING_SYNC_FIELD_KEYS.forEach((field) => {
+      if (!preserveKeys.has(field)) return;
+      if (field === "Priority") {
+        preserveFields.Priority = normalizePriority(local.Priority);
+        return;
+      }
+      if (field === "parentSheetRow") {
+        preserveFields.parentSheetRow = local.parentSheetRow;
+        return;
+      }
+      preserveFields[field] = local[field];
+    });
+    preserveFields.ticketId = local.ticketId || remoteTicket.ticketId;
+    preserveFields.submissionId = local.submissionId;
+    preserveFields.lastUpdated = local.lastUpdated;
+    preserveFields.pendingFields = remainingPendingFields;
+  }
 
   return normalizeTicket({
     ...remoteTicket,
     ...preserveFields,
     ticketId: preserveFields.ticketId || remoteTicket.ticketId || local?.ticketId || "",
     sheetRow,
-    NotesRaw: preservePendingEdits
+    NotesRaw: preservePendingEdits && remainingPendingFields.includes("Notes")
       ? String(local.Notes || local.Remarks || notesRaw || "")
       : notesRaw,
     NotesHtml: notesHtml,
     ScreenshotUrls: screenshotUrls,
-    pendingSheetSync: preservePendingEdits ? pending : 0
+    pendingSheetSync: preservePendingEdits ? pending : 0,
+    pendingFields: preservePendingEdits ? remainingPendingFields : []
   });
 }
 
@@ -2173,9 +2281,9 @@ function normalizeTicket(ticket) {
     "Raised By": cleanText(ticket["Raised By"]),
     Status: cleanText(ticket.Status),
     Type: cleanText(ticket.Type),
-    "Start date": sanitizeDateField(ticket["Start date"]),
-    "End date": sanitizeDateField(ticket["End date"]),
-    Milestone: sanitizeDateField(ticket.Milestone),
+    "Start date": canonicalizeTicketDate(ticket["Start date"]),
+    "End date": canonicalizeTicketDate(ticket["End date"]),
+    Milestone: canonicalizeTicketDate(ticket.Milestone),
     parentSheetRow: Number(ticket.parentSheetRow || ticket["Parent Sheet Row"]) || 0,
     Notes: remarks,
     Remarks: remarks,
@@ -2187,6 +2295,7 @@ function normalizeTicket(ticket) {
     submissionId: cleanText(ticket.submissionId || ""),
     sheetRow: Number(ticket.sheetRow) || 0,
     pendingSheetSync: Number(ticket.pendingSheetSync) || 0,
+    pendingFields: normalizePendingFieldsList(ticket.pendingFields),
     createdOn: ticket.createdOn || "",
     lastUpdated: ticket.lastUpdated || "",
     closedOn: ticket.closedOn || ""
@@ -2794,12 +2903,23 @@ function applyCompletionApprovalPreview(ticket) {
 }
 
 function reconcileSyncedTicketStatus(ticket, result = {}, expected = {}) {
-  const serverStatus = String(result.status || "").trim();
+  const serverStatus = cleanText(result.status);
+  const expectedStatus = cleanText(expected.Status);
+  // Approval workflow may rewrite Completed → Pending Approval; honor that.
+  if (serverStatus && expectedStatus && serverStatus !== expectedStatus) {
+    if (/^pending approval$/i.test(serverStatus) && /^completed$/i.test(expectedStatus)) {
+      return serverStatus;
+    }
+    // Prefer the value we just saved — ack/status echo can lag and snap the UI back.
+    if (expected.sheetRow || ticketStableId(expected)) {
+      return expectedStatus;
+    }
+  }
   if (serverStatus) return serverStatus;
   if (shouldRequireCompletionApproval({ ...ticket, ...expected, Status: "Completed" })) {
     return "Pending Approval";
   }
-  return String(ticket.Status || expected.Status || "").trim();
+  return cleanText(expected.Status || ticket.Status);
 }
 
 function populateTicketEditStatusSelect(ticket) {
@@ -3514,10 +3634,14 @@ function initMultiFilterControls() {
 function formatDate(value) {
   if (isPlaceholderDate(value)) return "";
   if (!value) return "";
-  if (value.includes("/")) return value;
-  const [year, month, day] = value.split("-");
-  if (!year || !month || !day) return value;
-  return `${day}/${month}/${year}`;
+  const canonical = canonicalizeTicketDate(value);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(canonical)) {
+    const [year, month, day] = canonical.split("-");
+    return `${Number(day)}/${Number(month)}/${year}`;
+  }
+  const text = String(value);
+  if (text.includes("/")) return text;
+  return text;
 }
 
 function statusClass(status) {
@@ -5173,34 +5297,66 @@ function applyTicketSyncResult(sheetRow, result = {}, expected = {}) {
 
   const syncedStatus = reconcileSyncedTicketStatus(ticket, result, expected);
   const serverLastUpdated = cleanText(result.lastUpdated) || cleanText(ticket.lastUpdated);
+
+  // Prefer the values we just saved for every core field. Ack payloads can omit or
+  // echo stale columns; refresh merge clears pending once the GET catches up.
   const nextTicket = normalizeTicket({
     ...ticket,
     ...expected,
+    Priority: expected.Priority ?? ticket.Priority,
+    Owner: expected.Owner ?? ticket.Owner,
+    "Raised By": expected["Raised By"] ?? ticket["Raised By"],
+    Type: expected.Type ?? ticket.Type,
+    "Bhanu List": expected["Bhanu List"] ?? ticket["Bhanu List"],
+    parentSheetRow: expected.parentSheetRow ?? ticket.parentSheetRow,
     Status: syncedStatus,
     Milestone: milestone,
     "Start date": startDate,
     "End date": endDate,
-    Notes: notes || ticket.Notes,
-    Remarks: notes || ticket.Remarks,
+    Notes: hasExpectedUpdate
+      ? String(expected.Notes ?? expected.Remarks ?? ticket.Notes ?? "")
+      : (notes || ticket.Notes),
+    Remarks: hasExpectedUpdate
+      ? String(expected.Remarks ?? expected.Notes ?? ticket.Remarks ?? "")
+      : (notes || ticket.Remarks),
     NotesHtml: notesHtml,
     ticketId: cleanText(result.ticketId) || ticketStableId(ticket) || ticketStableId(expected),
     sheetRow: Number(result.sheetRow) || Number(sheetRow) || ticket.sheetRow,
     lastUpdated: serverLastUpdated
   });
 
-  // Clear pending when server fields already match; do not blindly renew TTL on every ack.
-  const remoteSnapshot = normalizeTicket({
+  // If Drive returned links, fold them into local notes without dropping pending edits.
+  if (sheetLinks.length && hasExpectedUpdate) {
+    const merged = mergeDriveLinksIntoLocalNotes(nextTicket, notes);
+    if (merged) {
+      nextTicket.Notes = merged.notes;
+      nextTicket.Remarks = merged.notes;
+      nextTicket.NotesHtml = merged.notesHtml || nextTicket.NotesHtml;
+    }
+  } else if (sheetLinks.length && !hasExpectedUpdate) {
+    nextTicket.Notes = notes || nextTicket.Notes;
+    nextTicket.Remarks = notes || nextTicket.Remarks;
+  }
+
+  const trackedPending = normalizePendingFieldsList(
+    expected.pendingFields?.length
+      ? expected.pendingFields
+      : (ticket.pendingFields?.length
+        ? ticket.pendingFields
+        : diffPendingTicketFields(ticket, { ...ticket, ...expected, Status: syncedStatus }))
+  );
+
+  // Never clear pending from the ack alone — the ack echoes our write and a concurrent
+  // stale GET would otherwise snap every field back. mergeTicketFromSheet clears
+  // per-field pending once the sheet GET matches.
+  updateLocalTicket({
     ...nextTicket,
-    Status: syncedStatus || nextTicket.Status,
-    Notes: notes || nextTicket.Notes,
-    Remarks: notes || nextTicket.Remarks,
-    "Bhanu List": expected["Bhanu List"] ?? nextTicket["Bhanu List"],
-    Milestone: coalesceSyncValue(result.milestone, nextTicket.Milestone),
-    "Start date": coalesceSyncValue(result.startDate, nextTicket["Start date"]),
-    "End date": coalesceSyncValue(result.endDate, nextTicket["End date"])
+    pendingFields: trackedPending
+  }, {
+    clearPendingSync: trackedPending.length === 0,
+    keepPendingSync: trackedPending.length > 0,
+    pendingFields: trackedPending
   });
-  const matched = ticketCoreFieldsMatch(nextTicket, remoteSnapshot);
-  updateLocalTicket(nextTicket, { clearPendingSync: matched });
 }
 
 function mergeDriveLinksIntoLocalNotes(ticket, notesText) {
@@ -5240,16 +5396,23 @@ function applyDriveLinksToLocalTicket(sheetRow, notesText) {
       Notes: merged.notes,
       Remarks: merged.notes,
       NotesHtml: merged.notesHtml || ticket.NotesHtml
-    }), { keepPendingSync: true });
+    }), {
+      keepPendingSync: true,
+      pendingFields: normalizePendingFieldsList([
+        ...(ticket.pendingFields || []),
+        ...(pending > 0 ? [] : ["Notes"])
+      ])
+    });
     return;
   }
 
+  // No in-flight edits — adopt Drive links from sheet without touching other fields.
   updateLocalTicket(normalizeTicket({
     ...ticket,
     Notes: notes,
     Remarks: notes,
     NotesHtml: buildNotesHtmlFromDriveLinks({ Notes: notes, Remarks: notes })
-  }), { clearPendingSync: true });
+  }), { keepPendingSync: true, pendingFields: ticket.pendingFields || [] });
 }
 
 function truncateForLog(text, max = 240) {
@@ -5394,13 +5557,36 @@ function updateLocalTicket(updatedTicket, options = {}) {
 
     let pendingSheetSync = Date.now();
     if (options.clearPendingSync) pendingSheetSync = 0;
-    else if (options.keepPendingSync) pendingSheetSync = ticket.pendingSheetSync || 0;
+    else if (options.keepPendingSync) pendingSheetSync = ticket.pendingSheetSync || Date.now();
+
+    let pendingFields = [];
+    if (options.clearPendingSync) {
+      pendingFields = [];
+    } else if (options.pendingFields) {
+      pendingFields = normalizePendingFieldsList(options.pendingFields);
+    } else if (options.keepPendingSync) {
+      pendingFields = normalizePendingFieldsList(
+        updatedTicket.pendingFields?.length ? updatedTicket.pendingFields : ticket.pendingFields
+      );
+    } else {
+      const changed = diffPendingTicketFields(ticket, updatedTicket);
+      pendingFields = normalizePendingFieldsList([
+        ...(ticket.pendingFields || []),
+        ...changed,
+        ...(updatedTicket.pendingFields || [])
+      ]);
+    }
+
+    if (!options.clearPendingSync && pendingFields.length && !pendingSheetSync) {
+      pendingSheetSync = Date.now();
+    }
 
     return normalizeTicket({
       ...ticket,
       ...updatedTicket,
       ticketId: targetId || ticketStableId(ticket) || createTicketId(),
-      pendingSheetSync
+      pendingSheetSync,
+      pendingFields: pendingSheetSync ? pendingFields : []
     });
   });
 
@@ -5408,7 +5594,14 @@ function updateLocalTicket(updatedTicket, options = {}) {
     tickets.push(normalizeTicket({
       ...updatedTicket,
       ticketId: targetId || createTicketId(),
-      pendingSheetSync: options.clearPendingSync ? 0 : Date.now()
+      pendingSheetSync: options.clearPendingSync ? 0 : Date.now(),
+      pendingFields: options.clearPendingSync
+        ? []
+        : normalizePendingFieldsList(
+          options.pendingFields?.length
+            ? options.pendingFields
+            : (updatedTicket.pendingFields?.length ? updatedTicket.pendingFields : PENDING_SYNC_FIELD_KEYS)
+        )
     }));
   }
 
@@ -5664,11 +5857,12 @@ async function setTicketMilestoneFromAction(sheetRow) {
     let updatedTicket = normalizeTicket({
       ...ticket,
       Milestone: nextMilestone,
-      pendingSheetSync: Date.now()
+      pendingSheetSync: Date.now(),
+      pendingFields: ["Milestone"]
     });
 
     // Save locally first so the Milestone column updates immediately.
-    updateLocalTicket(updatedTicket);
+    updateLocalTicket(updatedTicket, { pendingFields: ["Milestone"] });
     renderTickets();
     setStatus("", `Setting milestone to ${label}...`);
 
@@ -5682,27 +5876,32 @@ async function setTicketMilestoneFromAction(sheetRow) {
         ...updatedTicket,
         sheetRow: ensured,
         Milestone: nextMilestone,
-        pendingSheetSync: Date.now()
+        pendingSheetSync: Date.now(),
+        pendingFields: ["Milestone"]
       });
-      updateLocalTicket(updatedTicket);
+      updateLocalTicket(updatedTicket, { pendingFields: ["Milestone"] });
       renderTickets();
     }
 
     const result = await sendTicketUpdateToSheet({
       ...updatedTicket,
-      Milestone: nextMilestone
+      Milestone: nextMilestone,
+      pendingFields: ["Milestone"]
     });
 
     const saved = findTicketBySheetRow(updatedTicket.sheetRow)
       || findTicketByIdentity(updatedTicket.Task, updatedTicket.Owner);
     const savedMilestone = toInputDateValue(saved?.Milestone);
     if (savedMilestone !== nextMilestone) {
+      // Keep Milestone pending until a sheet GET confirms — datesPersisted alone is not enough
+      // (a concurrent stale refresh can still race).
       updateLocalTicket(normalizeTicket({
         ...(saved || updatedTicket),
         sheetRow: updatedTicket.sheetRow,
         Milestone: nextMilestone,
-        pendingSheetSync: result?.datesPersisted ? 0 : Date.now()
-      }), { clearPendingSync: Boolean(result?.datesPersisted) });
+        pendingSheetSync: Date.now(),
+        pendingFields: ["Milestone"]
+      }), { pendingFields: ["Milestone"] });
     }
 
     setStatus("online", `Milestone set to ${label} (${formatDate(nextMilestone)})`);
@@ -5941,10 +6140,11 @@ async function togglePresentationMark(sheetRow) {
     ...ticket,
     Notes: nextNotes,
     Remarks: nextNotes,
-    pendingSheetSync: Date.now()
+    pendingSheetSync: Date.now(),
+    pendingFields: ["Notes"]
   });
 
-  updateLocalTicket(updatedTicket);
+  updateLocalTicket(updatedTicket, { pendingFields: ["Notes"] });
   renderTickets({ force: true });
   setStatus("", nextMarked ? "Added to presentation set..." : "Removed from presentation set...");
 
@@ -5958,15 +6158,16 @@ async function togglePresentationMark(sheetRow) {
             sheetRow: ensured,
             Notes: nextNotes,
             Remarks: nextNotes,
-            pendingSheetSync: Date.now()
+            pendingSheetSync: Date.now(),
+            pendingFields: ["Notes"]
           });
           setPresentationMarkLocal(ensured, nextMarked);
-          updateLocalTicket(updatedTicket);
+          updateLocalTicket(updatedTicket, { pendingFields: ["Notes"] });
         }
       }
 
       if (updatedTicket.sheetRow) {
-        await sendTicketUpdateToSheet(updatedTicket);
+        await sendTicketUpdateToSheet({ ...updatedTicket, pendingFields: ["Notes"] });
         setStatus("online", nextMarked
           ? "Included in presentation (saved to sheet)"
           : "Removed from presentation (saved to sheet)");
@@ -6242,10 +6443,11 @@ function clearPresentationMarks() {
         ...ticket,
         Notes: nextNotes,
         Remarks: nextNotes,
-        pendingSheetSync: Date.now()
+        pendingSheetSync: Date.now(),
+        pendingFields: ["Notes"]
       });
-      updateLocalTicket(updated);
-      sendTicketUpdateToSheet(updated).catch((error) => console.error(error));
+      updateLocalTicket(updated, { pendingFields: ["Notes"] });
+      sendTicketUpdateToSheet({ ...updated, pendingFields: ["Notes"] }).catch((error) => console.error(error));
     });
   }
 
@@ -6696,28 +6898,24 @@ function applyCreatedTicketSyncResult(localTicket, result = {}) {
       ...ticket,
       sheetRow: sheetRow || ticket.sheetRow,
       ticketId: cleanText(result.ticketId) || ticketStableId(ticket) || localId,
-      Status: reconcileSyncedTicketStatus(ticket, result),
+      Status: reconcileSyncedTicketStatus(ticket, result, ticket),
       Notes: notes || ticket.Notes,
       Remarks: notes || ticket.Remarks,
       NotesHtml: notesHtml,
-      Milestone: result.milestone || ticket.Milestone,
-      "Start date": result.startDate || ticket["Start date"],
-      "End date": result.endDate || ticket["End date"],
+      Milestone: coalesceSyncValue(ticket.Milestone, result.milestone),
+      "Start date": coalesceSyncValue(ticket["Start date"], result.startDate),
+      "End date": coalesceSyncValue(ticket["End date"], result.endDate),
       lastUpdated: cleanText(result.lastUpdated) || ticket.lastUpdated
     });
 
-    // Keep pending until core fields (incl. Status / Notes) match remote ack.
-    const remoteSnapshot = normalizeTicket({
-      ...next,
-      Status: cleanText(result.status) || next.Status,
-      Notes: notes || next.Notes,
-      Remarks: notes || next.Remarks
-    });
-    const matched = sheetRow > 0 && ticketCoreFieldsMatch(next, remoteSnapshot)
-      && !ticketHasLocalScreenshotsOnly(next);
+    // Keep pending until mergeTicketFromSheet sees the new row on GET.
+    const trackedPending = normalizePendingFieldsList(
+      ticket.pendingFields?.length ? ticket.pendingFields : PENDING_SYNC_FIELD_KEYS
+    );
     return normalizeTicket({
       ...next,
-      pendingSheetSync: matched ? 0 : (ticket.pendingSheetSync || Date.now())
+      pendingSheetSync: ticket.pendingSheetSync || Date.now(),
+      pendingFields: trackedPending
     });
   });
 
@@ -7120,7 +7318,8 @@ form?.addEventListener("submit", async (event) => {
       ...ticket,
       submissionId: ticket.submissionId || submissionId,
       ticketId: ticketStableId(ticket) || createTicketId(),
-      pendingSheetSync: Date.now()
+      pendingSheetSync: Date.now(),
+      pendingFields: PENDING_SYNC_FIELD_KEYS.slice()
     }));
     writeTickets(readTickets().map((ticket) => {
       const replacement = ticketsToCreate.find((entry) => ticketStableId(entry) === ticketStableId(ticket)
@@ -7129,7 +7328,11 @@ form?.addEventListener("submit", async (event) => {
     }));
   } else {
     ticketsToCreate = buildTicketsFromForm(selectedOwners, { submissionId }).map((ticket) =>
-      normalizeTicket(applyCompletionApprovalPreview({ ...ticket, pendingSheetSync: Date.now() }))
+      normalizeTicket(applyCompletionApprovalPreview({
+        ...ticket,
+        pendingSheetSync: Date.now(),
+        pendingFields: PENDING_SYNC_FIELD_KEYS.slice()
+      }))
     );
   }
 
