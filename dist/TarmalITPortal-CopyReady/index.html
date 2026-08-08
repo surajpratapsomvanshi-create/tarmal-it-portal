@@ -10,7 +10,7 @@
     <!-- auth stays blocking so requireLogin runs before app chrome paints -->
     <script src="./auth.js?v=22"></script>
     <!-- Defer main bundles so HTML can parse while ~210KB+ app.js downloads -->
-    <script src="./app.js?v=158" defer></script>
+    <script src="./app.js?v=159" defer></script>
     <script src="./assets.js?v=13" defer></script>
     <script src="./documents.js?v=11" defer></script>
     <script src="./procurement.js?v=5" defer></script>
@@ -70,27 +70,33 @@
       </aside>
 
       <div class="app-main">
-        <header class="topbar" id="siteTopbar">
-          <div class="topbar-context">
-            <p class="topbar-context-eyebrow">Workspace</p>
-            <h1 id="topbarPageTitle">Dashboard</h1>
-          </div>
-          <div class="topbar-actions">
-            <div class="user-chip">
-              <span class="user-chip-prefix">Signed in as</span>
-              <strong id="currentUserLabel">User</strong>
+        <div class="topbar-chrome" id="siteTopbarChrome">
+          <header class="topbar" id="siteTopbar">
+            <div class="topbar-context">
+              <p class="topbar-context-eyebrow">Workspace</p>
+              <h1 id="topbarPageTitle">Dashboard</h1>
             </div>
-            <button class="secondary-button" id="logoutButton" type="button">
-              <span class="logout-label-full">Sign Out</span>
-              <span class="logout-label-short" aria-hidden="true">Out</span>
-            </button>
-            <button class="topbar-collapse-btn" id="collapseTopbarButton" type="button" aria-controls="siteTopbar" aria-expanded="true" title="Hide header">
-              <span class="panel-icon-glyph panel-icon-glyph-collapse" aria-hidden="true"></span>
-              <span class="topbar-collapse-label-full">Hide header</span>
-              <span class="topbar-collapse-label-short" aria-hidden="true">Hide</span>
-            </button>
+            <div class="topbar-actions">
+              <div class="user-chip">
+                <span class="user-chip-prefix">Signed in as</span>
+                <strong id="currentUserLabel">User</strong>
+              </div>
+              <button class="secondary-button" id="logoutButton" type="button">
+                <span class="logout-label-full">Sign Out</span>
+                <span class="logout-label-short" aria-hidden="true">Out</span>
+              </button>
+              <button class="topbar-collapse-btn" id="collapseTopbarButton" type="button" aria-controls="siteTopbar" aria-expanded="true" title="Hide header">
+                <span class="panel-icon-glyph panel-icon-glyph-collapse" aria-hidden="true"></span>
+                <span class="topbar-collapse-label-full">Hide header</span>
+                <span class="topbar-collapse-label-short" aria-hidden="true">Hide</span>
+              </button>
+            </div>
+          </header>
+          <div class="sync-card topbar-status-strip" id="syncCard" role="status" aria-live="polite">
+            <span class="status-dot" id="statusDot"></span>
+            <span id="syncText">Sync not configured</span>
           </div>
-        </header>
+        </div>
 
         <div class="topbar-expand-bar" id="topbarExpandBar" hidden>
           <span class="topbar-expand-title" id="topbarExpandPageTitle">Dashboard</span>
@@ -99,11 +105,6 @@
             <span class="topbar-expand-label-full">Show header</span>
             <span class="topbar-expand-label-short" aria-hidden="true">Header</span>
           </button>
-        </div>
-
-        <div class="sync-card topbar-status-strip" id="syncCard" role="status" aria-live="polite">
-          <span class="status-dot" id="statusDot"></span>
-          <span id="syncText">Sync not configured</span>
         </div>
 
         <div class="sidebar-expand-bar panel-restore-bar" id="sidebarExpandBar">

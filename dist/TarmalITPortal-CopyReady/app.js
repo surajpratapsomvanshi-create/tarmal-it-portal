@@ -2844,9 +2844,9 @@ function canCurrentUserApproveTicket(ticket) {
     || (email && manager.email && email === manager.email.toLowerCase());
 }
 
-function shouldRequireCompletionApproval(ticket, user = Auth.currentUser()) {
-  const owner = cleanText(ticket?.Owner);
-  if (!owner || !isTicketCompleted(ticket)) return false;
+function actorIsOwnerManager(ownerName, user = Auth.currentUser()) {
+  const owner = cleanText(ownerName);
+  if (!owner || !user) return false;
   const hierarchy = readHierarchyRows();
   const ownerEntry = hierarchy.find((entry) => matchesHierarchyIdentity(owner, entry.user));
   if (!ownerEntry?.manager) return false;
@@ -2854,22 +2854,67 @@ function shouldRequireCompletionApproval(ticket, user = Auth.currentUser()) {
   if (!manager?.user) return false;
   const actorName = cleanText(user?.name) || cleanText(user?.username);
   const actorEmail = cleanText(user?.email).toLowerCase();
-  if (matchesHierarchyIdentity(actorName, manager.user)) return false;
-  if (actorEmail && manager.email && actorEmail === manager.email.toLowerCase()) return false;
-  return true;
+  if (matchesHierarchyIdentity(actorName, manager.user)) return true;
+  if (actorEmail && manager.email && actorEmail === manager.email.toLowerCase()) return true;
+  return false;
 }
 
-function applyCompletionApprovalPreview(ticket) {
-  if (!shouldRequireCompletionApproval(ticket)) return ticket;
+function ownerRequiresManagerApproval(ownerName) {
+  const owner = cleanText(ownerName);
+  if (!owner) return false;
+  const hierarchy = readHierarchyRows();
+  const ownerEntry = hierarchy.find((entry) => matchesHierarchyIdentity(owner, entry.user));
+  if (!ownerEntry?.manager) return false;
+  const manager = getManagerForOwner(owner, hierarchy);
+  return Boolean(manager?.user);
+}
+
+function shouldRequireCompletionApproval(ticket, user = Auth.currentUser()) {
+  const owner = cleanText(ticket?.Owner);
+  if (!owner || !isTicketCompleted(ticket)) return false;
+  if (!ownerRequiresManagerApproval(owner)) return false;
+  return !actorIsOwnerManager(owner, user);
+}
+
+function isExactProjectType(type) {
+  return isExactSapType(type) || isExactInfraType(type);
+}
+
+function typeEnteredProjectType(nextType, previousType) {
+  // Exact SAP / Infra only — not Daily - SAP / Daily - Infra.
+  return isExactProjectType(nextType) && !isExactProjectType(previousType);
+}
+
+function shouldRequireProjectTypeApproval(ticket, previousTicket = null, user = Auth.currentUser()) {
+  if (!typeEnteredProjectType(ticket?.Type, previousTicket?.Type)) return false;
+  const owner = cleanText(ticket?.Owner);
+  if (!owner) return false;
+  if (!ownerRequiresManagerApproval(owner)) return false;
+  return !actorIsOwnerManager(owner, user);
+}
+
+/** "completion" | "project-type" | "" — completion wins when both apply. */
+function getRequiredApprovalKind(ticket, previousTicket = null, user = Auth.currentUser()) {
+  if (shouldRequireCompletionApproval(ticket, user)) return "completion";
+  if (shouldRequireProjectTypeApproval(ticket, previousTicket, user)) return "project-type";
+  return "";
+}
+
+function applyTicketApprovalPreview(ticket, previousTicket = null) {
+  if (!getRequiredApprovalKind(ticket, previousTicket)) return ticket;
   return { ...ticket, Status: "Pending Approval" };
+}
+
+function applyCompletionApprovalPreview(ticket, previousTicket = null) {
+  return applyTicketApprovalPreview(ticket, previousTicket);
 }
 
 function reconcileSyncedTicketStatus(ticket, result = {}, expected = {}) {
   const serverStatus = cleanText(result.status);
   const expectedStatus = cleanText(expected.Status);
-  // Approval workflow may rewrite Completed → Pending Approval; honor that.
+  // Approval workflow may rewrite Completed / working status → Pending Approval; honor that.
   if (serverStatus && expectedStatus && serverStatus !== expectedStatus) {
-    if (/^pending approval$/i.test(serverStatus) && /^completed$/i.test(expectedStatus)) {
+    if (/^pending approval$/i.test(serverStatus) && !/^pending approval$/i.test(expectedStatus)) {
       return serverStatus;
     }
     // Prefer the value we just saved — ack/status echo can lag and snap the UI back.
@@ -2878,7 +2923,11 @@ function reconcileSyncedTicketStatus(ticket, result = {}, expected = {}) {
     }
   }
   if (serverStatus) return serverStatus;
-  if (shouldRequireCompletionApproval({ ...ticket, ...expected, Status: "Completed" })) {
+  if (shouldRequireCompletionApproval({ ...ticket, ...expected, Status: "Completed" })
+    && /^completed$/i.test(expectedStatus)) {
+    return "Pending Approval";
+  }
+  if (isPendingApprovalStatus(ticket.Status) || isPendingApprovalStatus(expectedStatus)) {
     return "Pending Approval";
   }
   return cleanText(expected.Status || ticket.Status);
@@ -2911,9 +2960,13 @@ function populateTicketEditApprovalNote(ticket) {
   const manager = getManagerForOwner(ticket.Owner);
   const managerName = manager?.user || "the manager";
   if (canCurrentUserApproveTicket(ticket)) {
-    ticketEditApprovalNote.textContent = `Awaiting your approval. Set status to Completed to approve closure for ${ticket.Owner}.`;
+    ticketEditApprovalNote.textContent = isProjectTypeTicket(ticket)
+      ? `Awaiting your approval for ${ticket.Owner}. Set status to Not started or In progress to approve project type ${ticket.Type}, or Completed to approve closure.`
+      : `Awaiting your approval. Set status to Completed to approve closure for ${ticket.Owner}.`;
   } else {
-    ticketEditApprovalNote.textContent = `Awaiting manager approval from ${managerName}.`;
+    ticketEditApprovalNote.textContent = isProjectTypeTicket(ticket)
+      ? `Awaiting manager approval from ${managerName} for project type ${ticket.Type}.`
+      : `Awaiting manager approval from ${managerName}.`;
   }
   ticketEditApprovalNote.hidden = false;
 }
@@ -5829,7 +5882,7 @@ async function sendTicketUpdateToSheet(ticket) {
       setStatus("online", "Sent for manager approval (check Tasks sheet Approval Email Sent column)");
     }
   } else if (result.approved) {
-    setStatus("online", "Completion approved");
+    setStatus("online", result.approvalMessage || "Approved");
   } else {
     setStatus("online", result.uploadedCount
       ? "Screenshot saved to Google Drive"
@@ -7248,6 +7301,7 @@ form?.addEventListener("submit", async (event) => {
   );
 
   let ticketsToCreate;
+  const formIntentTickets = buildTicketsFromForm(selectedOwners, { submissionId });
   if (existingPending.length && existingPending.length === selectedOwners.length) {
     ticketsToCreate = existingPending.map((ticket) => normalizeTicket({
       ...ticket,
@@ -7262,8 +7316,8 @@ form?.addEventListener("submit", async (event) => {
       return replacement || ticket;
     }));
   } else {
-    ticketsToCreate = buildTicketsFromForm(selectedOwners, { submissionId }).map((ticket) =>
-      normalizeTicket(applyCompletionApprovalPreview({
+    ticketsToCreate = formIntentTickets.map((ticket) =>
+      normalizeTicket(applyTicketApprovalPreview({
         ...ticket,
         pendingSheetSync: Date.now(),
         pendingFields: PENDING_SYNC_FIELD_KEYS.slice()
@@ -7271,7 +7325,24 @@ form?.addEventListener("submit", async (event) => {
     );
   }
 
-  const completionError = ticketsToCreate.map(getTicketCompletionError).find(Boolean);
+  // Sheet payload keeps pre-approval status intent so Apps Script applies workflow authoritatively.
+  const sheetCreateTickets = ticketsToCreate.map((local) => {
+    const intent = formIntentTickets.find((entry) =>
+      cleanText(entry.Owner).toLowerCase() === cleanText(local.Owner).toLowerCase()
+    ) || local;
+    const kind = getRequiredApprovalKind(intent, null);
+    if (kind === "completion") return { ...local, Type: intent.Type || local.Type, Status: "Completed" };
+    if (kind === "project-type") {
+      return { ...local, Type: intent.Type || local.Type, Status: intent.Status || "Not started" };
+    }
+    if (isPendingApprovalStatus(local.Status) && !isPendingApprovalStatus(intent.Status)) {
+      return { ...local, Type: intent.Type || local.Type, Status: intent.Status || "Not started" };
+    }
+    return local;
+  });
+
+  const completionError = formIntentTickets.map(getTicketCompletionError).find(Boolean)
+    || ticketsToCreate.map(getTicketCompletionError).find(Boolean);
   if (completionError) {
     alert(completionError);
     return;
@@ -7303,11 +7374,7 @@ form?.addEventListener("submit", async (event) => {
       // Creep past the old ~85% freeze point while Apps Script writes rows.
       startTicketSubmitProgressCreep(92, "Almost done — finishing save...");
       await sendNewTicketsToSheet(
-        ticketsToCreate.map((ticket) => (
-          isPendingApprovalStatus(ticket.Status)
-            ? { ...ticket, Status: "Completed" }
-            : ticket
-        )),
+        sheetCreateTickets,
         (index, total) => {
         const step = 30 + Math.round(((index + 1) / Math.max(total, 1)) * 50);
         const label = total > 1
@@ -7430,11 +7497,11 @@ ticketEditForm?.addEventListener("submit", async (event) => {
     lastKnownStatus: priorStatus || nextStatus,
     lastUpdated: cleanText(activeEditTicket?.lastUpdated) || cleanText(updatedTicket.lastUpdated) || new Date().toISOString()
   };
-  const localTicket = applyCompletionApprovalPreview({
+  const localTicket = applyTicketApprovalPreview({
     ...updatedTicket,
     ticketId: sheetTicket.ticketId,
     lastUpdated: new Date().toISOString()
-  });
+  }, activeEditTicket);
 
   ticketEditSubmitInFlight = true;
   ticketEditForm.classList.add("ticket-form-submitting");

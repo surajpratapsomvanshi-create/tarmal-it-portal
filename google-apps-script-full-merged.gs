@@ -1189,11 +1189,11 @@ function prepareTicketSave_(data, oldTicket) {
   assertCompletedHasEndDate_(data);
   const enriched = enrichTicketNotesWithDriveAttachments_(data);
   const fields = getTicketFieldValues_(enriched);
-  const oldStatus = oldTicket ? String(oldTicket.Status || "") : "";
   const owner = fields.owner || (oldTicket && oldTicket.Owner) || "";
-  const workflow = resolveCompletionWorkflow_(
-    oldStatus,
+  const workflow = resolveTicketWorkflow_(
+    oldTicket,
     fields.status,
+    fields.type,
     owner,
     resolveActorName_(data),
     resolveActorEmail_(data)
@@ -1226,11 +1226,13 @@ function sendApprovalEmailIfNeeded_(data, savedTicket, workflow, sheet, sheetRow
   }
 
   try {
-    sendTaskCompletionApprovalEmail_(
-      savedTicket,
-      { user: resolved.managerName, email: resolved.managerEmail },
-      resolveActorName_(data)
-    );
+    const managerEntry = { user: resolved.managerName, email: resolved.managerEmail };
+    const requester = resolveActorName_(data);
+    if (workflow.approvalKind === "project-type") {
+      sendTaskProjectTypeApprovalEmail_(savedTicket, managerEntry, requester);
+    } else {
+      sendTaskCompletionApprovalEmail_(savedTicket, managerEntry, requester);
+    }
     if (sheet && sheetRow) {
       markApprovalEmailSent_(sheet, sheetRow, "Yes");
     }
@@ -1279,8 +1281,10 @@ function writeTicketToSheetRow_(sheet, sheetRow, data) {
   const fields = prepared.fields;
   const workflow = prepared.workflow;
 
-  // Stale Pending Approval must not undo manager Completed.
-  if (isCompletedStatus(oldStatus) && isPendingApprovalStatus_(fields.status)) {
+  // Stale Pending Approval must not undo manager Completed — unless this save
+  // intentionally opens project-type approval (Type newly set to SAP/Infra).
+  if (isCompletedStatus(oldStatus) && isPendingApprovalStatus_(fields.status)
+    && !(workflow && workflow.approvalKind === "project-type")) {
     return {
       ok: false,
       conflict: true,
@@ -3205,6 +3209,16 @@ function canUserApproveCompletion_(actorName, actorEmail, ownerName, maps) {
   return actorMatchesUserMaster_(actorName, actorEmail, manager);
 }
 
+function isExactProjectType_(type) {
+  const value = String(type || "").trim().toLowerCase();
+  return value === "sap" || value === "infra";
+}
+
+function typeEnteredProjectType_(nextType, previousType) {
+  // Exact SAP / Infra only (not Daily - SAP / Daily - Infra).
+  return isExactProjectType_(nextType) && !isExactProjectType_(previousType);
+}
+
 function resolveCompletionWorkflow_(oldStatus, requestedStatus, owner, actorName, actorEmail) {
   const wantsComplete = isCompletedStatus(requestedStatus);
   const wasPending = isPendingApprovalStatus_(oldStatus);
@@ -3237,12 +3251,92 @@ function resolveCompletionWorkflow_(oldStatus, requestedStatus, owner, actorName
     return {
       status: PENDING_APPROVAL_STATUS,
       approvalSent: true,
+      approvalKind: "completion",
       manager: manager,
       message: "Completion sent for manager approval."
     };
   }
 
   return { status: requestedStatus, approvalSent: false };
+}
+
+/**
+ * Combined approval workflow:
+ * - Completion → Pending Approval (existing)
+ * - Type newly set to exact SAP / Infra → Pending Approval
+ * - Leaving Pending Approval (non-Completed) requires the owner's manager
+ */
+function resolveTicketWorkflow_(oldTicket, requestedStatus, requestedType, owner, actorName, actorEmail) {
+  const oldStatus = oldTicket ? String(oldTicket.Status || "") : "";
+  const oldType = oldTicket ? String(oldTicket.Type || "") : "";
+  const maps = readUserMasterMaps_();
+
+  const leavingPending = isPendingApprovalStatus_(oldStatus)
+    && !isPendingApprovalStatus_(requestedStatus)
+    && !isCompletedStatus(requestedStatus);
+
+  if (leavingPending && ownerRequiresCompletionApproval_(owner, maps)) {
+    if (!canUserApproveCompletion_(actorName, actorEmail, owner, maps)) {
+      throw new Error("Only the task owner's manager can approve this ticket.");
+    }
+  }
+
+  const completion = resolveCompletionWorkflow_(
+    oldStatus,
+    requestedStatus,
+    owner,
+    actorName,
+    actorEmail
+  );
+
+  // Completion approval (Requested Completed → Pending) wins over project-type gating.
+  if (isPendingApprovalStatus_(completion.status) && isCompletedStatus(requestedStatus)) {
+    return completion;
+  }
+
+  if (typeEnteredProjectType_(requestedType, oldType)) {
+    if (!ownerRequiresCompletionApproval_(owner, maps)) {
+      if (leavingPending) {
+        return {
+          status: requestedStatus,
+          approvalSent: false,
+          approved: true,
+          message: "Approved."
+        };
+      }
+      return completion;
+    }
+    if (canUserApproveCompletion_(actorName, actorEmail, owner, maps)) {
+      if (leavingPending) {
+        return {
+          status: completion.status,
+          approvalSent: false,
+          approved: true,
+          message: "Approved."
+        };
+      }
+      return completion;
+    }
+    const manager = getManagerEntryForUser_(owner, maps);
+    return {
+      status: PENDING_APPROVAL_STATUS,
+      approvalSent: true,
+      approvalKind: "project-type",
+      manager: manager,
+      message: "Project type sent for manager approval."
+    };
+  }
+
+  if (leavingPending) {
+    return {
+      status: requestedStatus,
+      approvalSent: false,
+      approved: true,
+      message: "Approved."
+    };
+  }
+
+  return completion;
 }
 
 function sendTaskCompletionApprovalEmail_(ticket, managerEntry, requesterName) {
@@ -3306,6 +3400,84 @@ function sendTaskCompletionApprovalEmail_(ticket, managerEntry, requesterName) {
           </table>
           <p style="margin:18px 0 0 0;">
             Open the Tarmal IT Portal, find this ticket, and set the status to <strong>Completed</strong> to approve.
+          </p>
+        </div>
+      </div>
+    </div>
+  `;
+
+  MailApp.sendEmail({
+    to: managerEmail,
+    subject: subject,
+    body: plainBody,
+    htmlBody: htmlBody
+  });
+  return true;
+}
+
+function sendTaskProjectTypeApprovalEmail_(ticket, managerEntry, requesterName) {
+  const managerEmail = String(managerEntry.email || "").trim();
+  if (!managerEmail) return false;
+
+  const taskName = String(ticket.Task || "").trim() || "Task";
+  const owner = String(ticket.Owner || ticket.owner || "").trim();
+  const requester = String(requesterName || owner).trim();
+  const managerName = String(managerEntry.user || "").trim() || "Manager";
+  const typeValue = String(ticket.Type || "").trim();
+  const endDate = formatDateValue(ticket["End date"] || ticket.endDate);
+  const notes = String(ticket.Notes || ticket.Remarks || "").trim();
+
+  const subject = "Project type approval required | " + taskName;
+  const plainBody =
+    "Hi " + managerName + ",\n\n" +
+    requester + " has set Type to " + typeValue + " for a task assigned to " + owner + ".\n\n" +
+    "Task: " + taskName + "\n" +
+    "Owner: " + owner + "\n" +
+    "Type: " + typeValue + "\n" +
+    "End Date: " + endDate + "\n" +
+    "Notes: " + notes + "\n\n" +
+    "Open the Tarmal IT Portal, find this ticket, and set status to Not started or In progress to approve the project type (or Completed to approve closure).\n\n" +
+    "This is an automated notification from the Task Management System.";
+
+  const htmlBody = `
+    <div style="margin:0; padding:24px; background:#eef2f7; font-family:Arial, sans-serif;">
+      <div style="max-width:580px; margin:0 auto; background:#ffffff; border:1px solid #d9e1e7; border-radius:14px; overflow:hidden; box-shadow:0 4px 14px rgba(0,0,0,0.10);">
+        <div style="background:#1d4ed8; color:#ffffff; padding:20px 24px;">
+          <div style="font-size:20px; font-weight:bold;">Project Type Approval Required</div>
+          <div style="font-size:12px; margin-top:5px; opacity:0.9;">Task Management System</div>
+        </div>
+        <div style="padding:24px; color:#333333; font-size:14px; line-height:1.6;">
+          <p style="margin:0 0 12px 0;">Hi <strong>${escapeHtml(managerName)}</strong>,</p>
+          <p style="margin:0 0 18px 0;">
+            <strong>${escapeHtml(requester)}</strong> has set Type to <strong>${escapeHtml(typeValue)}</strong>
+            for a task assigned to <strong>${escapeHtml(owner)}</strong>.
+          </p>
+          <table style="width:100%; border-collapse:collapse; font-size:14px;">
+            <tr>
+              <td style="padding:11px; border:1px solid #e5e7eb; background:#f8fafc; width:35%;"><strong>Task</strong></td>
+              <td style="padding:11px; border:1px solid #e5e7eb;">${escapeHtml(taskName)}</td>
+            </tr>
+            <tr>
+              <td style="padding:11px; border:1px solid #e5e7eb; background:#f8fafc;"><strong>Owner</strong></td>
+              <td style="padding:11px; border:1px solid #e5e7eb;">${escapeHtml(owner)}</td>
+            </tr>
+            <tr>
+              <td style="padding:11px; border:1px solid #e5e7eb; background:#f8fafc;"><strong>Type</strong></td>
+              <td style="padding:11px; border:1px solid #e5e7eb;">${escapeHtml(typeValue)}</td>
+            </tr>
+            <tr>
+              <td style="padding:11px; border:1px solid #e5e7eb; background:#f8fafc;"><strong>End Date</strong></td>
+              <td style="padding:11px; border:1px solid #e5e7eb;">${escapeHtml(endDate)}</td>
+            </tr>
+            <tr>
+              <td style="padding:11px; border:1px solid #e5e7eb; background:#f8fafc;"><strong>Notes</strong></td>
+              <td style="padding:11px; border:1px solid #e5e7eb;">${escapeHtml(notes)}</td>
+            </tr>
+          </table>
+          <p style="margin:18px 0 0 0;">
+            Open the Tarmal IT Portal, find this ticket, and set status to
+            <strong>Not started</strong> or <strong>In progress</strong> to approve the project type
+            (or <strong>Completed</strong> to approve closure).
           </p>
         </div>
       </div>
@@ -3389,11 +3561,13 @@ function sendPendingCompletionApprovalEmails(force) {
     }
 
     try {
-      sendTaskCompletionApprovalEmail_(
-        ticket,
-        { user: resolved.managerName, email: resolved.managerEmail },
-        ticket.Owner
-      );
+      const managerEntry = { user: resolved.managerName, email: resolved.managerEmail };
+      // Exact SAP/Infra pending rows use project-type copy; others use completion copy.
+      if (isExactProjectType_(ticket.Type)) {
+        sendTaskProjectTypeApprovalEmail_(ticket, managerEntry, ticket.Owner);
+      } else {
+        sendTaskCompletionApprovalEmail_(ticket, managerEntry, ticket.Owner);
+      }
       taskSheet.getRange(i + 1, approvalCol + 1).setValue("Yes");
       sent++;
       lastSentTo = resolved.managerEmail;
