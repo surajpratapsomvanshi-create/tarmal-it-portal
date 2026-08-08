@@ -529,8 +529,7 @@ body.performance-filters-collapsed .filter-sidebar {
 }
 
 .topbar-actions > .user-chip,
-.topbar-actions > .secondary-button,
-.topbar-actions > .sync-card {
+.topbar-actions > .secondary-button {
   box-sizing: border-box;
   display: inline-flex;
   align-items: center;
@@ -700,10 +699,30 @@ h2 {
 }
 
 .sync-card {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   color: #e2e8f0;
   background: rgba(255, 255, 255, 0.06);
   border: 1px solid rgba(255, 255, 255, 0.1);
   font-weight: 500;
+}
+
+.topbar-status-strip {
+  box-sizing: border-box;
+  width: auto;
+  min-height: 36px;
+  padding: 0 14px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  line-height: 1.2;
+  align-self: center;
+}
+
+.logout-label-short,
+.topbar-collapse-label-short,
+.topbar-expand-label-short {
+  display: none;
 }
 
 .status-dot {

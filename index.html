@@ -6,11 +6,11 @@
     <title>Tarmal IT Portal</title>
     <link rel="icon" href="./assets/tarmal-mark.png?v=1" type="image/png">
     <link rel="apple-touch-icon" href="./assets/apple-touch-icon.png?v=1">
-    <link rel="stylesheet" href="./styles.css?v=157">
+    <link rel="stylesheet" href="./styles.css?v=158">
     <!-- auth stays blocking so requireLogin runs before app chrome paints -->
     <script src="./auth.js?v=22"></script>
     <!-- Defer main bundles so HTML can parse while ~210KB+ app.js downloads -->
-    <script src="./app.js?v=157" defer></script>
+    <script src="./app.js?v=158" defer></script>
     <script src="./assets.js?v=13" defer></script>
     <script src="./documents.js?v=11" defer></script>
     <script src="./procurement.js?v=5" defer></script>
@@ -77,17 +77,17 @@
           </div>
           <div class="topbar-actions">
             <div class="user-chip">
-              <span>Signed in as</span>
+              <span class="user-chip-prefix">Signed in as</span>
               <strong id="currentUserLabel">User</strong>
             </div>
-            <button class="secondary-button" id="logoutButton" type="button">Sign Out</button>
-            <div class="sync-card" id="syncCard">
-              <span class="status-dot" id="statusDot"></span>
-              <span id="syncText">Sync not configured</span>
-            </div>
+            <button class="secondary-button" id="logoutButton" type="button">
+              <span class="logout-label-full">Sign Out</span>
+              <span class="logout-label-short" aria-hidden="true">Out</span>
+            </button>
             <button class="topbar-collapse-btn" id="collapseTopbarButton" type="button" aria-controls="siteTopbar" aria-expanded="true" title="Hide header">
               <span class="panel-icon-glyph panel-icon-glyph-collapse" aria-hidden="true"></span>
-              <span>Hide header</span>
+              <span class="topbar-collapse-label-full">Hide header</span>
+              <span class="topbar-collapse-label-short" aria-hidden="true">Hide</span>
             </button>
           </div>
         </header>
@@ -96,8 +96,14 @@
           <span class="topbar-expand-title" id="topbarExpandPageTitle">Dashboard</span>
           <button class="topbar-expand-btn" id="expandTopbarButton" type="button" aria-controls="siteTopbar" aria-expanded="false" title="Show header">
             <span class="panel-icon-glyph panel-icon-glyph-expand" aria-hidden="true"></span>
-            <span>Show header</span>
+            <span class="topbar-expand-label-full">Show header</span>
+            <span class="topbar-expand-label-short" aria-hidden="true">Header</span>
           </button>
+        </div>
+
+        <div class="sync-card topbar-status-strip" id="syncCard" role="status" aria-live="polite">
+          <span class="status-dot" id="statusDot"></span>
+          <span id="syncText">Sync not configured</span>
         </div>
 
         <div class="sidebar-expand-bar panel-restore-bar" id="sidebarExpandBar">

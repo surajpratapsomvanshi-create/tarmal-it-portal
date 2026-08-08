@@ -529,8 +529,7 @@ body.performance-filters-collapsed .filter-sidebar {
 }
 
 .topbar-actions > .user-chip,
-.topbar-actions > .secondary-button,
-.topbar-actions > .sync-card {
+.topbar-actions > .secondary-button {
   box-sizing: border-box;
   display: inline-flex;
   align-items: center;

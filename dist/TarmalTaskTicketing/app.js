@@ -136,7 +136,6 @@ const exportProjectsButton = document.querySelector("#exportProjectsButton");
 const openProjectTicketCreateButton = document.querySelector("#openProjectTicketCreateButton");
 const presentationDeck = document.querySelector("#presentationDeck");
 const presentationSummary = document.querySelector("#presentationSummary");
-const presentationSubtitle = document.querySelector("#presentationSubtitle");
 const enterPresentModeButton = document.querySelector("#enterPresentModeButton");
 const exitPresentModeButton = document.querySelector("#exitPresentModeButton");
 const presentationHero = document.querySelector("#presentationHero");
@@ -3955,8 +3954,8 @@ function setPresentationHeroCollapsed(collapsed, { persist = true } = {}) {
     togglePresentationHeroButton.setAttribute("aria-expanded", on ? "false" : "true");
     const mobile = isPresentationMobileLayout();
     togglePresentationHeroButton.textContent = on
-      ? (mobile ? "Show filters" : "Show briefing")
-      : (mobile ? "Hide" : "Hide briefing");
+      ? "Show filters"
+      : (mobile ? "Hide" : "Hide filters");
   }
   if (persist) {
     localStorage.setItem(PRESENTATION_HERO_COLLAPSED_KEY, on ? "1" : "0");
@@ -6231,84 +6230,51 @@ function getPresentationTickets(tickets = getValidTickets()) {
 function renderPresentationAttachmentThumbs(ticket) {
   const screenshots = getTicketScreenshots(ticket);
   const labeledCount = ticketAttachmentLabelCount(ticket);
-  if (!screenshots.length && !labeledCount) {
-    return '<p class="presentation-no-attachments">No attachments</p>';
-  }
+  const count = screenshots.length || labeledCount;
+  if (!count) return "";
 
-  if (!screenshots.length) {
-    return `
-      <button
-        class="screenshot-preview-btn presentation-attachment-fallback"
-        type="button"
-        data-sheet-row="${ticket.sheetRow}"
-        data-screenshot-index="0"
-      >Preview attachments (${labeledCount})</button>
-    `;
-  }
-
-  const thumbs = screenshots.slice(0, 4).map((url, index) => {
-    const thumb = toScreenshotThumbUrl(url);
-    const looksPdf = /\.pdf($|\?)/i.test(url);
-    return `
-      <button
-        class="presentation-thumb screenshot-preview-btn"
-        type="button"
-        data-sheet-row="${ticket.sheetRow}"
-        data-screenshot-index="${index}"
-        aria-label="Preview attachment ${index + 1}"
-        title="Preview attachment ${index + 1}"
-      >
-        ${!looksPdf
-          ? `<img src="${escapeHtml(thumb)}" alt="" loading="lazy" decoding="async">`
-          : `<span class="presentation-thumb-fallback">PDF</span>`}
-      </button>
-    `;
-  }).join("");
-
-  const extra = screenshots.length > 4
-    ? `<button class="presentation-thumb-more screenshot-preview-btn" type="button" data-sheet-row="${ticket.sheetRow}" data-screenshot-index="4">+${screenshots.length - 4}</button>`
-    : "";
-
-  return `<div class="presentation-thumbs">${thumbs}${extra}</div>`;
+  const label = count === 1 ? "1 file" : `${count} files`;
+  return `
+    <button
+      class="screenshot-preview-btn presentation-files-chip"
+      type="button"
+      data-sheet-row="${ticket.sheetRow}"
+      data-screenshot-index="0"
+      aria-label="Preview ${escapeHtml(label)}"
+      title="Preview attachments"
+    >${escapeHtml(label)}</button>
+  `;
 }
 
 function renderPresentationCard(ticket, index) {
   const remarks = getTicketRemarksText(ticket);
   const milestone = formatDate(ticket.Milestone) || "—";
   const priorityClass = normalizePriority(ticket.Priority) === "80" ? "high" : "low";
+  const attachHtml = renderPresentationAttachmentThumbs(ticket);
+  const idLabel = String(index + 1).padStart(2, "0");
 
   return `
     <article class="presentation-card ${statusClass(ticket.Status)}" data-sheet-row="${ticket.sheetRow}">
-      <header class="presentation-card-head">
-        <div class="presentation-card-kicker">
-          <span class="presentation-slide-index">${String(index + 1).padStart(2, "0")}</span>
-          ${ticket.Type ? `<span class="presentation-type">${escapeHtml(ticket.Type)}</span>` : ""}
-          <span class="priority-pill priority-${priorityClass}">${escapeHtml(formatPriorityLabel(ticket.Priority))}</span>
-        </div>
-      </header>
       <h3 class="presentation-card-title">${escapeHtml(ticket.Task || "Untitled project")}</h3>
       <div class="presentation-card-meta">
-        <div class="presentation-card-meta-primary">
-          <span class="status-pill ${statusClass(ticket.Status)}">${escapeHtml(ticket.Status || "Blank")}</span>
-          <span class="owner-chip">
-            <span class="owner-avatar">${escapeHtml(ownerInitials(ticket.Owner))}</span>
-            <span class="owner-chip-name">${escapeHtml(ticket.Owner || "No owner")}</span>
-          </span>
-        </div>
-        <div class="presentation-milestone">
-          <span class="presentation-milestone-label">Milestone</span>
-          <span class="presentation-milestone-date">${escapeHtml(milestone)}</span>
-        </div>
+        <span class="presentation-id-chip">${idLabel}</span>
+        ${ticket.Type ? `<span class="presentation-type">${escapeHtml(ticket.Type)}</span>` : ""}
+        <span class="priority-pill priority-${priorityClass}">${escapeHtml(formatPriorityLabel(ticket.Priority))}</span>
+        <span class="status-pill ${statusClass(ticket.Status)}">${escapeHtml(ticket.Status || "Blank")}</span>
+        <span class="owner-chip">
+          <span class="owner-avatar">${escapeHtml(ownerInitials(ticket.Owner))}</span>
+          <span class="owner-chip-name">${escapeHtml(ticket.Owner || "No owner")}</span>
+        </span>
       </div>
-      <div class="presentation-card-remarks-wrap${remarks ? "" : " is-empty"}">
-        ${remarks
-          ? `<p class="presentation-card-remarks">${escapeHtml(remarks)}</p>`
-          : `<p class="presentation-card-remarks muted-text">No remarks</p>`}
-      </div>
-      <div class="presentation-card-attachments">
-        <span class="presentation-attachments-label">Attachments</span>
-        ${renderPresentationAttachmentThumbs(ticket)}
-      </div>
+      <p class="presentation-milestone">
+        <span class="presentation-milestone-line">Milestone · ${escapeHtml(milestone)}</span>
+      </p>
+      ${remarks
+        ? `<p class="presentation-card-remarks">${escapeHtml(remarks)}</p>`
+        : ""}
+      ${attachHtml
+        ? `<div class="presentation-card-attachments">${attachHtml}</div>`
+        : ""}
     </article>
   `;
 }
@@ -6337,10 +6303,6 @@ function renderPresentationView(tickets = getValidTickets()) {
     presentationSummary.textContent = shown.length
       ? `${shown.length} ${typeLabel} project${shown.length === 1 ? "" : "s"} · ${periodLabel}`
       : `No ${typeLabel} projects match the current filters (${periodLabel})`;
-  }
-
-  if (presentationSubtitle) {
-    presentationSubtitle.textContent = "Kanban by status — Completed, In progress, then Not started. ★ on Tickets/Projects opens Edit (defaults Type to SAP when converting).";
   }
 
   if (!shown.length) {
