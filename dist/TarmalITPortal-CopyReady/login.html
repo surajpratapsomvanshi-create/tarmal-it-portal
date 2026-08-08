@@ -6,7 +6,7 @@
     <title>Sign In | Tarmal IT Portal</title>
     <link rel="icon" href="./assets/tarmal-mark.png?v=1" type="image/png">
     <link rel="apple-touch-icon" href="./assets/apple-touch-icon.png?v=1">
-    <link rel="stylesheet" href="./styles.css?v=84">
+    <link rel="stylesheet" href="./styles.css?v=151">
   </head>
   <body class="login-page">
     <main class="login-shell">
@@ -34,10 +34,10 @@
               <p class="login-form-secure">Secure session · Authorized use only</p>
             </header>
 
-            <form id="loginForm" class="login-form">
+            <form id="loginForm" class="login-form" method="post" action="#" autocomplete="on">
               <label class="login-field">
                 <div class="login-input-wrap">
-                  <input name="identifier" autocomplete="username" required placeholder="name@company.com" aria-label="Email or username">
+                  <input name="identifier" id="loginIdentifier" autocomplete="username" required placeholder="name@company.com" aria-label="Email or username">
                 </div>
               </label>
 
@@ -79,9 +79,37 @@
       </div>
     </main>
 
-    <script src="./auth.js?v=19"></script>
+    <script src="./auth.js?v=20"></script>
     <script>
+      (function initLoginPage() {
       const REMEMBER_KEY = "tarmal-login-remember";
+
+      function consumeLoginQueryParams() {
+        const url = new URL(window.location.href);
+        const identifier = String(
+          url.searchParams.get("identifier")
+          || url.searchParams.get("username")
+          || url.searchParams.get("email")
+          || ""
+        ).trim();
+        const hadSensitiveParams = identifier
+          || url.searchParams.has("password")
+          || url.searchParams.has("username")
+          || url.searchParams.has("email");
+
+        if (hadSensitiveParams) {
+          url.searchParams.delete("identifier");
+          url.searchParams.delete("username");
+          url.searchParams.delete("email");
+          url.searchParams.delete("password");
+          const nextUrl = url.searchParams.toString()
+            ? `${url.pathname}?${url.searchParams}`
+            : url.pathname;
+          history.replaceState(null, "", nextUrl);
+        }
+
+        return identifier;
+      }
 
       if (Auth.getSession()) {
         window.location.href = "./index.html";
@@ -95,26 +123,62 @@
       const loginPasswordToggle = document.querySelector("#loginPasswordToggle");
       const loginRemember = document.querySelector("#loginRemember");
       const loginForgot = document.querySelector("#loginForgot");
-      const userSyncOptions = { deferSync: true };
-      let usersPreload = Auth.loadUsersFromSheet(userSyncOptions).catch(() => null);
+      const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || "");
+      const userSyncOptions = {
+        deferSync: true,
+        // Apps Script JSONP is often slow on phones (cold start + redirects).
+        timeoutMs: isMobile ? 28000 : 20000,
+        retries: 1
+      };
+      let preloadState = "pending";
+      let usersPreload;
+
+      function startUsersPreload() {
+        preloadState = "pending";
+        usersPreload = Auth.loadUsersFromSheet(userSyncOptions)
+          .then((users) => {
+            preloadState = "ok";
+            return users;
+          })
+          .catch((error) => {
+            preloadState = "err";
+            throw error;
+          });
+        return usersPreload;
+      }
+
+      startUsersPreload();
+
+      const queryIdentifier = consumeLoginQueryParams();
 
       try {
         const saved = JSON.parse(localStorage.getItem(REMEMBER_KEY) || "null");
-        if (saved && saved.identifier) {
+        if (queryIdentifier) {
+          loginForm.elements.identifier.value = queryIdentifier;
+        } else if (saved && saved.identifier) {
           loginForm.elements.identifier.value = saved.identifier;
           loginRemember.checked = true;
         }
       } catch (error) {
         localStorage.removeItem(REMEMBER_KEY);
+        if (queryIdentifier) {
+          loginForm.elements.identifier.value = queryIdentifier;
+        }
       }
 
-      loginPasswordToggle.addEventListener("click", () => {
-        const show = loginPassword.type === "password";
+      function setPasswordVisibility(show) {
         loginPassword.type = show ? "text" : "password";
         loginPasswordToggle.setAttribute("aria-label", show ? "Hide password" : "Show password");
         loginPasswordToggle.title = show ? "Hide password" : "Show password";
-        loginPasswordToggle.querySelector(".login-eye-open").hidden = !show;
-        loginPasswordToggle.querySelector(".login-eye-closed").hidden = show;
+        loginPasswordToggle.classList.toggle("is-showing", show);
+        loginPasswordToggle.querySelector(".login-eye-open").hidden = show;
+        loginPasswordToggle.querySelector(".login-eye-closed").hidden = !show;
+      }
+
+      setPasswordVisibility(false);
+
+      loginPasswordToggle.addEventListener("click", () => {
+        setPasswordVisibility(loginPassword.type === "password");
       });
 
       loginForgot.addEventListener("click", () => {
@@ -122,7 +186,7 @@
         loginError.textContent = "Contact your IT administrator to reset your password.";
       });
 
-      function finishLogin(result) {
+      function finishLogin() {
         Auth.refreshSessionRights();
         if (loginRemember.checked) {
           Auth.persistRememberedSession();
@@ -145,6 +209,28 @@
         }
       }
 
+      async function refreshUsersForLogin() {
+        // Reuse an in-flight or successful preload so submit does not abandon a
+        // nearly-complete Apps Script response (common on mobile).
+        if (preloadState === "pending" || preloadState === "ok") {
+          try {
+            return await usersPreload;
+          } catch (error) {
+            // Fall through and start a fresh attempt below.
+          }
+        }
+
+        return startUsersPreload();
+      }
+
+      function syncFailureMessage(error) {
+        const message = String(error && error.message || "");
+        if (/timed out/i.test(message)) {
+          return "Account sync timed out. Your password may be correct — wait a moment and try again.";
+        }
+        return "Cannot refresh accounts from the server right now. Try again in a moment.";
+      }
+
       loginForm.addEventListener("submit", async (event) => {
         event.preventDefault();
         loginError.hidden = true;
@@ -155,10 +241,11 @@
         const identifier = data.get("identifier");
         const password = data.get("password");
 
+        // Prefer cached / seeded AppUsers first (works offline for known users).
         let result = Auth.login(identifier, password);
         if (result.ok) {
           storeRememberedIdentifier(identifier);
-          usersPreload.finally(() => {
+          usersPreload.catch(() => null).finally(() => {
             Auth.refreshSessionRights();
             if (loginRemember.checked) {
               Auth.persistRememberedSession();
@@ -166,22 +253,26 @@
               Auth.clearRememberedSession();
             }
           });
-          finishLogin(result);
+          finishLogin();
           return;
         }
 
         try {
-          await Promise.race([
-            usersPreload,
-            Auth.loadUsersFromSheet({ ...userSyncOptions, timeoutMs: 8000 })
-          ]);
-          usersPreload = Promise.resolve();
+          await refreshUsersForLogin();
           result = Auth.login(identifier, password);
         } catch (error) {
+          // Sheet refresh failed/timed out — still allow cache login if password matches.
+          result = Auth.login(identifier, password);
+          if (result.ok) {
+            storeRememberedIdentifier(identifier);
+            finishLogin();
+            return;
+          }
+
           loginError.hidden = false;
-          loginError.textContent = "Cannot verify credentials right now. Check your internet connection and try again.";
+          loginError.textContent = syncFailureMessage(error);
           resetLoginButton();
-          usersPreload = Auth.loadUsersFromSheet(userSyncOptions).catch(() => null);
+          startUsersPreload();
           return;
         }
 
@@ -193,8 +284,9 @@
         }
 
         storeRememberedIdentifier(identifier);
-        finishLogin(result);
+        finishLogin();
       });
+      })();
     </script>
   </body>
 </html>

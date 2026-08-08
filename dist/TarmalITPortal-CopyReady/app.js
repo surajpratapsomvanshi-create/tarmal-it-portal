@@ -139,7 +139,11 @@ const presentationSummary = document.querySelector("#presentationSummary");
 const presentationSubtitle = document.querySelector("#presentationSubtitle");
 const enterPresentModeButton = document.querySelector("#enterPresentModeButton");
 const exitPresentModeButton = document.querySelector("#exitPresentModeButton");
-const clearPresentationMarksButton = document.querySelector("#clearPresentationMarksButton");
+const presentationTypeFilter = document.querySelector("#presentationTypeFilter");
+const presentationPeriodFilters = document.querySelector("#presentationPeriodFilters");
+const presentationCustomRange = document.querySelector("#presentationCustomRange");
+const presentationDateFrom = document.querySelector("#presentationDateFrom");
+const presentationDateTo = document.querySelector("#presentationDateTo");
 const kanbanColumns = document.querySelector("#kanbanColumns");
 const kanbanSearchFilter = document.querySelector("#kanbanSearchFilter");
 const kanbanOwnerFilter = document.querySelector("#kanbanOwnerFilter");
@@ -223,8 +227,8 @@ const SIDEBAR_COLLAPSED_KEY = "tarmal-sidebar-collapsed";
 const TOPBAR_COLLAPSED_KEY = "tarmal-topbar-collapsed";
 const PERFORMANCE_FILTERS_COLLAPSED_KEY = "tarmal-performance-filters-collapsed";
 const TOOLBAR_COLLAPSED_PREFIX = "tarmal-toolbar-";
-const PRESENTATION_MARKS_KEY = "tarmal-presentation-marks";
-const PRESENTATION_TAG = "[PRESENTATION]";
+let selectedPresentationType = "all";
+let selectedPresentationPeriod = "all";
 const DEFAULT_COLLAPSED_TOOLBARS = new Set(["tickets", "projects", "procurement", "kanban", "assets", "users"]);
 
 const KANBAN_COLUMNS = [
@@ -1018,6 +1022,7 @@ function stripScreenshotMetadata(text) {
 }
 
 function stripPresentationTag(text) {
+  // Legacy cleanup: older builds stored [PRESENTATION] in Notes for starring.
   return String(text || "")
     .split(/\r?\n/)
     .map((line) => line.trim())
@@ -1028,62 +1033,13 @@ function stripPresentationTag(text) {
     .trim();
 }
 
-function ticketHasPresentationTag(ticket) {
-  const raw = String(ticket?.Remarks || ticket?.Notes || "");
-  return /\[PRESENTATION\]/i.test(raw);
-}
-
-function appendPresentationTag(text) {
-  const cleaned = stripPresentationTag(text);
-  return cleaned ? `${cleaned}\n${PRESENTATION_TAG}` : PRESENTATION_TAG;
-}
-
-function readPresentationMarks() {
-  try {
-    const saved = JSON.parse(localStorage.getItem(PRESENTATION_MARKS_KEY) || "[]");
-    if (!Array.isArray(saved)) return new Set();
-    return new Set(saved.map((row) => Number(row)).filter((row) => row > 0));
-  } catch (error) {
-    return new Set();
-  }
-}
-
-function writePresentationMarks(marks) {
-  const rows = [...marks].map((row) => Number(row)).filter((row) => row > 0);
-  localStorage.setItem(PRESENTATION_MARKS_KEY, JSON.stringify(rows));
-}
-
-function isPresentationMarkedLocal(ticketOrRow) {
-  const row = Number(ticketOrRow?.sheetRow ?? ticketOrRow);
-  if (!row) return false;
-  return readPresentationMarks().has(row);
-}
-
-function isPresentationMarked(ticket) {
-  if (!ticket) return false;
-  return isPresentationMarkedLocal(ticket) || ticketHasPresentationTag(ticket);
-}
-
-function setPresentationMarkLocal(sheetRow, marked) {
-  const row = Number(sheetRow);
-  if (!row) return;
-  const marks = readPresentationMarks();
-  if (marked) marks.add(row);
-  else marks.delete(row);
-  writePresentationMarks(marks);
-}
-
 function buildNotesTextForSheet(ticket) {
-  const hasPresentation = ticketHasPresentationTag(ticket) || isPresentationMarkedLocal(ticket);
   let text = stripPresentationTag(stripScreenshotMetadata(cleanText(ticket.Remarks || ticket.Notes || "")));
   const links = dedupeScreenshotUrls([
     ...extractDriveLinksFromNotes(ticket),
     ...collectScreenshotUrlsFromHtml(ticket.NotesHtml)
       .filter((url) => isDriveScreenshotUrl(url))
   ]);
-  if (hasPresentation) {
-    text = appendPresentationTag(text);
-  }
   if (!links.length) return text;
   const linkLines = links.map((url, index) => `Screenshot ${index + 1}: ${url}`);
   return [text, ...linkLines].filter(Boolean).join("\n");
@@ -2729,7 +2685,7 @@ function isProjectTypeTicket(ticket) {
 }
 
 function isPresentationEligible(ticket) {
-  // ★ / presentation set: exact Type SAP or Infra only (not Daily - SAP / Daily - Infra).
+  // Exact Type SAP or Infra only (not Daily - SAP / Daily - Infra).
   return isProjectTypeTicket(ticket);
 }
 
@@ -5155,7 +5111,7 @@ function closeTicketCreateModal() {
   }
 }
 
-function openTicketEditor(sheetRow) {
+function openTicketEditor(sheetRow, options = {}) {
   if (!canEditTickets()) {
     alert("You do not have permission to edit tickets.");
     return;
@@ -5177,7 +5133,11 @@ function openTicketEditor(sheetRow) {
   populateTicketEditOwnerSelect(ticket.Owner || "");
   ticketEditForm.elements["Raised By"].value = ticket["Raised By"] || "";
   populateTicketEditStatusSelect(ticket);
-  ticketEditForm.elements.Type.value = ticket.Type || "Daily - Infra";
+  let typeValue = ticket.Type || "Daily - Infra";
+  if (options.preferSapType && !isProjectTypeTicket(ticket)) {
+    typeValue = "SAP";
+  }
+  ticketEditForm.elements.Type.value = typeValue;
   const originalOwnerCheckbox = ticketEditForm.querySelector("[name='originalOwnerBhanu']");
   if (originalOwnerCheckbox) {
     originalOwnerCheckbox.checked = isTicketOriginalOwnerBhanu(ticket);
@@ -5191,7 +5151,11 @@ function openTicketEditor(sheetRow) {
 
   ticketEditModal.hidden = false;
   document.body.classList.add("modal-open");
-  ticketEditForm.elements.Task.focus();
+  if (options.preferSapType && !isProjectTypeTicket(ticket)) {
+    ticketEditForm.elements.Type?.focus();
+  } else {
+    ticketEditForm.elements.Task.focus();
+  }
 }
 
 function closeTicketEditor() {
@@ -5215,22 +5179,12 @@ function closeTicketEditor() {
 function ticketFromEditForm() {
   const data = new FormData(ticketEditForm);
   const sheetRow = resolveEditingSheetRow(data, activeEditTicket || {});
-  const ticket = normalizeTicket(applyTicketNotesToPayload({
+  return normalizeTicket(applyTicketNotesToPayload({
     ...ticketFromFormData(data),
     sheetRow,
     ticketId: ticketStableId(activeEditTicket) || createTicketId(),
     lastUpdated: cleanText(activeEditTicket?.lastUpdated) || ""
   }, ticketEditNotesEditor));
-
-  // Preserve durable presentation marks when remarks are edited in the modal.
-  if (isPresentationMarkedLocal(ticket) || ticketHasPresentationTag(activeEditTicket || {})) {
-    const notes = appendPresentationTag(ticket.Notes || ticket.Remarks || "");
-    ticket.Notes = notes;
-    ticket.Remarks = notes;
-    setPresentationMarkLocal(sheetRow, true);
-  }
-
-  return ticket;
 }
 
 function ticketFromFormData(data, owner = "") {
@@ -6123,127 +6077,53 @@ function duplicateTicket(sheetRow) {
   setStatus("", "Review the duplicated ticket, then Submit to create it.");
 }
 
-function bindPresentationPinButtons(root) {
+function bindTicketTypePromoteButtons(root) {
   if (!root) return;
-  root.querySelectorAll(".ticket-presentation-pin-button, .presentation-card-pin").forEach((button) => {
+  root.querySelectorAll(".ticket-presentation-pin-button").forEach((button) => {
     button.addEventListener("click", (event) => {
       event.stopPropagation();
-      if (button.classList.contains("is-syncing")) return;
-      togglePresentationMark(button.dataset.sheetRow);
+      openTicketEditor(button.dataset.sheetRow, { preferSapType: true });
     });
   });
 }
 
-const presentationActionInFlight = new Set();
+function syncPresentationCustomRangeVisibility() {
+  if (!presentationCustomRange) return;
+  presentationCustomRange.hidden = selectedPresentationPeriod !== "custom";
+}
 
-async function togglePresentationMark(sheetRow) {
-  const ticket = findTicketBySheetRow(sheetRow);
-  if (!ticket) {
-    alert("Could not find the selected project.");
-    return;
-  }
-
-  if (!isPresentationEligible(ticket)) {
-    alert("Only SAP / Infra project works can be included in the presentation.");
-    return;
-  }
-
-  const actionKey = milestoneActionKey(ticket);
-  if (presentationActionInFlight.has(actionKey)) return;
-  presentationActionInFlight.add(actionKey);
-
-  const nextMarked = !isPresentationMarked(ticket);
-  setPresentationMarkLocal(ticket.sheetRow, nextMarked);
-
-  const rawNotes = String(ticket.Notes || ticket.Remarks || "");
-  const nextNotes = nextMarked ? appendPresentationTag(rawNotes) : stripPresentationTag(rawNotes);
-  let updatedTicket = normalizeTicket({
-    ...ticket,
-    Notes: nextNotes,
-    Remarks: nextNotes,
-    pendingSheetSync: Date.now(),
-    pendingFields: ["Notes"]
+function ticketMatchesPresentationCustomRange(ticket) {
+  const fromRaw = presentationDateFrom?.value || "";
+  const toRaw = presentationDateTo?.value || "";
+  if (!fromRaw && !toRaw) return true;
+  const from = fromRaw ? parseTicketDate(fromRaw) : null;
+  const to = toRaw ? parseTicketDate(toRaw) : null;
+  if (from) from.setHours(0, 0, 0, 0);
+  if (to) to.setHours(23, 59, 59, 999);
+  return ticketPeriodDates(ticket).some((date) => {
+    const time = date.getTime();
+    if (from && time < from.getTime()) return false;
+    if (to && time > to.getTime()) return false;
+    return true;
   });
+}
 
-  updateLocalTicket(updatedTicket, { pendingFields: ["Notes"] });
-  renderTickets({ force: true });
-  setStatus("", nextMarked ? "Added to presentation set..." : "Removed from presentation set...");
-
-  try {
-    if (canEditTickets() && SHEET_WEB_APP_URL) {
-      if (!updatedTicket.sheetRow) {
-        const ensured = await ensureTicketSheetRow(updatedTicket);
-        if (ensured) {
-          updatedTicket = normalizeTicket({
-            ...updatedTicket,
-            sheetRow: ensured,
-            Notes: nextNotes,
-            Remarks: nextNotes,
-            pendingSheetSync: Date.now(),
-            pendingFields: ["Notes"]
-          });
-          setPresentationMarkLocal(ensured, nextMarked);
-          updateLocalTicket(updatedTicket, { pendingFields: ["Notes"] });
-        }
-      }
-
-      if (updatedTicket.sheetRow) {
-        await sendTicketUpdateToSheet({ ...updatedTicket, pendingFields: ["Notes"] });
-        setStatus("online", nextMarked
-          ? "Included in presentation (saved to sheet)"
-          : "Removed from presentation (saved to sheet)");
-      } else {
-        setStatus("online", nextMarked
-          ? "Included in presentation (this browser)"
-          : "Removed from presentation (this browser)");
-      }
-    } else {
-      setStatus("online", nextMarked
-        ? "Included in presentation (this browser)"
-        : "Removed from presentation (this browser)");
-    }
-  } catch (error) {
-    setStatus("error", error?.message || "Presentation mark saved locally, but sheet sync failed");
-    console.error(error);
-  } finally {
-    presentationActionInFlight.delete(actionKey);
-    renderTickets({ force: true });
-    if (getActiveTabName() === "presentation") {
-      renderPresentationView();
-    }
-  }
+function ticketMatchesPresentationPeriod(ticket) {
+  if (selectedPresentationPeriod === "all") return true;
+  if (selectedPresentationPeriod === "custom") return ticketMatchesPresentationCustomRange(ticket);
+  return ticketRelevantInPeriod(ticket, selectedPresentationPeriod);
 }
 
 function getPresentationTickets(tickets = getValidTickets()) {
-  // Presentation set: top-level exact SAP/Infra only (never Daily variants or other types).
-  const projects = tickets.filter((ticket) => isProjectTypeTicket(ticket) && !isSubtaskTicket(ticket));
-  const byRow = new Map();
-  tickets.forEach((ticket) => {
-    const row = Number(ticket.sheetRow);
-    if (row) byRow.set(row, ticket);
-  });
-
-  // Keep local marks aligned with durable [PRESENTATION] tags; drop marks on non-project types.
-  const marks = readPresentationMarks();
-  let marksChanged = false;
-  projects.forEach((ticket) => {
-    const row = Number(ticket.sheetRow);
-    if (!row || !ticketHasPresentationTag(ticket) || marks.has(row)) return;
-    marks.add(row);
-    marksChanged = true;
-  });
-  for (const row of [...marks]) {
-    const ticket = byRow.get(row);
-    if (!ticket) continue;
-    if (!isProjectTypeTicket(ticket) || isSubtaskTicket(ticket)) {
-      marks.delete(row);
-      marksChanged = true;
-    }
-  }
-  if (marksChanged) writePresentationMarks(marks);
-
-  return projects
-    .filter((ticket) => isPresentationMarked(ticket))
+  // Exact Type SAP / Infra only (never Daily variants); top-level projects.
+  return tickets
+    .filter((ticket) => isProjectTypeTicket(ticket) && !isSubtaskTicket(ticket))
+    .filter((ticket) => {
+      if (selectedPresentationType === "SAP") return isExactSapType(ticket.Type);
+      if (selectedPresentationType === "Infra") return isExactInfraType(ticket.Type);
+      return true;
+    })
+    .filter((ticket) => ticketMatchesPresentationPeriod(ticket))
     .sort((a, b) => {
       const aToday = isMilestoneToday(a) && isOpenTicket(a) ? 1 : 0;
       const bToday = isMilestoneToday(b) && isOpenTicket(b) ? 1 : 0;
@@ -6310,14 +6190,6 @@ function renderPresentationCard(ticket, index) {
           ${ticket.Type ? `<span class="presentation-type">${escapeHtml(ticket.Type)}</span>` : ""}
           <span class="priority-pill priority-${priorityClass}">${escapeHtml(formatPriorityLabel(ticket.Priority))}</span>
         </div>
-        <button
-          class="presentation-card-pin ticket-presentation-pin-button is-pinned"
-          type="button"
-          data-sheet-row="${ticket.sheetRow}"
-          aria-pressed="true"
-          aria-label="Remove from presentation"
-          title="Remove from presentation"
-        >★</button>
       </header>
       <h3 class="presentation-card-title">${escapeHtml(ticket.Task || "Untitled project")}</h3>
       <div class="presentation-card-meta">
@@ -6359,28 +6231,30 @@ function sortPresentationColumnTickets(tickets) {
 function renderPresentationView(tickets = getValidTickets()) {
   if (!presentationDeck) return;
 
-  const marked = getPresentationTickets(tickets);
-  const projectCount = getProjectTickets(tickets).filter((ticket) => !isSubtaskTicket(ticket)).length;
+  const shown = getPresentationTickets(tickets);
+  const typeLabel = selectedPresentationType === "all" ? "SAP & Infra" : selectedPresentationType;
+  const periodLabel = selectedPresentationPeriod === "custom"
+    ? "custom range"
+    : (PERFORMANCE_PERIOD_OPTIONS.find((entry) => entry.id === selectedPresentationPeriod)?.label
+      || selectedPresentationPeriod);
 
   if (presentationSummary) {
-    presentationSummary.textContent = marked.length
-      ? `${marked.length} project${marked.length === 1 ? "" : "s"} in the presentation set · ${projectCount} SAP/Infra projects available`
-      : `No projects marked yet · star SAP/Infra on Tickets or Projects (${projectCount} available)`;
+    presentationSummary.textContent = shown.length
+      ? `${shown.length} ${typeLabel} project${shown.length === 1 ? "" : "s"} · ${periodLabel}`
+      : `No ${typeLabel} projects match the current filters (${periodLabel})`;
   }
 
   if (presentationSubtitle) {
-    presentationSubtitle.textContent = marked.length
-      ? "Kanban by status — Completed, In progress, then Not started. Star more from Tickets or Projects."
-      : "Star SAP/Infra works from Tickets or Projects to build an exclusive Kanban set for management — title, status, owner, milestone, remarks, and attachments.";
+    presentationSubtitle.textContent = "Kanban by status — Completed, In progress, then Not started. ★ on Tickets/Projects opens Edit (defaults Type to SAP when converting).";
   }
 
-  if (!marked.length) {
+  if (!shown.length) {
     presentationDeck.classList.remove("presentation-kanban");
     presentationDeck.innerHTML = `
       <div class="presentation-empty">
-        <p class="eyebrow">Presentation set</p>
-        <h3>Nothing marked for management yet</h3>
-        <p>Open <strong>Tickets</strong> or <strong>Projects</strong>, then click the ★ on SAP or Infra works you want to present.</p>
+        <p class="eyebrow">Presentation</p>
+        <h3>No matching SAP or Infra projects</h3>
+        <p>Set a ticket’s <strong>Type</strong> to SAP or Infra (use ★ on Tickets/Projects to open Edit), or widen the filters above.</p>
         <div class="presentation-empty-actions">
           <button class="primary-button" type="button" data-goto-tab="tickets">Go to Tickets</button>
           <button class="secondary-button" type="button" data-goto-tab="projects">Go to Projects</button>
@@ -6394,7 +6268,7 @@ function renderPresentationView(tickets = getValidTickets()) {
   }
 
   const grouped = Object.fromEntries(PRESENTATION_KANBAN_COLUMNS.map((column) => [column.id, []]));
-  marked.forEach((ticket) => {
+  shown.forEach((ticket) => {
     const columnId = kanbanColumnId(ticket.Status);
     if (grouped[columnId]) {
       grouped[columnId].push(ticket);
@@ -6435,7 +6309,6 @@ function renderPresentationView(tickets = getValidTickets()) {
       }).join("")}
     </div>
   `;
-  bindPresentationPinButtons(presentationDeck);
   bindScreenshotPreviewButtons(presentationDeck);
 }
 
@@ -6450,42 +6323,6 @@ function setPresentMode(enabled) {
   }
 }
 
-function clearPresentationMarks() {
-  const tickets = getPresentationTickets();
-  if (!tickets.length) {
-    writePresentationMarks(new Set());
-    renderPresentationView();
-    setStatus("online", "Presentation set is already empty");
-    return;
-  }
-
-  if (!window.confirm(`Clear ${tickets.length} project${tickets.length === 1 ? "" : "s"} from the presentation set?`)) {
-    return;
-  }
-
-  writePresentationMarks(new Set());
-
-  if (canEditTickets() && SHEET_WEB_APP_URL) {
-    tickets.forEach((ticket) => {
-      if (!ticketHasPresentationTag(ticket)) return;
-      const nextNotes = stripPresentationTag(String(ticket.Notes || ticket.Remarks || ""));
-      const updated = normalizeTicket({
-        ...ticket,
-        Notes: nextNotes,
-        Remarks: nextNotes,
-        pendingSheetSync: Date.now(),
-        pendingFields: ["Notes"]
-      });
-      updateLocalTicket(updated, { pendingFields: ["Notes"] });
-      sendTicketUpdateToSheet({ ...updated, pendingFields: ["Notes"] }).catch((error) => console.error(error));
-    });
-  }
-
-  renderTickets({ force: true });
-  renderPresentationView();
-  setStatus("online", "Presentation set cleared");
-}
-
 function renderTicketTable(tickets, options = {}) {
   const bodyEl = options.bodyEl || rows;
   const tableEl = options.tableEl || ticketTable;
@@ -6495,7 +6332,7 @@ function renderTicketTable(tickets, options = {}) {
   if (!bodyEl) return;
 
   const canEdit = canEditTickets();
-  const showActions = canEdit || Boolean(options.showPresentationPin);
+  const showActions = canEdit;
   if (tableEl) {
     tableEl.classList.toggle("ticket-table-can-edit", showActions);
   }
@@ -6601,23 +6438,19 @@ function renderTicketTable(tickets, options = {}) {
         statusClass(ticket.Status),
         isMilestoneToday(ticket) && isOpenTicket(ticket) ? "milestone-today" : "",
         options.highlightImportantRemarks && hasImportantRemarks(ticket) ? "remarks-important" : "",
-        options.showPresentationPin && isPresentationEligible(ticket) && isPresentationMarked(ticket) ? "presentation-marked" : "",
         subtask ? "subtask-row" : "",
         hasChildren ? "has-subtasks" : "",
         collapsed ? "subtasks-collapsed" : "",
         parentCollapsed ? "subtask-hidden" : ""
       ].filter(Boolean).join(" ");
 
-      const showPresentationPinForRow = Boolean(options.showPresentationPin) && isPresentationEligible(ticket);
-      const presentationPinned = showPresentationPinForRow && isPresentationMarked(ticket);
-      const presentationPinButton = showPresentationPinForRow ? `
+      const typePromoteButton = canEdit ? `
             <button
-              class="ticket-presentation-pin-button${presentationPinned ? " is-pinned" : ""}"
+              class="ticket-presentation-pin-button"
               type="button"
               data-sheet-row="${ticket.sheetRow}"
-              aria-pressed="${presentationPinned ? "true" : "false"}"
-              aria-label="${presentationPinned ? "Remove from presentation" : "Include in presentation"}"
-              title="${presentationPinned ? "Remove from presentation" : "Include in presentation"}"
+              aria-label="Edit ticket type"
+              title="Edit ticket (defaults Type to SAP)"
             >★</button>` : "";
 
       return `
@@ -6631,11 +6464,11 @@ function renderTicketTable(tickets, options = {}) {
         <td class="ticket-col-compact ticket-col-date">${escapeHtml(formatDate(ticket["End date"]))}</td>
         <td class="ticket-col-compact ticket-col-type">${escapeHtml(ticket.Type)}</td>
         <td class="remarks-col">${renderTicketRemarksCell(ticket)}</td>
-        ${canEdit || options.showPresentationPin ? `
+        ${canEdit ? `
         <td class="actions-col">
           <div class="ticket-row-actions">
-            ${presentationPinButton}
-            ${canEdit && !subtask ? `
+            ${typePromoteButton}
+            ${!subtask ? `
             <button
               class="ticket-subtask-button"
               type="button"
@@ -6643,7 +6476,6 @@ function renderTicketTable(tickets, options = {}) {
               aria-label="Add sub-task"
               title="Add sub-task"
             >+</button>` : ""}
-            ${canEdit ? `
             <button
               class="ticket-milestone-today-button${isMilestoneToday(ticket) ? " is-today" : ""}${isMilestoneTomorrow(ticket) ? " is-tomorrow" : ""}${milestoneActionInFlight.has(milestoneActionKey(ticket)) ? " is-syncing" : ""}"
               type="button"
@@ -6669,7 +6501,7 @@ function renderTicketTable(tickets, options = {}) {
               title="Edit ticket"
             >
               <span class="edit-icon" aria-hidden="true"></span>
-            </button>` : ""}
+            </button>
           </div>
         </td>` : ""}
       </tr>
@@ -6688,7 +6520,7 @@ function renderTicketTable(tickets, options = {}) {
   bodyEl.innerHTML = rowsHtml + loadMoreHtml;
 
   bindTicketEditButtons(bodyEl);
-  bindPresentationPinButtons(bodyEl);
+  bindTicketTypePromoteButtons(bodyEl);
   bindScreenshotPreviewButtons(bodyEl);
   bodyEl.querySelectorAll("[data-load-more]").forEach((button) => {
     button.addEventListener("click", () => {
@@ -6848,8 +6680,7 @@ function renderTickets(options = {}) {
     renderTicketTable(filteredTickets, {
       pageLimit: ticketTableLimit,
       loadMoreKind: "tickets",
-      collapsePanel: "tickets",
-      showPresentationPin: true
+      collapsePanel: "tickets"
     });
   }
 
@@ -6876,7 +6707,6 @@ function renderTickets(options = {}) {
       actionsHeaderEl: projectActionsHeader,
       emptyMessage: "No SAP or Infra project works match the current filters.",
       highlightImportantRemarks: true,
-      showPresentationPin: true,
       pageLimit: projectTableLimit,
       loadMoreKind: "projects",
       collapsePanel: "projects"
@@ -7640,7 +7470,27 @@ tabButtons.forEach((button) => {
 
 enterPresentModeButton?.addEventListener("click", () => setPresentMode(true));
 exitPresentModeButton?.addEventListener("click", () => setPresentMode(false));
-clearPresentationMarksButton?.addEventListener("click", clearPresentationMarks);
+presentationTypeFilter?.addEventListener("change", () => {
+  selectedPresentationType = presentationTypeFilter.value || "all";
+  renderPresentationView();
+});
+presentationPeriodFilters?.querySelectorAll("[data-period]").forEach((button) => {
+  button.addEventListener("click", () => {
+    selectedPresentationPeriod = button.dataset.period || "all";
+    presentationPeriodFilters.querySelectorAll("[data-period]").forEach((chip) => {
+      chip.classList.toggle("is-active", chip === button);
+    });
+    syncPresentationCustomRangeVisibility();
+    renderPresentationView();
+  });
+});
+presentationDateFrom?.addEventListener("change", () => {
+  if (selectedPresentationPeriod === "custom") renderPresentationView();
+});
+presentationDateTo?.addEventListener("change", () => {
+  if (selectedPresentationPeriod === "custom") renderPresentationView();
+});
+syncPresentationCustomRangeVisibility();
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && document.body.classList.contains("present-mode")) {
     setPresentMode(false);

@@ -6,11 +6,11 @@
     <title>Tarmal IT Portal</title>
     <link rel="icon" href="./assets/tarmal-mark.png?v=1" type="image/png">
     <link rel="apple-touch-icon" href="./assets/apple-touch-icon.png?v=1">
-    <link rel="stylesheet" href="./styles.css?v=102">
+    <link rel="stylesheet" href="./styles.css?v=151">
     <!-- auth stays blocking so requireLogin runs before app chrome paints -->
     <script src="./auth.js?v=20"></script>
     <!-- Defer main bundles so HTML can parse while ~210KB+ app.js downloads -->
-    <script src="./app.js?v=141" defer></script>
+    <script src="./app.js?v=151" defer></script>
     <script src="./assets.js?v=13" defer></script>
     <script src="./documents.js?v=11" defer></script>
     <script src="./procurement.js?v=5" defer></script>
@@ -566,7 +566,7 @@
       </section>
 
       <section class="tab-panel" data-panel="presentation" aria-label="Management presentation">
-        <section class="presentation-board" aria-label="Project presentation set">
+        <section class="presentation-board" aria-label="SAP and Infra project presentation">
           <div class="presentation-hero" id="presentationHero">
             <div class="presentation-hero-glow" aria-hidden="true"></div>
             <div class="presentation-hero-body">
@@ -574,7 +574,7 @@
                 <p class="presentation-eyebrow">Management briefing</p>
                 <h2>Project Presentation</h2>
                 <p class="presentation-subtitle" id="presentationSubtitle">
-                  Star projects from the Projects tab to build an exclusive Kanban set for management — Completed, In progress, Not started.
+                  SAP and Infra projects on a status Kanban — Completed, In progress, Not started. Use ★ on Tickets or Projects to open Edit and set Type.
                 </p>
               </div>
               <div class="presentation-hero-actions">
@@ -582,11 +582,34 @@
                   <button class="primary-button" id="enterPresentModeButton" type="button">Present mode</button>
                   <button class="secondary-button" id="exitPresentModeButton" type="button" hidden>Exit present</button>
                 </div>
-                <div class="presentation-action-divider" aria-hidden="true"></div>
-                <div class="presentation-action-group presentation-action-secondary">
-                  <button class="secondary-button" id="gotoProjectsFromPresentationButton" type="button" data-goto-tab="projects">Mark from Projects</button>
-                  <button class="secondary-button" id="clearPresentationMarksButton" type="button">Clear set</button>
-                </div>
+              </div>
+            </div>
+            <div class="presentation-filters" id="presentationFilters" role="group" aria-label="Presentation filters">
+              <label class="presentation-filter-field">
+                <span>Type</span>
+                <select id="presentationTypeFilter" aria-label="Filter by type">
+                  <option value="all">All</option>
+                  <option value="SAP">SAP</option>
+                  <option value="Infra">Infra</option>
+                </select>
+              </label>
+              <div class="presentation-period-filters" id="presentationPeriodFilters" role="group" aria-label="Time duration">
+                <span class="presentation-filter-label">Time</span>
+                <button class="presentation-period-chip is-active" type="button" data-period="all">All</button>
+                <button class="presentation-period-chip" type="button" data-period="today">Today</button>
+                <button class="presentation-period-chip" type="button" data-period="week">This week</button>
+                <button class="presentation-period-chip" type="button" data-period="month">This month</button>
+                <button class="presentation-period-chip" type="button" data-period="custom">Custom</button>
+              </div>
+              <div class="presentation-custom-range" id="presentationCustomRange" hidden>
+                <label class="presentation-filter-field">
+                  <span>From</span>
+                  <input type="date" id="presentationDateFrom" aria-label="Custom range start">
+                </label>
+                <label class="presentation-filter-field">
+                  <span>To</span>
+                  <input type="date" id="presentationDateTo" aria-label="Custom range end">
+                </label>
               </div>
             </div>
             <p class="presentation-summary" id="presentationSummary"></p>
