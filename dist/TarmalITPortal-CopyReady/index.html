@@ -6,11 +6,11 @@
     <title>Tarmal IT Portal</title>
     <link rel="icon" href="./assets/tarmal-mark.png?v=1" type="image/png">
     <link rel="apple-touch-icon" href="./assets/apple-touch-icon.png?v=1">
-    <link rel="stylesheet" href="./styles.css?v=151">
+    <link rel="stylesheet" href="./styles.css?v=154">
     <!-- auth stays blocking so requireLogin runs before app chrome paints -->
     <script src="./auth.js?v=20"></script>
     <!-- Defer main bundles so HTML can parse while ~210KB+ app.js downloads -->
-    <script src="./app.js?v=151" defer></script>
+    <script src="./app.js?v=154" defer></script>
     <script src="./assets.js?v=13" defer></script>
     <script src="./documents.js?v=11" defer></script>
     <script src="./procurement.js?v=5" defer></script>
@@ -71,14 +71,9 @@
 
       <div class="app-main">
         <header class="topbar" id="siteTopbar">
-          <div class="brand">
-            <div class="brand-logo-wrap">
-              <img class="brand-logo" src="./assets/tarmal-logo.png" alt="Tarmal" decoding="async" fetchpriority="high">
-            </div>
-            <div>
-              <h1>Tarmal IT Portal</h1>
-              <p class="brand-tagline">Unified Access Portal</p>
-            </div>
+          <div class="topbar-context">
+            <p class="topbar-context-eyebrow">Workspace</p>
+            <h1 id="topbarPageTitle">Dashboard</h1>
           </div>
           <div class="topbar-actions">
             <div class="user-chip">
@@ -98,10 +93,7 @@
         </header>
 
         <div class="topbar-expand-bar" id="topbarExpandBar" hidden>
-          <div class="topbar-expand-brand">
-            <img class="topbar-expand-logo" src="./assets/tarmal-logo.png" alt="" loading="lazy" decoding="async">
-            <span class="topbar-expand-title">Tarmal IT Portal</span>
-          </div>
+          <span class="topbar-expand-title" id="topbarExpandPageTitle">Dashboard</span>
           <button class="topbar-expand-btn" id="expandTopbarButton" type="button" aria-controls="siteTopbar" aria-expanded="false" title="Show header">
             <span class="panel-icon-glyph panel-icon-glyph-expand" aria-hidden="true"></span>
             <span>Show header</span>
@@ -566,53 +558,63 @@
       </section>
 
       <section class="tab-panel" data-panel="presentation" aria-label="Management presentation">
-        <section class="presentation-board" aria-label="SAP and Infra project presentation">
-          <div class="presentation-hero" id="presentationHero">
+        <section class="presentation-board presentation-hero-collapsed" aria-label="SAP and Infra project presentation">
+          <div class="presentation-hero is-collapsed" id="presentationHero">
             <div class="presentation-hero-glow" aria-hidden="true"></div>
-            <div class="presentation-hero-body">
-              <div class="presentation-hero-main">
-                <p class="presentation-eyebrow">Management briefing</p>
-                <h2>Project Presentation</h2>
-                <p class="presentation-subtitle" id="presentationSubtitle">
-                  SAP and Infra projects on a status Kanban — Completed, In progress, Not started. Use ★ on Tickets or Projects to open Edit and set Type.
-                </p>
+            <div class="presentation-hero-toolbar">
+              <span class="presentation-hero-toolbar-label">
+                <span class="presentation-hero-toolbar-label-full">Management briefing</span>
+                <span class="presentation-hero-toolbar-label-short">Presentation</span>
+              </span>
+              <div class="presentation-hero-toolbar-actions">
+                <button class="primary-button" id="enterPresentModeButton" type="button">Present mode</button>
+                <button class="secondary-button" id="exitPresentModeButton" type="button" hidden>Exit present</button>
+                <button class="secondary-button presentation-hero-toggle" id="togglePresentationHeroButton" type="button" aria-expanded="false" aria-controls="presentationHeroBody">Show filters</button>
               </div>
-              <div class="presentation-hero-actions">
-                <div class="presentation-action-group presentation-action-primary">
-                  <button class="primary-button" id="enterPresentModeButton" type="button">Present mode</button>
-                  <button class="secondary-button" id="exitPresentModeButton" type="button" hidden>Exit present</button>
+            </div>
+            <div class="presentation-hero-collapsible" id="presentationHeroBody">
+              <div class="presentation-hero-body">
+                <div class="presentation-hero-main">
+                  <p class="presentation-eyebrow">Management briefing</p>
+                  <h2>Project Presentation</h2>
+                  <p class="presentation-subtitle" id="presentationSubtitle">
+                    SAP and Infra projects on a status Kanban — Completed, In progress, Not started. Use ★ on Tickets or Projects to open Edit and set Type.
+                  </p>
+                  <p class="presentation-subtitle presentation-subtitle-short" aria-hidden="true">
+                    SAP &amp; Infra status Kanban
+                  </p>
                 </div>
               </div>
-            </div>
-            <div class="presentation-filters" id="presentationFilters" role="group" aria-label="Presentation filters">
-              <label class="presentation-filter-field">
-                <span>Type</span>
-                <select id="presentationTypeFilter" aria-label="Filter by type">
-                  <option value="all">All</option>
-                  <option value="SAP">SAP</option>
-                  <option value="Infra">Infra</option>
-                </select>
-              </label>
-              <div class="presentation-period-filters" id="presentationPeriodFilters" role="group" aria-label="Time duration">
-                <span class="presentation-filter-label">Time</span>
-                <button class="presentation-period-chip is-active" type="button" data-period="all">All</button>
-                <button class="presentation-period-chip" type="button" data-period="today">Today</button>
-                <button class="presentation-period-chip" type="button" data-period="week">This week</button>
-                <button class="presentation-period-chip" type="button" data-period="month">This month</button>
-                <button class="presentation-period-chip" type="button" data-period="custom">Custom</button>
-              </div>
-              <div class="presentation-custom-range" id="presentationCustomRange" hidden>
+              <div class="presentation-filters" id="presentationFilters" role="group" aria-label="Presentation filters">
                 <label class="presentation-filter-field">
-                  <span>From</span>
-                  <input type="date" id="presentationDateFrom" aria-label="Custom range start">
+                  <span>Type</span>
+                  <select id="presentationTypeFilter" aria-label="Filter by type">
+                    <option value="all">All</option>
+                    <option value="SAP">SAP</option>
+                    <option value="Infra">Infra</option>
+                  </select>
                 </label>
-                <label class="presentation-filter-field">
-                  <span>To</span>
-                  <input type="date" id="presentationDateTo" aria-label="Custom range end">
-                </label>
+                <div class="presentation-period-filters" id="presentationPeriodFilters" role="group" aria-label="Time duration">
+                  <span class="presentation-filter-label">Time</span>
+                  <button class="presentation-period-chip is-active" type="button" data-period="all">All</button>
+                  <button class="presentation-period-chip" type="button" data-period="today">Today</button>
+                  <button class="presentation-period-chip" type="button" data-period="week">This week</button>
+                  <button class="presentation-period-chip" type="button" data-period="month">This month</button>
+                  <button class="presentation-period-chip" type="button" data-period="custom">Custom</button>
+                </div>
+                <div class="presentation-custom-range" id="presentationCustomRange" hidden>
+                  <label class="presentation-filter-field">
+                    <span>From</span>
+                    <input type="date" id="presentationDateFrom" aria-label="Custom range start">
+                  </label>
+                  <label class="presentation-filter-field">
+                    <span>To</span>
+                    <input type="date" id="presentationDateTo" aria-label="Custom range end">
+                  </label>
+                </div>
               </div>
+              <p class="presentation-summary" id="presentationSummary"></p>
             </div>
-            <p class="presentation-summary" id="presentationSummary"></p>
           </div>
 
           <div class="presentation-deck" id="presentationDeck" aria-live="polite"></div>

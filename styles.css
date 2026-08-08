@@ -574,6 +574,34 @@ body.performance-filters-collapsed .filter-sidebar {
   background: rgba(255, 255, 255, 0.14);
 }
 
+.topbar-context {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.topbar-context-eyebrow {
+  margin: 0;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgba(226, 232, 240, 0.72);
+}
+
+.topbar-context h1,
+.topbar h1 {
+  margin: 0;
+  font-size: clamp(18px, 2vw, 22px);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: #fff;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .brand {
   display: flex;
   align-items: center;
@@ -638,8 +666,8 @@ h2 {
 }
 
 .topbar h1 {
-  font-size: clamp(22px, 2.4vw, 28px);
-  font-weight: 800;
+  font-size: clamp(18px, 2vw, 22px);
+  font-weight: 700;
 }
 
 .brand-tagline {
@@ -4269,16 +4297,9 @@ body.view-focus .tab-panel[data-panel="performance"].active .performance-content
   overflow-y: auto;
 }
 
-body.view-focus .brand-logo-wrap {
-  height: 52px;
-}
-
-body.view-focus .brand-logo {
-  height: 52px;
-}
-
+body.view-focus .topbar-context h1,
 body.view-focus .topbar h1 {
-  font-size: clamp(22px, 2.2vw, 28px);
+  font-size: clamp(18px, 2vw, 22px);
 }
 
 body.view-focus .tabbar-row {
@@ -6236,22 +6257,6 @@ body.view-focus .dashboard-layout {
     box-shadow: var(--shadow);
   }
 
-  .topbar-expand-brand {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    min-width: 0;
-  }
-
-  .topbar-expand-logo {
-    display: block;
-    height: 28px;
-    width: auto;
-    max-width: 120px;
-    object-fit: contain;
-    object-position: left center;
-  }
-
   .topbar-expand-title {
     font-size: 13px;
     font-weight: 700;
@@ -6259,6 +6264,7 @@ body.view-focus .dashboard-layout {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    min-width: 0;
   }
 
   .topbar-expand-btn {
@@ -6320,13 +6326,9 @@ body.view-focus .dashboard-layout {
     justify-content: flex-start;
   }
 
-  body.view-focus .topbar h1 {
-    font-size: 20px;
-  }
-
-  body.view-focus .brand-logo-wrap,
-  body.view-focus .brand-logo {
-    height: 40px;
+  body.view-focus .topbar h1,
+  body.view-focus .topbar-context h1 {
+    font-size: 18px;
   }
 
   .panel-icon-btn {
@@ -6412,104 +6414,48 @@ body.view-focus .dashboard-layout {
     table-layout: auto;
   }
 
-  /* Tickets / Projects: Task + Actions only on tablet & phone.
-     Hide other columns hard, give Task the remaining width, and avoid
-     letter-stacking from break-word/anywhere in a collapsed cell. */
+  /* Tablet: keep tickets/projects scrollable with real column widths.
+     Do NOT force table-layout:fixed + overflow-x:hidden — that crushed
+     Task to a ~1ch column and letter-wrapped titles. */
   #ticketTable,
   #projectTable {
-    min-width: 0 !important;
-    width: 100% !important;
-    max-width: 100% !important;
-    table-layout: fixed !important;
+    min-width: 820px;
+    width: max-content;
+    max-width: none;
+    table-layout: auto;
   }
 
-  #ticketTable .ticket-col-compact,
-  #ticketTable .remarks-col,
-  #projectTable .ticket-col-compact,
-  #projectTable .remarks-col {
-    display: none !important;
-    width: 0 !important;
-    min-width: 0 !important;
-    max-width: 0 !important;
-    padding: 0 !important;
-    border: 0 !important;
-    overflow: hidden !important;
+  #ticketTable th,
+  #ticketTable td,
+  #projectTable th,
+  #projectTable td {
+    word-break: normal;
+    overflow-wrap: break-word;
   }
 
   #ticketTable .task-col,
-  #projectTable .task-col,
-  #ticketTable.ticket-table-can-edit .task-col,
-  #projectTable.ticket-table-can-edit .task-col,
-  #ticketTable:not(.ticket-table-can-edit) .task-col,
-  #projectTable:not(.ticket-table-can-edit) .task-col,
-  body.view-focus #ticketTable .task-col,
-  body.view-focus #ticketTable.ticket-table-can-edit .task-col,
-  body.view-focus #projectTable .task-col,
-  body.view-focus #projectTable.ticket-table-can-edit .task-col {
-    width: calc(100% - 152px) !important;
-    min-width: 0 !important;
-    max-width: none !important;
-    white-space: normal !important;
-    word-break: normal !important;
-    overflow-wrap: break-word !important;
-    line-height: 1.35;
-    vertical-align: top;
-  }
-
-  #ticketTable .actions-col,
-  #projectTable .actions-col,
-  #ticketTable.ticket-table-can-edit .actions-col,
-  #projectTable.ticket-table-can-edit .actions-col,
-  body.view-focus #ticketTable .actions-col,
-  body.view-focus #projectTable .actions-col,
-  body.view-focus #ticketTable.ticket-table-can-edit .actions-col,
-  body.view-focus #projectTable.ticket-table-can-edit .actions-col {
-    width: 152px !important;
-    min-width: 152px !important;
-    max-width: 152px !important;
-    padding: 4px 6px;
+  #projectTable .task-col {
+    min-width: 220px;
+    max-width: 360px;
     white-space: normal;
-    vertical-align: middle;
-    text-align: center;
-    overflow: visible;
-  }
-
-  #ticketTable .ticket-row-actions,
-  #projectTable .ticket-row-actions {
-    flex-wrap: wrap;
-    max-width: 100%;
-  }
-
-  #ticketTable .ticket-task-head,
-  #projectTable .ticket-task-head {
-    display: flex;
-    align-items: flex-start;
-    gap: 6px;
-    width: 100%;
-    min-width: 0;
-    max-width: 100%;
+    word-break: normal;
+    overflow-wrap: break-word;
   }
 
   #ticketTable .ticket-parent-task,
   #projectTable .ticket-parent-task {
-    flex: 1 1 auto;
-    min-width: 0;
-    max-width: 100%;
-    white-space: normal !important;
-    word-break: normal !important;
-    overflow-wrap: break-word !important;
+    word-break: normal;
+    overflow-wrap: break-word;
   }
 
-  /* Read-only: Actions column omitted — Task fills the row */
-  #ticketTable:not(.ticket-table-can-edit) .task-col,
-  #projectTable:not(.ticket-table-can-edit) .task-col,
-  body.view-focus #ticketTable:not(.ticket-table-can-edit) .task-col,
-  body.view-focus #projectTable:not(.ticket-table-can-edit) .task-col {
-    width: 100% !important;
+  #ticketTable .actions-col,
+  #projectTable .actions-col {
+    min-width: 152px;
   }
 
   .ticket-board .table-wrap.ticket-table-wrap {
-    overflow-x: hidden;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
     width: 100%;
     max-width: 100%;
   }
@@ -6595,10 +6541,13 @@ body.view-focus .dashboard-layout {
   }
 
   .topbar,
-  .brand,
   .topbar-actions {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .topbar-context {
+    width: 100%;
   }
 
   .topbar-actions > .user-chip,
@@ -6657,6 +6606,176 @@ body.view-focus .dashboard-layout {
     min-height: 44px;
     padding: 10px 12px;
   }
+
+  /* Phone: stacked card rows — full-width task title, meta chips, actions */
+  .ticket-board .table-wrap.ticket-table-wrap {
+    overflow-x: hidden;
+    overflow-y: auto;
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+    max-height: none;
+  }
+
+  #ticketTable,
+  #projectTable {
+    display: block;
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+    table-layout: auto !important;
+    border-collapse: separate;
+    border-spacing: 0;
+  }
+
+  #ticketTable thead,
+  #projectTable thead {
+    display: none;
+  }
+
+  #ticketTable tbody,
+  #projectTable tbody {
+    display: block;
+    width: 100%;
+  }
+
+  #ticketTable tbody tr,
+  #projectTable tbody tr {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: 8px 10px;
+    width: 100%;
+    box-sizing: border-box;
+    margin: 0 0 10px;
+    padding: 12px 14px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md);
+    background: #fff;
+    box-shadow: var(--shadow-sm, 0 1px 2px rgba(15, 23, 42, 0.04));
+  }
+
+  #ticketTable tbody tr.status-completed,
+  #projectTable tbody tr.status-completed {
+    background: #fafdfa;
+  }
+
+  #ticketTable tbody tr.status-progress,
+  #projectTable tbody tr.status-progress {
+    background: #fffbeb;
+  }
+
+  #ticketTable tbody tr.status-pending,
+  #projectTable tbody tr.status-pending {
+    background: #fef2f2;
+  }
+
+  #ticketTable tbody tr.empty-row,
+  #projectTable tbody tr.empty-row,
+  #ticketTable tbody tr.load-more-row,
+  #projectTable tbody tr.load-more-row {
+    display: block;
+    padding: 14px;
+    background: var(--panel);
+  }
+
+  #ticketTable td,
+  #projectTable td {
+    display: block;
+    width: auto !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+    padding: 0 !important;
+    border: 0 !important;
+    white-space: normal !important;
+    word-break: normal !important;
+    overflow-wrap: break-word !important;
+    vertical-align: top;
+  }
+
+  #ticketTable .task-col,
+  #projectTable .task-col,
+  #ticketTable.ticket-table-can-edit .task-col,
+  #projectTable.ticket-table-can-edit .task-col,
+  #ticketTable:not(.ticket-table-can-edit) .task-col,
+  #projectTable:not(.ticket-table-can-edit) .task-col {
+    flex: 1 1 100%;
+    width: 100% !important;
+    font-size: 15px;
+    font-weight: 650;
+    line-height: 1.4;
+    color: var(--ink);
+  }
+
+  #ticketTable .ticket-task-head,
+  #projectTable .ticket-task-head {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    width: 100%;
+    min-width: 0;
+  }
+
+  #ticketTable .ticket-parent-task,
+  #projectTable .ticket-parent-task {
+    flex: 1 1 auto;
+    min-width: 0;
+    white-space: normal !important;
+    word-break: normal !important;
+    overflow-wrap: break-word !important;
+  }
+
+  #ticketTable .ticket-col-compact,
+  #projectTable .ticket-col-compact {
+    display: inline-flex !important;
+    align-items: center;
+    flex: 0 0 auto;
+    width: auto !important;
+    max-width: 100%;
+    font-size: 12px;
+    color: var(--muted);
+    white-space: nowrap !important;
+    overflow: visible !important;
+    text-overflow: clip;
+  }
+
+  #ticketTable .remarks-col,
+  #projectTable .remarks-col {
+    flex: 1 1 100%;
+    width: 100% !important;
+    font-size: 13px;
+    color: var(--ink-secondary);
+    white-space: pre-wrap !important;
+    word-break: normal !important;
+    overflow-wrap: break-word !important;
+  }
+
+  #ticketTable .actions-col,
+  #projectTable .actions-col,
+  #ticketTable.ticket-table-can-edit .actions-col,
+  #projectTable.ticket-table-can-edit .actions-col {
+    flex: 1 1 100%;
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: none !important;
+    text-align: left;
+    padding-top: 4px !important;
+    border-top: 1px solid var(--line) !important;
+  }
+
+  #ticketTable .ticket-row-actions,
+  #projectTable .ticket-row-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+    gap: 6px;
+    max-width: 100%;
+  }
+
+  #ticketTable .subtask-row .task-col,
+  #projectTable .subtask-row .task-col {
+    padding-left: 8px !important;
+  }
 }
 
 @media (max-width: 480px) {
@@ -6702,45 +6821,12 @@ body.view-focus .dashboard-layout {
     min-width: 640px;
   }
 
+  /* Cards already applied at 768px — keep ticket/project tables fluid */
   #ticketTable,
   #projectTable {
     min-width: 0 !important;
     width: 100% !important;
-    table-layout: fixed !important;
-  }
-
-  #ticketTable .ticket-col-compact,
-  #ticketTable .remarks-col,
-  #projectTable .ticket-col-compact,
-  #projectTable .remarks-col {
-    display: none !important;
-  }
-
-  #ticketTable .task-col,
-  #projectTable .task-col,
-  #ticketTable.ticket-table-can-edit .task-col,
-  #projectTable.ticket-table-can-edit .task-col,
-  body.view-focus #ticketTable .task-col,
-  body.view-focus #projectTable .task-col {
-    width: calc(100% - 152px) !important;
-    word-break: normal !important;
-    overflow-wrap: break-word !important;
-  }
-
-  #ticketTable:not(.ticket-table-can-edit) .task-col,
-  #projectTable:not(.ticket-table-can-edit) .task-col {
-    width: 100% !important;
-  }
-
-  #ticketTable .actions-col,
-  #projectTable .actions-col,
-  #ticketTable.ticket-table-can-edit .actions-col,
-  #projectTable.ticket-table-can-edit .actions-col {
-    width: 152px !important;
-    min-width: 152px !important;
-    max-width: 152px !important;
-    white-space: normal;
-    overflow: visible;
+    table-layout: auto !important;
   }
 
   body.view-focus .kanban-column,
@@ -7068,7 +7154,103 @@ body.view-focus .dashboard-layout {
     linear-gradient(118deg, #0b1220 0%, #152033 52%, #1a2740 100%);
   color: #f8fafc;
   box-shadow: var(--shadow);
-  padding: 1.5rem 1.65rem 1.25rem;
+  padding: 0;
+}
+
+.presentation-hero-toolbar {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.65rem 1rem;
+  padding: 0.75rem 1.15rem;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+}
+
+.presentation-hero.is-collapsed {
+  position: sticky;
+  top: 0;
+  z-index: 6;
+}
+
+.presentation-hero.is-collapsed .presentation-hero-toolbar {
+  border-bottom: 0;
+  padding: 0.45rem 0.85rem;
+  min-height: 44px;
+  gap: 0.4rem 0.65rem;
+  flex-wrap: nowrap;
+}
+
+.presentation-hero-toolbar-label-short {
+  display: none;
+}
+
+.presentation-subtitle-short {
+  display: none;
+  margin: 0.45rem 0 0;
+  color: #cbd5e1;
+  font-size: 0.88rem;
+  line-height: 1.4;
+}
+
+.presentation-hero-toolbar-label {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #94a3b8;
+}
+
+.presentation-hero-toolbar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.presentation-hero-toolbar-actions .primary-button {
+  background: #f1f5f9;
+  color: var(--navy);
+  border-color: #f1f5f9;
+  font-weight: 650;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.35) inset;
+  min-height: 36px;
+  padding: 0 14px;
+}
+
+.presentation-hero-toolbar-actions .primary-button:hover {
+  background: #fff;
+  border-color: #fff;
+}
+
+.presentation-hero-toolbar-actions .secondary-button {
+  background: rgba(248, 250, 252, 0.06);
+  color: #e2e8f0;
+  border-color: rgba(226, 232, 240, 0.28);
+  min-height: 36px;
+  padding: 0 12px;
+}
+
+.presentation-hero-toolbar-actions .secondary-button:hover {
+  background: rgba(248, 250, 252, 0.12);
+  border-color: rgba(226, 232, 240, 0.48);
+  color: #fff;
+}
+
+.presentation-hero-collapsible {
+  position: relative;
+  z-index: 1;
+  padding: 1.15rem 1.65rem 1.25rem;
+}
+
+.presentation-hero.is-collapsed .presentation-hero-collapsible {
+  display: none;
+}
+
+.presentation-board.presentation-hero-collapsed {
+  gap: 0.65rem;
 }
 
 .presentation-hero-glow {
@@ -7749,6 +7931,12 @@ body.view-focus .presentation-hero {
   flex-shrink: 0;
 }
 
+body.view-focus .presentation-board.presentation-hero-collapsed .presentation-deck.presentation-kanban,
+body.view-focus .presentation-hero.is-collapsed ~ .presentation-deck.presentation-kanban {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
 body.view-focus .presentation-deck.presentation-kanban {
   flex: 1 1 auto;
   min-height: 0;
@@ -7831,7 +8019,19 @@ body.present-mode .presentation-hero {
   border-right: none;
   border-top: none;
   margin: 0;
-  padding: 1.65rem clamp(1.25rem, 3.5vw, 2.75rem) 1.25rem;
+  padding: 0;
+}
+
+body.present-mode .presentation-hero-toolbar {
+  padding: 0.85rem clamp(1.25rem, 3.5vw, 2.75rem);
+}
+
+body.present-mode .presentation-hero-collapsible {
+  padding: 1.25rem clamp(1.25rem, 3.5vw, 2.75rem) 1.25rem;
+}
+
+body.present-mode .presentation-hero.is-collapsed .presentation-hero-toggle {
+  display: none;
 }
 
 body.present-mode .presentation-eyebrow {
@@ -7955,33 +8155,64 @@ body.present-mode .presentation-thumb-more {
 }
 
 @media (max-width: 720px) {
-  .presentation-hero {
-    padding: 1.25rem 1.15rem 1.05rem;
+  .presentation-hero-toolbar {
+    padding: 0.55rem 0.75rem;
+  }
+
+  .presentation-hero.is-collapsed .presentation-hero-toolbar {
+    padding: 0.4rem 0.7rem;
+  }
+
+  .presentation-hero-toolbar-label-full {
+    display: none;
+  }
+
+  .presentation-hero-toolbar-label-short {
+    display: inline;
+  }
+
+  .presentation-hero-collapsible {
+    padding: 0.85rem 1rem 0.9rem;
   }
 
   .presentation-hero-body {
     align-items: stretch;
   }
 
-  .presentation-hero-actions {
-    width: 100%;
-  }
-
-  .presentation-action-divider {
+  .presentation-eyebrow {
     display: none;
   }
 
-  .presentation-action-group {
-    width: 100%;
+  .presentation-hero-main h2 {
+    font-size: 1.25rem;
   }
 
-  .presentation-action-secondary {
-    width: 100%;
+  .presentation-subtitle:not(.presentation-subtitle-short) {
+    display: none;
   }
 
-  .presentation-hero-actions .primary-button,
-  .presentation-hero-actions .secondary-button {
+  .presentation-subtitle-short {
+    display: block;
+  }
+
+  .presentation-hero-toolbar-actions {
     flex: 1 1 auto;
+    justify-content: flex-end;
+    min-width: 0;
+  }
+
+  .presentation-hero-toolbar-actions .primary-button,
+  .presentation-hero-toolbar-actions .secondary-button {
+    flex: 0 1 auto;
+    min-height: 36px;
+    padding: 0 10px;
+    font-size: 12px;
+  }
+
+  .presentation-hero.is-collapsed ~ .presentation-deck.presentation-kanban,
+  .presentation-board.presentation-hero-collapsed .presentation-deck.presentation-kanban {
+    flex: 1 1 auto;
+    min-height: 0;
   }
 
   .presentation-card .owner-chip-name {
@@ -7990,7 +8221,7 @@ body.present-mode .presentation-thumb-more {
 }
 
 @media print {
-  body.present-mode .presentation-hero-actions,
+  body.present-mode .presentation-hero-toolbar-actions,
   body.present-mode .presentation-card-pin {
     display: none !important;
   }

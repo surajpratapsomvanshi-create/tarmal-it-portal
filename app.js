@@ -139,6 +139,9 @@ const presentationSummary = document.querySelector("#presentationSummary");
 const presentationSubtitle = document.querySelector("#presentationSubtitle");
 const enterPresentModeButton = document.querySelector("#enterPresentModeButton");
 const exitPresentModeButton = document.querySelector("#exitPresentModeButton");
+const presentationHero = document.querySelector("#presentationHero");
+const presentationBoard = document.querySelector(".presentation-board");
+const togglePresentationHeroButton = document.querySelector("#togglePresentationHeroButton");
 const presentationTypeFilter = document.querySelector("#presentationTypeFilter");
 const presentationPeriodFilters = document.querySelector("#presentationPeriodFilters");
 const presentationCustomRange = document.querySelector("#presentationCustomRange");
@@ -158,6 +161,8 @@ const topbarExpandBar = document.querySelector("#topbarExpandBar");
 const togglePerformanceFiltersButton = document.querySelector("#togglePerformanceFiltersButton");
 const expandPerformanceFiltersButton = document.querySelector("#expandPerformanceFiltersButton");
 const activeTabLabel = document.querySelector("#activeTabLabel");
+const topbarPageTitle = document.querySelector("#topbarPageTitle");
+const topbarExpandPageTitle = document.querySelector("#topbarExpandPageTitle");
 const ticketTable = document.querySelector("#ticketTable");
 const ticketActionsHeader = document.querySelector("#ticketActionsHeader");
 const ticketEditModal = document.querySelector("#ticketEditModal");
@@ -227,8 +232,10 @@ const SIDEBAR_COLLAPSED_KEY = "tarmal-sidebar-collapsed";
 const TOPBAR_COLLAPSED_KEY = "tarmal-topbar-collapsed";
 const PERFORMANCE_FILTERS_COLLAPSED_KEY = "tarmal-performance-filters-collapsed";
 const TOOLBAR_COLLAPSED_PREFIX = "tarmal-toolbar-";
+const PRESENTATION_HERO_COLLAPSED_KEY = "tarmal-presentation-hero-collapsed";
 let selectedPresentationType = "all";
 let selectedPresentationPeriod = "all";
+let presentModeFullscreenSync = false;
 const DEFAULT_COLLAPSED_TOOLBARS = new Set(["tickets", "projects", "procurement", "kanban", "assets", "users"]);
 
 const KANBAN_COLUMNS = [
@@ -3761,6 +3768,9 @@ function setActiveTab(tabName, options = {}) {
   if (activeTabLabel) {
     activeTabLabel.textContent = TAB_LABELS[tabName] || tabName;
   }
+  const pageTitle = TAB_LABELS[tabName] || tabName;
+  if (topbarPageTitle) topbarPageTitle.textContent = pageTitle;
+  if (topbarExpandPageTitle) topbarExpandPageTitle.textContent = pageTitle;
 
   if (options.skipRender) return;
 
@@ -3935,6 +3945,91 @@ function initToolbarCollapse() {
       setToolbarCollapsed(panel, false);
     });
   });
+}
+
+function setPresentationHeroCollapsed(collapsed, { persist = true } = {}) {
+  const on = Boolean(collapsed);
+  presentationHero?.classList.toggle("is-collapsed", on);
+  presentationBoard?.classList.toggle("presentation-hero-collapsed", on);
+  if (togglePresentationHeroButton) {
+    togglePresentationHeroButton.setAttribute("aria-expanded", on ? "false" : "true");
+    const mobile = isPresentationMobileLayout();
+    togglePresentationHeroButton.textContent = on
+      ? (mobile ? "Show filters" : "Show briefing")
+      : (mobile ? "Hide" : "Hide briefing");
+  }
+  if (persist) {
+    localStorage.setItem(PRESENTATION_HERO_COLLAPSED_KEY, on ? "1" : "0");
+  }
+}
+
+const PRESENTATION_HERO_MQ = window.matchMedia("(max-width: 768px)");
+
+function isPresentationMobileLayout() {
+  return PRESENTATION_HERO_MQ.matches;
+}
+
+function getStoredPresentationHeroCollapsedPreference() {
+  const stored = localStorage.getItem(PRESENTATION_HERO_COLLAPSED_KEY);
+  // Phones: default collapsed so the Kanban fills the screen immediately.
+  if (isPresentationMobileLayout()) {
+    if (stored === null) return true;
+    return stored === "1";
+  }
+  if (stored === null) return false;
+  return stored === "1";
+}
+
+function syncPresentationHeroForViewport() {
+  setPresentationHeroCollapsed(getStoredPresentationHeroCollapsedPreference(), { persist: false });
+}
+
+function initPresentationHeroCollapse() {
+  if (!presentationHero || !togglePresentationHeroButton) return;
+  syncPresentationHeroForViewport();
+  togglePresentationHeroButton.addEventListener("click", () => {
+    setPresentationHeroCollapsed(!presentationHero.classList.contains("is-collapsed"));
+  });
+  const onViewportChange = () => syncPresentationHeroForViewport();
+  if (typeof PRESENTATION_HERO_MQ.addEventListener === "function") {
+    PRESENTATION_HERO_MQ.addEventListener("change", onViewportChange);
+  } else if (typeof PRESENTATION_HERO_MQ.addListener === "function") {
+    PRESENTATION_HERO_MQ.addListener(onViewportChange);
+  }
+}
+
+function getFullscreenElement() {
+  return document.fullscreenElement
+    || document.webkitFullscreenElement
+    || document.msFullscreenElement
+    || null;
+}
+
+function requestAppFullscreen(target = document.documentElement) {
+  const request = target.requestFullscreen
+    || target.webkitRequestFullscreen
+    || target.webkitRequestFullScreen
+    || target.msRequestFullscreen;
+  if (!request) return Promise.resolve(false);
+  try {
+    return Promise.resolve(request.call(target)).then(() => true).catch(() => false);
+  } catch (_error) {
+    return Promise.resolve(false);
+  }
+}
+
+function exitAppFullscreen() {
+  if (!getFullscreenElement()) return Promise.resolve();
+  const exit = document.exitFullscreen
+    || document.webkitExitFullscreen
+    || document.webkitCancelFullScreen
+    || document.msExitFullscreen;
+  if (!exit) return Promise.resolve();
+  try {
+    return Promise.resolve(exit.call(document)).catch(() => {});
+  } catch (_error) {
+    return Promise.resolve();
+  }
 }
 
 function countBy(tickets, key) {
@@ -6312,14 +6407,32 @@ function renderPresentationView(tickets = getValidTickets()) {
   bindScreenshotPreviewButtons(presentationDeck);
 }
 
-function setPresentMode(enabled) {
+function setPresentMode(enabled, { syncFullscreen = true } = {}) {
   const on = Boolean(enabled);
+  const wasOn = document.body.classList.contains("present-mode");
   document.body.classList.toggle("present-mode", on);
   if (enterPresentModeButton) enterPresentModeButton.hidden = on;
   if (exitPresentModeButton) exitPresentModeButton.hidden = !on;
   if (on && getActiveTabName() !== "presentation") {
     setActiveTab("presentation", { skipRender: true });
     renderPresentationView();
+  }
+  if (!syncFullscreen || on === wasOn) return;
+  presentModeFullscreenSync = true;
+  const finish = () => {
+    presentModeFullscreenSync = false;
+  };
+  if (on) {
+    requestAppFullscreen(document.documentElement).finally(finish);
+  } else {
+    exitAppFullscreen().finally(finish);
+  }
+}
+
+function onPresentModeFullscreenChange() {
+  if (presentModeFullscreenSync) return;
+  if (!getFullscreenElement() && document.body.classList.contains("present-mode")) {
+    setPresentMode(false, { syncFullscreen: false });
   }
 }
 
@@ -7470,6 +7583,9 @@ tabButtons.forEach((button) => {
 
 enterPresentModeButton?.addEventListener("click", () => setPresentMode(true));
 exitPresentModeButton?.addEventListener("click", () => setPresentMode(false));
+document.addEventListener("fullscreenchange", onPresentModeFullscreenChange);
+document.addEventListener("webkitfullscreenchange", onPresentModeFullscreenChange);
+document.addEventListener("MSFullscreenChange", onPresentModeFullscreenChange);
 presentationTypeFilter?.addEventListener("change", () => {
   selectedPresentationType = presentationTypeFilter.value || "all";
   renderPresentationView();
@@ -7708,6 +7824,7 @@ initChromeCollapse();
 initTopbarCollapse();
 initPerformanceFilterSidebar();
 initToolbarCollapse();
+initPresentationHeroCollapse();
 const initialTab = document.querySelector(".tab-button.active")?.dataset.tab;
 if (initialTab) {
   setActiveTab(initialTab, { skipRender: true });
