@@ -43,6 +43,7 @@ const FALLBACK_HIERARCHY = [
 const rows = document.querySelector("#ticketRows");
 const syncText = document.querySelector("#syncText");
 const statusDot = document.querySelector("#statusDot");
+const syncCard = document.querySelector("#syncCard");
 const tabButtons = document.querySelectorAll(".tab-button");
 const tabPanels = document.querySelectorAll(".tab-panel");
 const totalCount = document.querySelector("#totalCount");
@@ -3803,9 +3804,23 @@ function renderKanbanBoard(tickets) {
   bindScreenshotPreviewButtons(kanbanColumns);
 }
 
+function shortenStatusMessageForMobile(message) {
+  const text = String(message || "");
+  if (/^Could not refresh tickets$/i.test(text)) return "Refresh failed";
+  if (/^Using cached tickets$/i.test(text)) return "Cached tickets";
+  if (/^Refreshing tickets\.\.\.$/i.test(text)) return "Refreshing…";
+  if (/^Ready to sync$/i.test(text)) return "Ready";
+  if (/^Loaded (\d+) tickets$/i.test(text)) return text.replace(/^Loaded (\d+) tickets$/i, "$1 tickets");
+  if (/^Auto-refreshed at /i.test(text)) return "Updated";
+  if (/^Synced$/i.test(text)) return "Synced";
+  return text;
+}
+
 function setStatus(kind, message) {
+  const display = isMobileNavLayout() ? shortenStatusMessageForMobile(message) : message;
   statusDot.className = `status-dot ${kind || ""}`.trim();
-  syncText.textContent = message;
+  syncText.textContent = display;
+  if (syncCard) syncCard.title = message || "";
 }
 
 function setActiveTab(tabName, options = {}) {
@@ -3942,8 +3957,8 @@ function initChromeCollapse() {
 
 function getStoredTopbarCollapsedPreference() {
   const stored = localStorage.getItem(TOPBAR_COLLAPSED_KEY);
-  // First mobile visit: default collapsed to free content space.
-  if (stored === null) return true;
+  // First mobile visit (and legacy unset): default collapsed to free content space.
+  if (stored === null || stored === "") return true;
   return stored === "1";
 }
 
@@ -5567,6 +5582,13 @@ function parseAppsScriptResponseText(text) {
   let parsed = tryParseJsonText(raw);
   if (parsed.ok) return parsed.value;
 
+  // Tolerate callback(...) JSONP envelopes (same soft-parse path as auth users sync).
+  const jsonpMatch = raw.match(/^[a-zA-Z_$][\w$]*\s*\(\s*([\s\S]*)\s\)\s*;?\s*$/);
+  if (jsonpMatch) {
+    parsed = tryParseJsonText(jsonpMatch[1]);
+    if (parsed.ok) return parsed.value;
+  }
+
   // Prefer a real JSON object that includes the "ok" key.
   const okObjectMatch = raw.match(/\{\s*"ok"\s*:[\s\S]*\}/);
   if (okObjectMatch) {
@@ -6236,7 +6258,9 @@ function bindTicketTypePromoteButtons(root) {
 
 function syncPresentationCustomRangeVisibility() {
   if (!presentationCustomRange) return;
-  presentationCustomRange.hidden = selectedPresentationPeriod !== "custom";
+  const showCustom = selectedPresentationPeriod === "custom";
+  presentationCustomRange.hidden = !showCustom;
+  presentationCustomRange.setAttribute("aria-hidden", showCustom ? "false" : "true");
 }
 
 function ticketMatchesPresentationCustomRange(ticket) {
@@ -6286,16 +6310,17 @@ function renderPresentationAttachmentThumbs(ticket) {
   const count = screenshots.length || labeledCount;
   if (!count) return "";
 
-  const label = count === 1 ? "1 file" : `${count} files`;
+  // Compact control only — never inline <img> thumbs on the card (click opens lightbox).
+  const previewLabel = count > 1 ? `Preview (${count})` : "Preview";
   return `
     <button
       class="screenshot-preview-btn presentation-files-chip"
       type="button"
       data-sheet-row="${ticket.sheetRow}"
       data-screenshot-index="0"
-      aria-label="Preview ${escapeHtml(label)}"
+      aria-label="${escapeHtml(previewLabel)}"
       title="Preview attachments"
-    >${escapeHtml(label)}</button>
+    ><span class="presentation-files-icon" aria-hidden="true"></span><span>${escapeHtml(previewLabel)}</span></button>
   `;
 }
 
@@ -7006,50 +7031,120 @@ async function sendNewTicketsToSheet(tickets, onProgress) {
   return { synced: true, uploadedCount: uploadedTotal, count: tickets.length, outcomes };
 }
 
-function loadSheetTickets() {
+function applyRemoteTicketsPayload(payload) {
+  if (!payload || payload.ok === false) {
+    throw new Error(payload?.error || "Refresh failed.");
+  }
+
+  if (payload.users?.length) {
+    const localUsers = Auth.readUsers();
+    const merged = Auth.mergeUsers(localUsers, payload.users.map((user) => Auth.normalizeUser(user)));
+    Auth.saveUsers(merged);
+    if (merged.length > payload.users.length) {
+      Auth.syncUsersToSheet(merged);
+    }
+    renderUsers();
+  }
+
+  if (payload.hierarchy?.length) {
+    writeHierarchyRows(normalizeHierarchyRows(payload.hierarchy));
+  }
+
+  // Raw sheet rows — merge happens once in mergeRemoteTicketsWithLocal (Map lookup).
+  return (payload.tickets || []).map((ticket, index) => ({
+    ...ticket,
+    sheetRow: ticket.sheetRow ?? index + 2
+  }));
+}
+
+function firstSuccessfulPromise(promises, fallbackMessage) {
+  return new Promise((resolve, reject) => {
+    let pending = promises.length;
+    let lastError = null;
+    if (!pending) {
+      reject(new Error(fallbackMessage || "Request failed."));
+      return;
+    }
+    promises.forEach((promise) => {
+      Promise.resolve(promise).then(resolve, (error) => {
+        lastError = error;
+        pending -= 1;
+        if (pending === 0) {
+          reject(lastError || new Error(fallbackMessage || "Request failed."));
+        }
+      });
+    });
+  });
+}
+
+function fetchTicketsViaHttp(timeoutMs) {
+  if (!SHEET_WEB_APP_URL) {
+    return Promise.reject(new Error("Sync is not configured."));
+  }
+
+  const separator = SHEET_WEB_APP_URL.includes("?") ? "&" : "?";
+  const controller = typeof AbortController === "function" ? new AbortController() : null;
+  let timer = null;
+
+  const request = fetch(`${SHEET_WEB_APP_URL}${separator}compact=1`, {
+    method: "GET",
+    redirect: "follow",
+    credentials: "omit",
+    cache: "no-store",
+    signal: controller ? controller.signal : undefined
+  }).then(async (response) => {
+    const text = await response.text();
+    return parseAppsScriptResponseText(text);
+  });
+
+  if (!(timeoutMs > 0)) {
+    return request;
+  }
+
+  const timeoutPromise = new Promise((_, reject) => {
+    timer = window.setTimeout(() => {
+      try {
+        controller?.abort();
+      } catch {
+        // ignore
+      }
+      reject(new Error("Ticket refresh timed out."));
+    }, timeoutMs);
+  });
+
+  return Promise.race([request, timeoutPromise]).finally(() => {
+    if (timer) window.clearTimeout(timer);
+  });
+}
+
+function fetchTicketsViaJsonp(timeoutMs) {
   return new Promise((resolve, reject) => {
     if (!SHEET_WEB_APP_URL) {
       reject(new Error("Sync is not configured."));
       return;
     }
 
-    const callbackName = `handleSheetTickets_${Date.now()}`;
+    const callbackName = `handleSheetTickets_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
     const script = document.createElement("script");
     const separator = SHEET_WEB_APP_URL.includes("?") ? "&" : "?";
+    let settled = false;
+    let timer = null;
     const cleanup = () => {
+      if (timer) window.clearTimeout(timer);
       delete window[callbackName];
       script.remove();
     };
 
     window[callbackName] = (payload) => {
+      if (settled) return;
+      settled = true;
       cleanup();
-      if (!payload || payload.ok === false) {
-        reject(new Error(payload?.error || "Refresh failed."));
-        return;
-      }
-
-      if (payload.users?.length) {
-        const localUsers = Auth.readUsers();
-        const merged = Auth.mergeUsers(localUsers, payload.users.map((user) => Auth.normalizeUser(user)));
-        Auth.saveUsers(merged);
-        if (merged.length > payload.users.length) {
-          Auth.syncUsersToSheet(merged);
-        }
-        renderUsers();
-      }
-
-      if (payload.hierarchy?.length) {
-        writeHierarchyRows(normalizeHierarchyRows(payload.hierarchy));
-      }
-
-      // Raw sheet rows — merge happens once in mergeRemoteTicketsWithLocal (Map lookup).
-      resolve((payload.tickets || []).map((ticket, index) => ({
-        ...ticket,
-        sheetRow: ticket.sheetRow ?? index + 2
-      })));
+      resolve(payload);
     };
 
     script.onerror = () => {
+      if (settled) return;
+      settled = true;
       cleanup();
       reject(new Error("Could not load ticket data."));
     };
@@ -7059,7 +7154,77 @@ function loadSheetTickets() {
     // deployments ignore the flag and still return a full payload.
     script.src = `${SHEET_WEB_APP_URL}${separator}callback=${callbackName}&compact=1`;
     document.body.appendChild(script);
+
+    if (timeoutMs > 0) {
+      timer = window.setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        reject(new Error("Ticket refresh timed out."));
+      }, timeoutMs);
+    }
   });
+}
+
+function hasLocalTicketsCache() {
+  try {
+    const tickets = readTickets();
+    return Array.isArray(tickets) && tickets.some((ticket) => cleanText(ticket?.Task));
+  } catch {
+    return false;
+  }
+}
+
+function setTicketRefreshFailureStatus(options = {}) {
+  const silent = Boolean(options.silent);
+  const hasCache = hasLocalTicketsCache();
+  if (silent && !options.forceStatus) return hasCache;
+  if (hasCache) {
+    setStatus("warning", "Using cached tickets");
+    return true;
+  }
+  setStatus("error", "Could not refresh tickets");
+  return false;
+}
+
+function loadSheetTickets(options = {}) {
+  if (!SHEET_WEB_APP_URL) {
+    return Promise.reject(new Error("Sync is not configured."));
+  }
+
+  // Apps Script cold starts + redirects are routinely >20s on phones.
+  const timeoutMs = Number(options.timeoutMs) > 0 ? Number(options.timeoutMs) : 35000;
+  const retries = Math.max(0, Number.isFinite(Number(options.retries)) ? Number(options.retries) : 2);
+  const backoffMs = [400, 1000, 1800];
+
+  const fetchOnce = async () => {
+    // Race HTTP + JSONP so a hanging CORS/fetch path cannot burn the full
+    // timeout before JSONP gets a chance (common on GitHub Pages / mobile).
+    const payload = await firstSuccessfulPromise([
+      fetchTicketsViaHttp(timeoutMs),
+      fetchTicketsViaJsonp(timeoutMs)
+    ], "Could not load ticket data.");
+    return applyRemoteTicketsPayload(payload);
+  };
+
+  const runWithRetries = async () => {
+    let lastError;
+    for (let attempt = 0; attempt <= retries; attempt += 1) {
+      try {
+        return await fetchOnce();
+      } catch (error) {
+        lastError = error;
+        // Failed refresh must never clear cached tickets — writeTickets is only
+        // called after a successful remote merge in refreshFromSheet.
+        if (attempt < retries) {
+          await sleepMs(backoffMs[Math.min(attempt, backoffMs.length - 1)]);
+        }
+      }
+    }
+    throw lastError || new Error("Could not load ticket data.");
+  };
+
+  return runWithRetries();
 }
 
 async function refreshFromSheet(options = {}) {
@@ -7071,7 +7236,7 @@ async function refreshFromSheet(options = {}) {
   if (!options.silent) setStatus("", "Refreshing tickets...");
 
   try {
-    const remoteTickets = await loadSheetTickets();
+    const remoteTickets = await loadSheetTickets(options);
     reconcileDeletedTicketTombstones(remoteTickets);
     const tickets = mergeRemoteTicketsWithLocal(remoteTickets);
     const nextSignature = computeTicketsDataSignature(tickets);
@@ -7102,7 +7267,7 @@ async function refreshFromSheet(options = {}) {
     }
     return true;
   } catch (error) {
-    if (!options.silent) setStatus("error", "Could not refresh tickets");
+    setTicketRefreshFailureStatus({ silent: options.silent });
     console.error(error);
     return false;
   }
@@ -7140,12 +7305,17 @@ async function autoRefreshTickets() {
 
   autoRefreshInProgress = true;
   try {
-    await refreshFromSheet({
+    const ok = await refreshFromSheet({
       skipScreenshotSync: true,
       deferSecondary: true,
       silent: true
     });
-    setStatus("online", `Auto-refreshed at ${new Date().toLocaleTimeString()}`);
+    if (ok) {
+      setStatus("online", `Auto-refreshed at ${new Date().toLocaleTimeString()}`);
+    } else {
+      // Keep local board usable; avoid flipping a transient blip into a hard error.
+      setTicketRefreshFailureStatus({ forceStatus: true });
+    }
   } finally {
     autoRefreshInProgress = false;
   }
@@ -7186,10 +7356,10 @@ async function softRefreshAfterLocalPaint() {
         syncPendingScreenshotsToDrive(getValidTickets()).catch((error) => console.error(error));
       }, 2500);
     } else {
-      setStatus("error", "Could not refresh tickets");
+      setTicketRefreshFailureStatus({ forceStatus: true });
     }
   } catch (error) {
-    setStatus("error", "Could not refresh tickets");
+    setTicketRefreshFailureStatus({ forceStatus: true });
     console.error(error);
   } finally {
     bootRefreshInProgress = false;

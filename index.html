@@ -6,11 +6,11 @@
     <title>Tarmal IT Portal</title>
     <link rel="icon" href="./assets/tarmal-mark.png?v=1" type="image/png">
     <link rel="apple-touch-icon" href="./assets/apple-touch-icon.png?v=1">
-    <link rel="stylesheet" href="./styles.css?v=158">
+    <link rel="stylesheet" href="./styles.css?v=162">
     <!-- auth stays blocking so requireLogin runs before app chrome paints -->
     <script src="./auth.js?v=22"></script>
     <!-- Defer main bundles so HTML can parse while ~210KB+ app.js downloads -->
-    <script src="./app.js?v=159" defer></script>
+    <script src="./app.js?v=162" defer></script>
     <script src="./assets.js?v=13" defer></script>
     <script src="./documents.js?v=11" defer></script>
     <script src="./procurement.js?v=5" defer></script>
@@ -573,7 +573,7 @@
             <div class="presentation-hero-toolbar">
               <span class="presentation-hero-toolbar-label">Presentation</span>
               <div class="presentation-hero-toolbar-actions">
-                <button class="primary-button" id="enterPresentModeButton" type="button">Present mode</button>
+                <button class="primary-button" id="enterPresentModeButton" type="button">Present</button>
                 <button class="secondary-button" id="exitPresentModeButton" type="button" hidden>Exit present</button>
                 <button class="secondary-button presentation-hero-toggle" id="togglePresentationHeroButton" type="button" aria-expanded="false" aria-controls="presentationHeroBody">Show filters</button>
               </div>
@@ -581,20 +581,18 @@
             <div class="presentation-hero-collapsible" id="presentationHeroBody">
               <h2 class="presentation-hero-title">Project Presentation</h2>
               <div class="presentation-filters" id="presentationFilters" role="group" aria-label="Presentation filters">
-                <label class="presentation-filter-field">
-                  <span>Type</span>
-                  <select id="presentationTypeFilter" aria-label="Filter by type">
-                    <option value="all">All</option>
+                <label class="presentation-filter-field presentation-filter-field--type">
+                  <select id="presentationTypeFilter" aria-label="Type">
+                    <option value="all">All types</option>
                     <option value="SAP">SAP</option>
                     <option value="Infra">Infra</option>
                   </select>
                 </label>
-                <div class="presentation-period-filters" id="presentationPeriodFilters" role="group" aria-label="Time duration">
-                  <span class="presentation-filter-label">Time</span>
+                <div class="presentation-period-filters" id="presentationPeriodFilters" role="group" aria-label="Time">
                   <button class="presentation-period-chip is-active" type="button" data-period="all">All</button>
                   <button class="presentation-period-chip" type="button" data-period="today">Today</button>
-                  <button class="presentation-period-chip" type="button" data-period="week">This week</button>
-                  <button class="presentation-period-chip" type="button" data-period="month">This month</button>
+                  <button class="presentation-period-chip" type="button" data-period="week">Week</button>
+                  <button class="presentation-period-chip" type="button" data-period="month">Month</button>
                   <button class="presentation-period-chip" type="button" data-period="custom">Custom</button>
                 </div>
                 <div class="presentation-custom-range" id="presentationCustomRange" hidden>
