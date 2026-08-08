@@ -6,11 +6,11 @@
     <title>Tarmal IT Portal</title>
     <link rel="icon" href="./assets/tarmal-mark.png?v=1" type="image/png">
     <link rel="apple-touch-icon" href="./assets/apple-touch-icon.png?v=1">
-    <link rel="stylesheet" href="./styles.css?v=154">
+    <link rel="stylesheet" href="./styles.css?v=156">
     <!-- auth stays blocking so requireLogin runs before app chrome paints -->
-    <script src="./auth.js?v=20"></script>
+    <script src="./auth.js?v=21"></script>
     <!-- Defer main bundles so HTML can parse while ~210KB+ app.js downloads -->
-    <script src="./app.js?v=154" defer></script>
+    <script src="./app.js?v=156" defer></script>
     <script src="./assets.js?v=13" defer></script>
     <script src="./documents.js?v=11" defer></script>
     <script src="./procurement.js?v=5" defer></script>
@@ -562,10 +562,7 @@
           <div class="presentation-hero is-collapsed" id="presentationHero">
             <div class="presentation-hero-glow" aria-hidden="true"></div>
             <div class="presentation-hero-toolbar">
-              <span class="presentation-hero-toolbar-label">
-                <span class="presentation-hero-toolbar-label-full">Management briefing</span>
-                <span class="presentation-hero-toolbar-label-short">Presentation</span>
-              </span>
+              <span class="presentation-hero-toolbar-label">Presentation</span>
               <div class="presentation-hero-toolbar-actions">
                 <button class="primary-button" id="enterPresentModeButton" type="button">Present mode</button>
                 <button class="secondary-button" id="exitPresentModeButton" type="button" hidden>Exit present</button>
@@ -573,18 +570,7 @@
               </div>
             </div>
             <div class="presentation-hero-collapsible" id="presentationHeroBody">
-              <div class="presentation-hero-body">
-                <div class="presentation-hero-main">
-                  <p class="presentation-eyebrow">Management briefing</p>
-                  <h2>Project Presentation</h2>
-                  <p class="presentation-subtitle" id="presentationSubtitle">
-                    SAP and Infra projects on a status Kanban — Completed, In progress, Not started. Use ★ on Tickets or Projects to open Edit and set Type.
-                  </p>
-                  <p class="presentation-subtitle presentation-subtitle-short" aria-hidden="true">
-                    SAP &amp; Infra status Kanban
-                  </p>
-                </div>
-              </div>
+              <h2 class="presentation-hero-title">Project Presentation</h2>
               <div class="presentation-filters" id="presentationFilters" role="group" aria-label="Presentation filters">
                 <label class="presentation-filter-field">
                   <span>Type</span>

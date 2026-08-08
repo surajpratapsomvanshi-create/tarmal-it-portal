@@ -299,23 +299,157 @@ const Auth = {
     return this.ensureAdminUser([...merged.values()]).map((user) => this.normalizeUser(user));
   },
 
-  loadUsersFromSheet(options = {}) {
-    const deferSync = options.deferSync !== false;
-    const timeoutMs = Number(options.timeoutMs) || 0;
-    const retries = Math.max(0, Number(options.retries) || 0);
+  hasCachedUsers() {
+    const saved = localStorage.getItem(this.USERS_KEY);
+    if (!saved) return false;
+    try {
+      const list = JSON.parse(saved);
+      return Array.isArray(list) && list.length > 0;
+    } catch {
+      return false;
+    }
+  },
 
-    const fetchOnce = () => new Promise((resolve, reject) => {
+  sleep_(ms) {
+    return new Promise((resolve) => window.setTimeout(resolve, ms));
+  },
+
+  tryParseJsonText_(candidate) {
+    try {
+      return { ok: true, value: JSON.parse(candidate) };
+    } catch {
+      return { ok: false };
+    }
+  },
+
+  /**
+   * Soft-parse Apps Script users responses the same way ticket sync does:
+   * tolerate BOM, HTML error wrappers, and callback(...) JSONP envelopes.
+   */
+  parseUsersResponse_(text) {
+    const raw = String(text ?? "").replace(/^\uFEFF/, "").trim();
+    if (!raw) {
+      throw new Error("Empty response from Apps Script.");
+    }
+
+    const head = raw.slice(0, 80).toLowerCase();
+    const looksHtml = head.startsWith("<!doctype")
+      || head.startsWith("<html")
+      || head.startsWith("<head")
+      || head.startsWith("<body")
+      || head.startsWith("<pre");
+
+    let parsed = this.tryParseJsonText_(raw);
+    if (parsed.ok) return parsed.value;
+
+    const jsonpMatch = raw.match(/^[a-zA-Z_$][\w$]*\s*\(\s*([\s\S]*)\s\)\s*;?\s*$/);
+    if (jsonpMatch) {
+      parsed = this.tryParseJsonText_(jsonpMatch[1]);
+      if (parsed.ok) return parsed.value;
+    }
+
+    const okObjectMatch = raw.match(/\{\s*"ok"\s*:[\s\S]*\}/);
+    if (okObjectMatch) {
+      parsed = this.tryParseJsonText_(okObjectMatch[0]);
+      if (parsed.ok && parsed.value && typeof parsed.value === "object") return parsed.value;
+    }
+
+    const braceMatch = raw.match(/\{[\s\S]*\}/);
+    if (braceMatch) {
+      parsed = this.tryParseJsonText_(braceMatch[0]);
+      if (parsed.ok && parsed.value && typeof parsed.value === "object") return parsed.value;
+    }
+
+    if (looksHtml) {
+      throw new Error("Sheet sync returned an HTML error page instead of JSON.");
+    }
+    throw new Error("Could not read users response from Apps Script.");
+  },
+
+  applyRemoteUsersPayload_(payload, options = {}) {
+    const deferSync = options.deferSync !== false;
+    if (!payload || payload.ok === false) {
+      throw new Error(payload?.error || "Could not load users.");
+    }
+
+    // Read cache at apply-time so failed attempts never wipe local users.
+    const localUsers = this.readUsers();
+    const remoteUsers = (payload.users || []).map((user) => this.normalizeUser(user));
+    const merged = this.mergeUsers(localUsers, remoteUsers, true);
+    this.saveUsers(merged);
+
+    // Never push when the sheet returned an empty user list — that wipe risk
+    // has deleted real AppUsers rows after a failed/partial read.
+    const shouldPushToSheet = remoteUsers.length > 0
+      && (merged.length > remoteUsers.length || this.usersChanged_(merged, remoteUsers));
+
+    if (!shouldPushToSheet) {
+      return Promise.resolve(merged);
+    }
+
+    const syncPromise = this.syncUsersToSheet(merged);
+    if (deferSync) {
+      syncPromise.catch(() => {});
+      return Promise.resolve(merged);
+    }
+
+    return syncPromise.then(() => merged).catch(() => merged);
+  },
+
+  fetchUsersViaHttp_(timeoutMs) {
+    if (!this.SHEET_WEB_APP_URL) {
+      return Promise.reject(new Error("Sync is not configured."));
+    }
+
+    const separator = this.SHEET_WEB_APP_URL.includes("?") ? "&" : "?";
+    const controller = typeof AbortController === "function" ? new AbortController() : null;
+    let timer = null;
+
+    const request = fetch(`${this.SHEET_WEB_APP_URL}${separator}resource=users`, {
+      method: "GET",
+      redirect: "follow",
+      credentials: "omit",
+      cache: "no-store",
+      signal: controller ? controller.signal : undefined
+    }).then(async (response) => {
+      const text = await response.text();
+      return this.parseUsersResponse_(text);
+    });
+
+    if (!(timeoutMs > 0)) {
+      return request;
+    }
+
+    const timeoutPromise = new Promise((_, reject) => {
+      timer = window.setTimeout(() => {
+        try {
+          controller?.abort();
+        } catch {
+          // ignore
+        }
+        reject(new Error("User sync timed out."));
+      }, timeoutMs);
+    });
+
+    return Promise.race([request, timeoutPromise]).finally(() => {
+      if (timer) window.clearTimeout(timer);
+    });
+  },
+
+  fetchUsersViaJsonp_(timeoutMs) {
+    return new Promise((resolve, reject) => {
       if (!this.SHEET_WEB_APP_URL) {
         reject(new Error("Sync is not configured."));
         return;
       }
 
-      const localUsers = this.readUsers();
       const callbackName = `handleSheetUsers_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
       const script = document.createElement("script");
       const separator = this.SHEET_WEB_APP_URL.includes("?") ? "&" : "?";
       let settled = false;
+      let timer = null;
       const cleanup = () => {
+        if (timer) window.clearTimeout(timer);
         delete window[callbackName];
         script.remove();
       };
@@ -324,31 +458,7 @@ const Auth = {
         if (settled) return;
         settled = true;
         cleanup();
-        if (!payload || payload.ok === false) {
-          reject(new Error(payload?.error || "Could not load users."));
-          return;
-        }
-
-        const remoteUsers = (payload.users || []).map((user) => this.normalizeUser(user));
-        const merged = this.mergeUsers(localUsers, remoteUsers, true);
-        this.saveUsers(merged);
-
-        // Never push when the sheet returned an empty user list — that wipe risk
-        // has deleted real AppUsers rows after a failed/partial read.
-        const shouldPushToSheet = remoteUsers.length > 0
-          && (merged.length > remoteUsers.length || this.usersChanged_(merged, remoteUsers));
-
-        if (shouldPushToSheet) {
-          const syncPromise = this.syncUsersToSheet(merged);
-          if (deferSync) {
-            syncPromise.catch(() => {});
-          } else {
-            syncPromise.then(() => resolve(merged)).catch(() => resolve(merged));
-            return;
-          }
-        }
-
-        resolve(merged);
+        resolve(payload);
       };
 
       script.onerror = () => {
@@ -362,7 +472,7 @@ const Auth = {
       document.body.appendChild(script);
 
       if (timeoutMs > 0) {
-        window.setTimeout(() => {
+        timer = window.setTimeout(() => {
           if (settled) return;
           settled = true;
           cleanup();
@@ -370,10 +480,25 @@ const Auth = {
         }, timeoutMs);
       }
     });
+  },
 
-    if (retries < 1) {
-      return fetchOnce();
-    }
+  loadUsersFromSheet(options = {}) {
+    const deferSync = options.deferSync !== false;
+    // Apps Script cold starts + redirects are routinely >20s on phones.
+    const timeoutMs = Number(options.timeoutMs) > 0 ? Number(options.timeoutMs) : 35000;
+    const retries = Math.max(0, Number.isFinite(Number(options.retries)) ? Number(options.retries) : 2);
+    const backoffMs = [400, 1000, 1800];
+
+    const fetchOnce = async () => {
+      let payload;
+      try {
+        payload = await this.fetchUsersViaHttp_(timeoutMs);
+      } catch (httpError) {
+        // CORS / opaque gateway failures: fall back to JSONP.
+        payload = await this.fetchUsersViaJsonp_(timeoutMs);
+      }
+      return this.applyRemoteUsersPayload_(payload, { deferSync });
+    };
 
     const runWithRetries = async () => {
       let lastError;
@@ -382,6 +507,11 @@ const Auth = {
           return await fetchOnce();
         } catch (error) {
           lastError = error;
+          // Failed refresh must never clear cached users — readUsers/saveUsers
+          // are only called after a successful payload parse.
+          if (attempt < retries) {
+            await this.sleep_(backoffMs[Math.min(attempt, backoffMs.length - 1)]);
+          }
         }
       }
       throw lastError || new Error("Could not load users.");
