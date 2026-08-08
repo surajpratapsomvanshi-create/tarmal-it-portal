@@ -5812,6 +5812,27 @@ function getTomorrowDateValue() {
   return formatLocalDateValue(tomorrow);
 }
 
+/** Next day for M-button advance; Sunday is off so skip to Monday. */
+function getNextMilestoneAdvanceDateValue() {
+  const next = startOfTodayDate();
+  next.setDate(next.getDate() + 1);
+  if (next.getDay() === 0) {
+    next.setDate(next.getDate() + 1);
+  }
+  return formatLocalDateValue(next);
+}
+
+function milestoneAdvanceTargetLabel(dateValue) {
+  if (dateValue === getTodayDateValue()) return "today";
+  if (dateValue === getTomorrowDateValue()) return "tomorrow";
+  const parts = String(dateValue || "").split("-").map(Number);
+  if (parts.length === 3 && parts.every((n) => Number.isFinite(n))) {
+    const date = new Date(parts[0], parts[1] - 1, parts[2]);
+    return date.toLocaleDateString(undefined, { weekday: "long" });
+  }
+  return String(dateValue || "");
+}
+
 function isMilestoneTomorrow(ticket) {
   const date = parseTicketDate(getEffectiveMilestone(ticket));
   if (!date) return false;
@@ -5850,8 +5871,8 @@ async function setTicketMilestoneFromAction(sheetRow) {
   if (milestoneActionInFlight.has(actionKey)) return;
   milestoneActionInFlight.add(actionKey);
 
-  const nextMilestone = isMilestoneToday(ticket) ? getTomorrowDateValue() : getTodayDateValue();
-  const label = nextMilestone === getTomorrowDateValue() ? "tomorrow" : "today";
+  const nextMilestone = isMilestoneToday(ticket) ? getNextMilestoneAdvanceDateValue() : getTodayDateValue();
+  const label = milestoneAdvanceTargetLabel(nextMilestone);
 
   try {
     let updatedTicket = normalizeTicket({
@@ -6618,8 +6639,8 @@ function renderTicketTable(tickets, options = {}) {
               class="ticket-milestone-today-button${isMilestoneToday(ticket) ? " is-today" : ""}${isMilestoneTomorrow(ticket) ? " is-tomorrow" : ""}${milestoneActionInFlight.has(milestoneActionKey(ticket)) ? " is-syncing" : ""}"
               type="button"
               data-sheet-row="${ticket.sheetRow}"
-              aria-label="${isMilestoneToday(ticket) ? "Set milestone to tomorrow" : "Set milestone to today"}"
-              title="${isMilestoneToday(ticket) ? "Set milestone to tomorrow" : "Set milestone to today"}"
+              aria-label="${isMilestoneToday(ticket) ? `Set milestone to ${milestoneAdvanceTargetLabel(getNextMilestoneAdvanceDateValue())}` : "Set milestone to today"}"
+              title="${isMilestoneToday(ticket) ? `Set milestone to ${milestoneAdvanceTargetLabel(getNextMilestoneAdvanceDateValue())}` : "Set milestone to today"}"
             >M</button>
             <button
               class="ticket-duplicate-button${duplicateTicketInFlight.has(milestoneActionKey(ticket)) ? " is-syncing" : ""}"
