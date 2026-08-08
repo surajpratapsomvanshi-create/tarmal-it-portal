@@ -7957,6 +7957,54 @@ body.view-focus .dashboard-layout {
   box-shadow: none;
   border-top: 2px solid var(--line-strong);
   overflow: hidden;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: grab;
+}
+
+.presentation-card.is-long-pressing {
+  outline: 2px solid rgba(29, 78, 216, 0.45);
+  outline-offset: 1px;
+  animation: presentation-long-press-pulse 1s ease-in-out infinite;
+}
+
+.presentation-card.is-dragging {
+  opacity: 0.35;
+}
+
+.presentation-card-ghost {
+  position: fixed;
+  z-index: 12000;
+  pointer-events: none;
+  opacity: 0.92;
+  transform: scale(1.03) rotate(1.5deg);
+  box-shadow: var(--shadow);
+}
+
+.presentation-kanban-column.is-drop-target {
+  outline: 2px dashed var(--blue);
+  outline-offset: -2px;
+  background: rgba(29, 78, 216, 0.06);
+}
+
+.presentation-kanban-column.is-drop-target .presentation-kanban-column-body {
+  background: rgba(29, 78, 216, 0.04);
+}
+
+body.presentation-card-dragging {
+  cursor: grabbing;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+body.presentation-card-dragging .presentation-kanban-column-body {
+  overflow: hidden;
+}
+
+@keyframes presentation-long-press-pulse {
+  0%, 100% { outline-color: rgba(29, 78, 216, 0.35); }
+  50% { outline-color: rgba(29, 78, 216, 0.85); }
 }
 
 .presentation-card.status-progress { border-top-color: var(--blue); }

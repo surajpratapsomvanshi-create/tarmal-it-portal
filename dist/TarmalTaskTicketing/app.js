@@ -6338,6 +6338,241 @@ function bindPresentationCardEditButtons(root) {
   });
 }
 
+const PRESENTATION_LONG_PRESS_MS = 4000;
+let presentationDragMoveInFlight = false;
+
+function statusLabelForKanbanColumnId(columnId) {
+  switch (String(columnId || "").trim()) {
+    case "completed":
+      return "Completed";
+    case "progress":
+      return "In progress";
+    case "blocked":
+      return "Blocked";
+    case "approval":
+      return "Pending Approval";
+    case "pending":
+      return "Not started";
+    default:
+      return "";
+  }
+}
+
+function findPresentationColumnFromPoint(clientX, clientY) {
+  const stack = typeof document.elementsFromPoint === "function"
+    ? document.elementsFromPoint(clientX, clientY)
+    : [document.elementFromPoint(clientX, clientY)].filter(Boolean);
+  for (const el of stack) {
+    const column = el?.closest?.(".presentation-kanban-column[data-column-id]");
+    if (column) return column;
+  }
+  return null;
+}
+
+async function movePresentationTicketToColumn(sheetRow, columnId) {
+  if (!canEditTickets() || presentationDragMoveInFlight) return;
+  const nextStatus = statusLabelForKanbanColumnId(columnId);
+  if (!nextStatus) return;
+
+  const ticket = getValidTickets().find((entry) => Number(entry.sheetRow) === Number(sheetRow));
+  if (!ticket) return;
+  const priorStatus = cleanText(ticket.Status);
+  if (priorStatus.toLowerCase() === nextStatus.toLowerCase()) return;
+  if (kanbanColumnId(ticket.Status) === columnId) return;
+
+  const updated = {
+    ...ticket,
+    Status: nextStatus,
+    expectedStatus: priorStatus || nextStatus,
+    lastKnownStatus: priorStatus || nextStatus,
+    lastUpdated: new Date().toISOString(),
+    ticketId: ticketStableId(ticket) || createTicketId()
+  };
+  if (/^completed$/i.test(nextStatus) && !cleanText(updated["End date"])) {
+    updated["End date"] = getTodayDateValue();
+  }
+
+  const sheetTicket = { ...updated };
+  const localTicket = applyTicketApprovalPreview(normalizeTicket(updated), ticket);
+  const pendingFields = ["Status"];
+  if (cleanText(localTicket["End date"]) !== cleanText(ticket["End date"])) {
+    pendingFields.push("End date");
+  }
+
+  presentationDragMoveInFlight = true;
+  updateLocalTicket(localTicket, { pendingFields });
+  renderPresentationView();
+  if (typeof renderTickets === "function") {
+    try {
+      renderTickets({ activeOnly: true });
+    } catch (_error) {
+      /* ignore non-ticket panels */
+    }
+  }
+
+  try {
+    await sendTicketUpdateToSheet(sheetTicket);
+    const shown = cleanText(localTicket.Status) || nextStatus;
+    setStatus("online", shown === nextStatus ? `Moved to ${nextStatus}` : `Moved — ${shown}`);
+  } catch (error) {
+    console.error(error);
+    setStatus("error", "Status saved locally, but sync failed");
+  } finally {
+    presentationDragMoveInFlight = false;
+  }
+}
+
+function bindPresentationCardDragDrop(root) {
+  if (!root || !canEditTickets()) return;
+
+  const clearColumnTargets = () => {
+    root.querySelectorAll(".presentation-kanban-column.is-drop-target").forEach((column) => {
+      column.classList.remove("is-drop-target");
+    });
+  };
+
+  root.querySelectorAll(".presentation-card[data-sheet-row]").forEach((card) => {
+    let pressTimer = null;
+    let armed = false;
+    let dragging = false;
+    let pointerId = null;
+    let startX = 0;
+    let startY = 0;
+    let lastX = 0;
+    let lastY = 0;
+    let ghost = null;
+    let originColumnId = "";
+
+    const clearPress = () => {
+      if (pressTimer) {
+        window.clearTimeout(pressTimer);
+        pressTimer = null;
+      }
+      card.classList.remove("is-long-pressing");
+    };
+
+    const cleanupDrag = () => {
+      const capturedId = pointerId;
+      clearPress();
+      armed = false;
+      dragging = false;
+      pointerId = null;
+      originColumnId = "";
+      clearColumnTargets();
+      card.classList.remove("is-dragging");
+      document.body.classList.remove("presentation-card-dragging");
+      if (ghost) {
+        ghost.remove();
+        ghost = null;
+      }
+      try {
+        if (capturedId != null && card.hasPointerCapture?.(capturedId)) {
+          card.releasePointerCapture(capturedId);
+        }
+      } catch (_error) {
+        /* ignore */
+      }
+    };
+
+    const armDrag = () => {
+      if (armed || dragging) return;
+      armed = true;
+      dragging = true;
+      card.classList.remove("is-long-pressing");
+      card.classList.add("is-dragging");
+      document.body.classList.add("presentation-card-dragging");
+      if (navigator.vibrate) {
+        try {
+          navigator.vibrate(30);
+        } catch (_error) {
+          /* ignore */
+        }
+      }
+
+      ghost = card.cloneNode(true);
+      ghost.classList.add("presentation-card-ghost");
+      ghost.style.width = `${card.getBoundingClientRect().width}px`;
+      ghost.style.left = `${lastX - 24}px`;
+      ghost.style.top = `${lastY - 24}px`;
+      document.body.appendChild(ghost);
+
+      const sourceColumn = card.closest(".presentation-kanban-column[data-column-id]");
+      originColumnId = sourceColumn?.dataset.columnId || "";
+      setStatus("online", "Drag to a column, then release");
+    };
+
+    card.addEventListener("pointerdown", (event) => {
+      if (event.button != null && event.button !== 0) return;
+      if (event.target.closest("button, a, input, select, textarea, label")) return;
+      if (!card.dataset.sheetRow) return;
+
+      cleanupDrag();
+      pointerId = event.pointerId;
+      startX = event.clientX;
+      startY = event.clientY;
+      lastX = event.clientX;
+      lastY = event.clientY;
+      card.classList.add("is-long-pressing");
+      try {
+        card.setPointerCapture(event.pointerId);
+      } catch (_error) {
+        /* ignore */
+      }
+
+      pressTimer = window.setTimeout(() => {
+        pressTimer = null;
+        armDrag();
+      }, PRESENTATION_LONG_PRESS_MS);
+    });
+
+    card.addEventListener("pointermove", (event) => {
+      if (pointerId != null && event.pointerId !== pointerId) return;
+      lastX = event.clientX;
+      lastY = event.clientY;
+
+      if (!dragging) {
+        const dx = event.clientX - startX;
+        const dy = event.clientY - startY;
+        if (Math.hypot(dx, dy) > 12) {
+          clearPress();
+        }
+        return;
+      }
+
+      event.preventDefault();
+      if (ghost) {
+        ghost.style.left = `${event.clientX - 24}px`;
+        ghost.style.top = `${event.clientY - 24}px`;
+      }
+
+      clearColumnTargets();
+      const column = findPresentationColumnFromPoint(event.clientX, event.clientY);
+      if (column && column.dataset.columnId !== originColumnId) {
+        column.classList.add("is-drop-target");
+      }
+    });
+
+    const endDrag = async (event) => {
+      if (pointerId != null && event.pointerId !== pointerId) return;
+      const wasDragging = dragging;
+      const row = Number(card.dataset.sheetRow);
+      const dropX = event.clientX ?? lastX;
+      const dropY = event.clientY ?? lastY;
+      const dropColumn = wasDragging
+        ? findPresentationColumnFromPoint(dropX, dropY)
+        : null;
+      const targetId = dropColumn?.dataset.columnId || "";
+      cleanupDrag();
+
+      if (!wasDragging || !row || !targetId || targetId === originColumnId) return;
+      await movePresentationTicketToColumn(row, targetId);
+    };
+
+    card.addEventListener("pointerup", endDrag);
+    card.addEventListener("pointercancel", () => cleanupDrag());
+  });
+}
+
 function renderPresentationCard(ticket, index) {
   const remarks = getTicketRemarksText(ticket);
   const milestone = formatDate(ticket.Milestone) || "—";
@@ -6358,7 +6593,11 @@ function renderPresentationCard(ticket, index) {
     : "";
 
   return `
-    <article class="presentation-card ${statusClass(ticket.Status)}" data-sheet-row="${ticket.sheetRow}">
+    <article
+      class="presentation-card ${statusClass(ticket.Status)}"
+      data-sheet-row="${ticket.sheetRow}"
+      title="${canEditTickets() ? "Hold 4 seconds, then drag to another column" : ""}"
+    >
       <h3 class="presentation-card-title">${escapeHtml(ticket.Task || "Untitled project")}</h3>
       <div class="presentation-card-meta">
         <span class="presentation-id-chip">${idLabel}</span>
@@ -6455,7 +6694,12 @@ function renderPresentationView(tickets = getValidTickets()) {
           : '<div class="presentation-kanban-empty">No projects</div>';
 
         return `
-          <section class="presentation-kanban-column ${column.statusClass}" role="listitem" aria-label="${escapeHtml(column.label)}">
+          <section
+            class="presentation-kanban-column ${column.statusClass}"
+            role="listitem"
+            aria-label="${escapeHtml(column.label)}"
+            data-column-id="${escapeHtml(column.id)}"
+          >
             <header class="presentation-kanban-column-head">
               <h3>${escapeHtml(column.label)}</h3>
               <span class="presentation-kanban-column-count">${columnTickets.length}</span>
@@ -6470,6 +6714,7 @@ function renderPresentationView(tickets = getValidTickets()) {
   `;
   bindScreenshotPreviewButtons(presentationDeck);
   bindPresentationCardEditButtons(presentationDeck);
+  bindPresentationCardDragDrop(presentationDeck);
 }
 
 function setPresentMode(enabled, { syncFullscreen = true } = {}) {
