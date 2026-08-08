@@ -7019,10 +7019,13 @@ body.view-focus .dashboard-layout {
   flex-direction: column;
   gap: 1.35rem;
   padding: 0.15rem 0 1.5rem;
+  min-height: 0;
+  min-width: 0;
 }
 
 .presentation-hero {
   position: relative;
+  flex-shrink: 0;
   overflow: hidden;
   border: 1px solid rgba(148, 163, 184, 0.28);
   border-radius: var(--radius-lg);
@@ -7160,17 +7163,24 @@ body.view-focus .dashboard-layout {
 .presentation-deck {
   display: block;
   min-width: 0;
+  min-height: 0;
 }
 
 .presentation-deck.presentation-kanban {
-  overflow: visible;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .presentation-kanban-columns {
   display: flex;
   gap: 1.1rem;
   align-items: stretch;
+  flex: 1 1 auto;
   flex-wrap: nowrap;
+  min-height: 0;
   overflow-x: auto;
   overflow-y: hidden;
   -webkit-overflow-scrolling: touch;
@@ -7198,11 +7208,13 @@ body.view-focus .dashboard-layout {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   flex: 1 1 0;
+  align-self: stretch;
   width: auto;
   min-width: 280px;
   max-width: none;
-  min-height: 460px;
-  max-height: calc(100vh - 270px);
+  min-height: 0;
+  max-height: none;
+  height: auto;
   border: 1px solid var(--line);
   border-radius: var(--radius-md);
   background: var(--soft);
@@ -7214,6 +7226,7 @@ body.view-focus .dashboard-layout {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  flex-shrink: 0;
   padding: 0.85rem 1rem;
   border-bottom: 1px solid var(--line);
   background: var(--panel);
@@ -7646,23 +7659,53 @@ body.present-mode .sidebar-expand-bar {
   display: none !important;
 }
 
+body.present-mode.view-focus {
+  height: 100dvh;
+  overflow: hidden;
+}
+
 body.present-mode .app-shell {
-  display: block;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: none;
+  height: 100dvh;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  box-sizing: border-box;
 }
 
 body.present-mode .app-main {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
   width: 100%;
   max-width: none;
+  min-height: 0;
   margin: 0;
-  padding: 0 0 1.5rem;
+  padding: 0;
+  overflow: hidden;
+}
+
+body.present-mode .tab-panel[data-panel="presentation"].active {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
 }
 
 body.present-mode .presentation-board {
+  flex: 1;
+  min-height: 0;
   gap: 1.1rem;
   padding: 0;
+  overflow: hidden;
 }
 
 body.present-mode .presentation-hero {
+  flex-shrink: 0;
   border-radius: 0;
   border-left: none;
   border-right: none;
@@ -7696,12 +7739,15 @@ body.present-mode .presentation-summary {
 }
 
 body.present-mode .presentation-deck {
-  padding: 0 clamp(1.25rem, 3.5vw, 2.75rem);
+  flex: 1;
+  min-height: 0;
+  padding: 0 clamp(1.25rem, 3.5vw, 2.75rem) 1rem;
 }
 
 body.present-mode .presentation-kanban-columns {
   gap: 1.25rem;
   padding-bottom: 0.5rem;
+  min-height: 0;
 }
 
 body.present-mode .presentation-kanban-column {
@@ -7709,8 +7755,10 @@ body.present-mode .presentation-kanban-column {
   width: auto;
   min-width: min(300px, 78vw);
   max-width: none;
-  min-height: calc(100vh - 200px);
-  max-height: calc(100vh - 170px);
+  min-height: 0;
+  max-height: none;
+  height: auto;
+  align-self: stretch;
 }
 
 body.present-mode .presentation-kanban-column-head {
@@ -7770,13 +7818,40 @@ body.present-mode .presentation-thumb-more {
   height: 48px;
 }
 
+/* Fill remaining viewport in app chrome without 100vh crop */
+body.view-focus .presentation-board {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+body.view-focus .presentation-hero {
+  flex-shrink: 0;
+}
+
+body.view-focus .presentation-deck.presentation-kanban {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+body.view-focus .presentation-kanban-columns {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+body.view-focus .presentation-kanban-column {
+  min-height: 0;
+  max-height: none;
+}
+
 @media (max-width: 900px) {
   .presentation-kanban-column {
     flex: 0 0 min(300px, 80vw);
     width: min(300px, 80vw);
     min-width: min(300px, 80vw);
     max-width: min(320px, 86vw);
-    min-height: 380px;
+    min-height: 0;
   }
 
   body.present-mode .presentation-kanban-column {
