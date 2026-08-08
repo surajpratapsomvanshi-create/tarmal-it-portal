@@ -7167,8 +7167,8 @@ body.view-focus .dashboard-layout {
 .presentation-board {
   display: flex;
   flex-direction: column;
-  gap: 1.35rem;
-  padding: 0.15rem 0 1.5rem;
+  gap: 0.55rem;
+  padding: 0.1rem 0 0.65rem;
   min-height: 0;
   min-width: 0;
 }
@@ -7193,8 +7193,9 @@ body.view-focus .dashboard-layout {
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 0.65rem 1rem;
-  padding: 0.75rem 1.15rem;
+  gap: 0.4rem 0.65rem;
+  padding: 0.45rem 0.85rem;
+  min-height: 44px;
   border-bottom: 1px solid rgba(148, 163, 184, 0.18);
 }
 
@@ -7206,37 +7207,23 @@ body.view-focus .dashboard-layout {
 
 .presentation-hero.is-collapsed .presentation-hero-toolbar {
   border-bottom: 0;
-  padding: 0.45rem 0.85rem;
-  min-height: 44px;
-  gap: 0.4rem 0.65rem;
   flex-wrap: nowrap;
 }
 
-.presentation-hero-toolbar-label-short {
-  display: none;
-}
-
-.presentation-subtitle-short {
-  display: none;
-  margin: 0.45rem 0 0;
-  color: #cbd5e1;
-  font-size: 0.88rem;
-  line-height: 1.4;
-}
-
 .presentation-hero-toolbar-label {
-  font-size: 0.7rem;
+  font-size: 0.65rem;
   font-weight: 700;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
   color: #94a3b8;
+  white-space: nowrap;
 }
 
 .presentation-hero-toolbar-actions {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 0.45rem;
+  gap: 0.35rem;
 }
 
 .presentation-hero-toolbar-actions .primary-button {
@@ -7245,8 +7232,9 @@ body.view-focus .dashboard-layout {
   border-color: #f1f5f9;
   font-weight: 650;
   box-shadow: 0 1px 0 rgba(255, 255, 255, 0.35) inset;
-  min-height: 36px;
-  padding: 0 14px;
+  min-height: 32px;
+  padding: 0 12px;
+  font-size: 0.82rem;
 }
 
 .presentation-hero-toolbar-actions .primary-button:hover {
@@ -7258,8 +7246,9 @@ body.view-focus .dashboard-layout {
   background: rgba(248, 250, 252, 0.06);
   color: #e2e8f0;
   border-color: rgba(226, 232, 240, 0.28);
-  min-height: 36px;
-  padding: 0 12px;
+  min-height: 32px;
+  padding: 0 10px;
+  font-size: 0.82rem;
 }
 
 .presentation-hero-toolbar-actions .secondary-button:hover {
@@ -7271,7 +7260,11 @@ body.view-focus .dashboard-layout {
 .presentation-hero-collapsible {
   position: relative;
   z-index: 1;
-  padding: 1.15rem 1.65rem 1.25rem;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem 0.75rem;
+  padding: 0.4rem 0.85rem 0.5rem;
 }
 
 .presentation-hero.is-collapsed .presentation-hero-collapsible {
@@ -7279,51 +7272,28 @@ body.view-focus .dashboard-layout {
 }
 
 .presentation-board.presentation-hero-collapsed {
-  gap: 0.65rem;
+  gap: 0.45rem;
 }
 
 .presentation-hero-glow {
   position: absolute;
   inset: auto -12% -70% 40%;
-  height: 200px;
-  background: radial-gradient(circle, rgba(148, 163, 184, 0.16), transparent 68%);
+  height: 120px;
+  background: radial-gradient(circle, rgba(148, 163, 184, 0.14), transparent 68%);
   pointer-events: none;
 }
 
-.presentation-hero-body {
+.presentation-hero-title {
   position: relative;
   z-index: 1;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 1.15rem 1.75rem;
-}
-
-.presentation-eyebrow {
-  margin: 0 0 0.4rem;
-  color: #94a3b8;
-  font-size: 0.7rem;
-  font-weight: 700;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-}
-
-.presentation-hero-main h2 {
   margin: 0;
-  font-size: clamp(1.5rem, 2.4vw, 2rem);
+  flex: 0 0 auto;
+  font-size: 1.05rem;
   font-weight: 700;
-  letter-spacing: -0.025em;
-  line-height: 1.15;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
   color: #fff;
-}
-
-.presentation-subtitle {
-  margin: 0.55rem 0 0;
-  max-width: 40rem;
-  color: #cbd5e1;
-  font-size: 0.9rem;
-  line-height: 1.5;
+  white-space: nowrap;
 }
 
 .presentation-hero-actions {
@@ -7396,14 +7366,16 @@ body.view-focus .dashboard-layout {
   z-index: 1;
   display: inline-flex;
   align-items: center;
-  margin: 1rem 0 0;
-  padding: 0.35rem 0.7rem;
+  margin: 0;
+  padding: 0.2rem 0.55rem;
   border-radius: 6px;
   background: rgba(15, 23, 42, 0.4);
   border: 1px solid rgba(148, 163, 184, 0.18);
   color: #94a3b8;
-  font-size: 0.8rem;
+  font-size: 0.72rem;
   letter-spacing: 0.01em;
+  white-space: nowrap;
+  flex: 0 0 auto;
 }
 
 .presentation-filters {
@@ -7411,38 +7383,89 @@ body.view-focus .dashboard-layout {
   z-index: 1;
   display: flex;
   flex-wrap: wrap;
-  align-items: flex-end;
-  gap: 0.75rem 1rem;
-  margin-top: 1rem;
-  padding: 0.85rem 1rem;
-  border-radius: var(--radius-md);
-  background: rgba(15, 23, 42, 0.35);
-  border: 1px solid rgba(148, 163, 184, 0.2);
+  align-items: center;
+  gap: 0.4rem 0.65rem;
+  margin: 0;
+  padding: 0.25rem 0.55rem;
+  flex: 1 1 auto;
+  min-width: 0;
+  border-radius: var(--radius-sm);
+  background: rgba(15, 23, 42, 0.28);
+  border: 1px solid rgba(148, 163, 184, 0.16);
+}
+
+/* Desktop expanded: single thin toolbar row — Title | Filters | Present | count */
+@media (min-width: 721px) {
+  .presentation-hero:not(.is-collapsed) {
+    display: flex;
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: 0.35rem 0.5rem;
+    padding: 0.3rem 0.55rem 0.3rem 0.85rem;
+    min-height: 48px;
+  }
+
+  .presentation-hero:not(.is-collapsed) .presentation-hero-glow {
+    display: none;
+  }
+
+  .presentation-hero:not(.is-collapsed) .presentation-hero-collapsible {
+    display: contents;
+  }
+
+  .presentation-hero:not(.is-collapsed) .presentation-hero-title {
+    order: 1;
+  }
+
+  .presentation-hero:not(.is-collapsed) .presentation-filters {
+    order: 2;
+  }
+
+  .presentation-hero:not(.is-collapsed) .presentation-hero-toolbar {
+    order: 3;
+    border-bottom: 0;
+    padding: 0;
+    min-height: 0;
+    gap: 0.35rem;
+    flex: 0 0 auto;
+  }
+
+  .presentation-hero:not(.is-collapsed) .presentation-hero-toolbar-label {
+    display: none;
+  }
+
+  .presentation-hero:not(.is-collapsed) .presentation-summary {
+    order: 4;
+  }
 }
 
 .presentation-filter-field {
-  display: grid;
-  gap: 0.3rem;
-  min-width: 7.5rem;
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 0.35rem;
+  min-width: 0;
 }
 
 .presentation-filter-field span,
 .presentation-filter-label {
   color: #94a3b8;
-  font-size: 0.68rem;
+  font-size: 0.65rem;
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
+  white-space: nowrap;
 }
 
 .presentation-filter-field select,
 .presentation-filter-field input[type="date"] {
-  min-height: 36px;
-  padding: 0 0.65rem;
+  min-height: 30px;
+  padding: 0 0.5rem;
   border-radius: var(--radius-sm);
   border: 1px solid rgba(226, 232, 240, 0.22);
   background: rgba(248, 250, 252, 0.08);
   color: #f8fafc;
+  font-size: 0.8rem;
 }
 
 .presentation-filter-field select option {
@@ -7458,13 +7481,13 @@ body.view-focus .dashboard-layout {
 }
 
 .presentation-period-chip {
-  min-height: 32px;
-  padding: 0 0.7rem;
+  min-height: 28px;
+  padding: 0 0.55rem;
   border-radius: 999px;
   border: 1px solid rgba(226, 232, 240, 0.22);
   background: rgba(248, 250, 252, 0.06);
   color: #cbd5e1;
-  font-size: 0.78rem;
+  font-size: 0.74rem;
   font-weight: 600;
   cursor: pointer;
 }
@@ -7502,7 +7525,7 @@ body.view-focus .dashboard-layout {
 
 .presentation-kanban-columns {
   display: flex;
-  gap: 1.1rem;
+  gap: 0.85rem;
   align-items: stretch;
   flex: 1 1 auto;
   flex-wrap: nowrap;
@@ -7510,7 +7533,7 @@ body.view-focus .dashboard-layout {
   overflow-x: auto;
   overflow-y: hidden;
   -webkit-overflow-scrolling: touch;
-  padding: 2px 2px 12px;
+  padding: 2px 2px 10px;
   scrollbar-width: thin;
   scrollbar-color: #cbd5e1 transparent;
 }
@@ -7536,7 +7559,7 @@ body.view-focus .dashboard-layout {
   flex: 1 1 0;
   align-self: stretch;
   width: auto;
-  min-width: 280px;
+  min-width: 232px;
   max-width: none;
   min-height: 0;
   max-height: none;
@@ -7551,9 +7574,9 @@ body.view-focus .dashboard-layout {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: 10px;
   flex-shrink: 0;
-  padding: 0.85rem 1rem;
+  padding: 0.55rem 0.7rem;
   border-bottom: 1px solid var(--line);
   background: var(--panel);
   border-radius: var(--radius-md) var(--radius-md) 0 0;
@@ -7561,7 +7584,7 @@ body.view-focus .dashboard-layout {
 
 .presentation-kanban-column-head h3 {
   margin: 0;
-  font-size: 0.84rem;
+  font-size: 0.76rem;
   font-weight: 700;
   letter-spacing: 0.01em;
   color: var(--ink);
@@ -7571,40 +7594,40 @@ body.view-focus .dashboard-layout {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 1.65rem;
-  height: 1.65rem;
-  padding: 0 0.45rem;
+  min-width: 1.4rem;
+  height: 1.4rem;
+  padding: 0 0.35rem;
   border-radius: 999px;
   background: var(--canvas);
   color: var(--ink-secondary);
   border: 1px solid var(--line);
-  font-size: 0.75rem;
+  font-size: 0.68rem;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
 
 .presentation-kanban-column.status-completed .presentation-kanban-column-head {
-  border-top: 3px solid var(--green);
+  border-top: 2px solid var(--green);
 }
 
 .presentation-kanban-column.status-progress .presentation-kanban-column-head {
-  border-top: 3px solid #d97706;
+  border-top: 2px solid #d97706;
 }
 
 .presentation-kanban-column.status-blocked .presentation-kanban-column-head {
-  border-top: 3px solid var(--red);
+  border-top: 2px solid var(--red);
 }
 
 .presentation-kanban-column.status-approval .presentation-kanban-column-head {
-  border-top: 3px solid #ea580c;
+  border-top: 2px solid #ea580c;
 }
 
 .presentation-kanban-column.status-pending .presentation-kanban-column-head {
-  border-top: 3px solid #dc2626;
+  border-top: 2px solid #dc2626;
 }
 
 .presentation-kanban-column.status-other .presentation-kanban-column-head {
-  border-top: 3px solid #64748b;
+  border-top: 2px solid #64748b;
 }
 
 .presentation-kanban-column.status-completed .presentation-kanban-column-count {
@@ -7629,8 +7652,8 @@ body.view-focus .dashboard-layout {
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  gap: 0.85rem;
-  padding: 0.85rem;
+  gap: 0.4rem;
+  padding: 0.45rem;
   min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
@@ -7639,7 +7662,7 @@ body.view-focus .dashboard-layout {
 }
 
 .presentation-kanban-column-body::-webkit-scrollbar {
-  width: 8px;
+  width: 6px;
 }
 
 .presentation-kanban-column-body::-webkit-scrollbar-track {
@@ -7654,10 +7677,10 @@ body.view-focus .dashboard-layout {
 }
 
 .presentation-kanban-empty {
-  padding: 2rem 0.85rem;
+  padding: 1.25rem 0.55rem;
   text-align: center;
   color: var(--muted);
-  font-size: 0.85rem;
+  font-size: 0.78rem;
 }
 
 .presentation-empty {
@@ -7690,16 +7713,16 @@ body.view-focus .dashboard-layout {
 .presentation-card {
   display: flex;
   flex-direction: column;
-  gap: 0.85rem;
+  gap: 0.28rem;
   flex: 0 0 auto;
   height: auto;
-  min-height: min-content;
-  padding: 1.1rem 1.15rem 1.15rem;
+  min-height: 0;
+  padding: 0.45rem 0.55rem 0.5rem;
   border: 1px solid var(--line);
-  border-radius: var(--radius-md);
+  border-radius: 8px;
   background: var(--panel);
-  box-shadow: var(--shadow-soft);
-  border-top: 3px solid var(--line-strong);
+  box-shadow: none;
+  border-top: 2px solid var(--line-strong);
   overflow: hidden;
 }
 
@@ -7709,215 +7732,140 @@ body.view-focus .dashboard-layout {
 .presentation-card.status-blocked { border-top-color: var(--red); }
 .presentation-card.status-approval { border-top-color: var(--cyan); }
 
-.presentation-card-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 0.65rem;
+.presentation-card-title {
+  margin: 0;
+  font-size: 0.82rem;
+  font-weight: 700;
+  line-height: 1.25;
+  letter-spacing: -0.015em;
+  color: var(--ink);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  word-break: break-word;
 }
 
-.presentation-card-kicker {
+.presentation-card-meta {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 0.35rem;
+  gap: 0.2rem 0.3rem;
   min-width: 0;
 }
 
-.presentation-slide-index {
-  font-size: 0.72rem;
+.presentation-id-chip {
+  font-size: 0.62rem;
   font-weight: 700;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.04em;
   color: var(--muted-light);
   font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
 }
 
 .presentation-type {
-  font-size: 0.68rem;
+  font-size: 0.58rem;
   font-weight: 650;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.03em;
   text-transform: uppercase;
   color: var(--ink-secondary);
   background: var(--soft);
   border: 1px solid var(--line);
   border-radius: 999px;
-  padding: 0.12rem 0.45rem;
+  padding: 0.05rem 0.32rem;
+  line-height: 1.2;
 }
 
-.presentation-card .priority-pill {
-  font-size: 0.68rem;
-  min-height: 1.35rem;
-  padding: 0.1rem 0.45rem;
-}
-
-.presentation-card-title {
-  margin: 0;
-  font-size: 1.05rem;
-  font-weight: 700;
-  line-height: 1.35;
-  letter-spacing: -0.02em;
-  color: var(--ink);
-}
-
-.presentation-card-meta {
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  gap: 0.55rem;
-}
-
-.presentation-card-meta-primary {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.5rem 0.75rem;
+.presentation-card .priority-pill,
+.presentation-card .status-pill {
+  font-size: 0.58rem;
+  min-height: 1.05rem;
+  padding: 0 0.32rem;
+  line-height: 1.15;
 }
 
 .presentation-card .owner-chip {
-  gap: 0.45rem;
-  font-size: 0.82rem;
+  gap: 0.25rem;
+  font-size: 0.68rem;
   font-weight: 600;
   color: var(--ink-secondary);
   min-width: 0;
+  max-width: 100%;
 }
 
 .presentation-card .owner-avatar {
-  width: 26px;
-  height: 26px;
-  font-size: 0.68rem;
+  width: 16px;
+  height: 16px;
+  font-size: 0.52rem;
 }
 
 .presentation-card .owner-chip-name {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  max-width: 9.5rem;
+  max-width: 6.5rem;
 }
 
 .presentation-milestone {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 0.75rem;
-  padding: 0.4rem 0.55rem;
-  border-radius: 6px;
-  background: var(--soft);
-  border: 1px solid var(--line);
+  display: block;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  border-radius: 0;
 }
 
-.presentation-milestone-label {
-  font-size: 0.68rem;
-  font-weight: 650;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+.presentation-milestone-line {
+  display: block;
+  font-size: 0.66rem;
+  font-weight: 600;
+  line-height: 1.2;
   color: var(--muted);
-}
-
-.presentation-milestone-date {
-  font-size: 0.84rem;
-  font-weight: 650;
-  color: var(--ink-secondary);
   font-variant-numeric: tabular-nums;
-}
-
-.presentation-card-remarks-wrap {
-  position: relative;
-  max-height: 4.7em;
+  white-space: nowrap;
   overflow: hidden;
-}
-
-.presentation-card-remarks-wrap:not(.is-empty)::after {
-  content: "";
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  height: 1.35em;
-  pointer-events: none;
-  background: linear-gradient(to bottom, rgba(255, 255, 255, 0), var(--panel));
-}
-
-.presentation-card-remarks-wrap.is-empty {
-  max-height: none;
+  text-overflow: ellipsis;
 }
 
 .presentation-card-remarks {
   margin: 0;
   color: var(--ink-secondary);
-  font-size: 0.86rem;
-  line-height: 1.45;
-  white-space: pre-wrap;
+  font-size: 0.7rem;
+  line-height: 1.3;
+  white-space: normal;
   display: -webkit-box;
-  -webkit-line-clamp: 3;
+  -webkit-line-clamp: 1;
   -webkit-box-orient: vertical;
   overflow: hidden;
-}
-
-.presentation-card-remarks-wrap.is-empty .presentation-card-remarks {
-  -webkit-line-clamp: unset;
-  display: block;
+  word-break: break-word;
 }
 
 .presentation-card-attachments {
-  margin-top: auto;
-  padding-top: 0.55rem;
-  border-top: 1px solid var(--line);
+  margin-top: 0.05rem;
+  padding-top: 0;
+  border-top: 0;
 }
 
-.presentation-attachments-label {
-  display: block;
-  margin-bottom: 0.4rem;
-  font-size: 0.66rem;
-  font-weight: 650;
-  letter-spacing: 0.07em;
-  text-transform: uppercase;
-  color: var(--muted);
-}
-
-.presentation-thumbs {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.4rem;
-}
-
-.presentation-thumb,
-.presentation-thumb-more {
-  width: 56px;
-  height: 42px;
-  padding: 0;
+.presentation-files-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.15rem;
+  padding: 0 0.4rem;
   border: 1px solid var(--line);
-  border-radius: 5px;
+  border-radius: 999px;
   background: var(--soft);
-  overflow: hidden;
-  cursor: pointer;
-}
-
-.presentation-thumb:hover,
-.presentation-thumb-more:hover {
-  border-color: var(--blue);
-}
-
-.presentation-thumb img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  display: block;
-}
-
-.presentation-thumb-fallback,
-.presentation-thumb-more {
-  display: grid;
-  place-items: center;
-  font-size: 0.68rem;
-  font-weight: 700;
   color: var(--ink-secondary);
+  font-size: 0.6rem;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  line-height: 1;
 }
 
-.presentation-no-attachments,
-.presentation-attachment-fallback {
-  margin: 0;
-  font-size: 0.8rem;
-  color: var(--muted);
+.presentation-files-chip:hover {
+  border-color: var(--blue);
+  color: var(--blue);
+  background: var(--blue-soft);
 }
 
 .ticket-presentation-pin-button {
@@ -8036,7 +7984,7 @@ body.present-mode .tab-panel[data-panel="presentation"].active {
 body.present-mode .presentation-board {
   flex: 1;
   min-height: 0;
-  gap: 1.1rem;
+  gap: 0.55rem;
   padding: 0;
   overflow: hidden;
 }
@@ -8052,28 +8000,19 @@ body.present-mode .presentation-hero {
 }
 
 body.present-mode .presentation-hero-toolbar {
-  padding: 0.85rem clamp(1.25rem, 3.5vw, 2.75rem);
+  padding: 0.45rem clamp(1rem, 3vw, 2.25rem);
 }
 
 body.present-mode .presentation-hero-collapsible {
-  padding: 1.25rem clamp(1.25rem, 3.5vw, 2.75rem) 1.25rem;
+  padding: 0.4rem clamp(1rem, 3vw, 2.25rem) 0.5rem;
 }
 
 body.present-mode .presentation-hero.is-collapsed .presentation-hero-toggle {
   display: none;
 }
 
-body.present-mode .presentation-eyebrow {
-  font-size: 0.74rem;
-  letter-spacing: 0.16em;
-}
-
-body.present-mode .presentation-hero-main h2 {
-  font-size: clamp(1.75rem, 3vw, 2.35rem);
-}
-
-body.present-mode .presentation-subtitle {
-  display: none;
+body.present-mode .presentation-hero-title {
+  font-size: 1.15rem;
 }
 
 body.present-mode .presentation-action-secondary,
@@ -8083,27 +8022,37 @@ body.present-mode .presentation-filters {
 }
 
 body.present-mode .presentation-summary {
-  margin-top: 0.85rem;
-  font-size: 0.88rem;
+  margin: 0;
+  font-size: 0.8rem;
   color: #cbd5e1;
+}
+
+@media (min-width: 721px) {
+  body.present-mode .presentation-hero:not(.is-collapsed) {
+    min-height: 44px;
+  }
+
+  body.present-mode .presentation-hero:not(.is-collapsed) .presentation-hero-toolbar {
+    padding: 0;
+  }
 }
 
 body.present-mode .presentation-deck {
   flex: 1;
   min-height: 0;
-  padding: 0 clamp(1.25rem, 3.5vw, 2.75rem) 1rem;
+  padding: 0 clamp(0.85rem, 2.5vw, 1.75rem) 0.65rem;
 }
 
 body.present-mode .presentation-kanban-columns {
-  gap: 1.25rem;
-  padding-bottom: 0.5rem;
+  gap: 0.75rem;
+  padding-bottom: 0.35rem;
   min-height: 0;
 }
 
 body.present-mode .presentation-kanban-column {
   flex: 1 1 0;
   width: auto;
-  min-width: min(300px, 78vw);
+  min-width: min(248px, 72vw);
   max-width: none;
   min-height: 0;
   max-height: none;
@@ -8112,22 +8061,22 @@ body.present-mode .presentation-kanban-column {
 }
 
 body.present-mode .presentation-kanban-column-head {
-  padding: 1rem 1.1rem;
+  padding: 0.55rem 0.7rem;
 }
 
 body.present-mode .presentation-kanban-column-head h3 {
-  font-size: 0.95rem;
-}
-
-body.present-mode .presentation-kanban-column-count {
-  min-width: 1.85rem;
-  height: 1.85rem;
   font-size: 0.82rem;
 }
 
+body.present-mode .presentation-kanban-column-count {
+  min-width: 1.5rem;
+  height: 1.5rem;
+  font-size: 0.72rem;
+}
+
 body.present-mode .presentation-kanban-column-body {
-  gap: 1rem;
-  padding: 1rem;
+  gap: 0.45rem;
+  padding: 0.5rem;
   min-height: 0;
   overflow-y: auto;
 }
@@ -8135,9 +8084,9 @@ body.present-mode .presentation-kanban-column-body {
 body.present-mode .presentation-card {
   flex: 0 0 auto;
   height: auto;
-  min-height: min-content;
-  gap: 0.95rem;
-  padding: 1.25rem 1.3rem 1.3rem;
+  min-height: 0;
+  gap: 0.32rem;
+  padding: 0.55rem 0.65rem 0.6rem;
 }
 
 body.present-mode .presentation-card-pin {
@@ -8145,83 +8094,82 @@ body.present-mode .presentation-card-pin {
 }
 
 body.present-mode .presentation-card-title {
-  font-size: 1.22rem;
-  line-height: 1.3;
-}
-
-body.present-mode .presentation-milestone-date {
   font-size: 0.92rem;
+  line-height: 1.28;
+  -webkit-line-clamp: 2;
 }
 
-body.present-mode .presentation-card-remarks-wrap {
-  max-height: 7.1em;
+body.present-mode .presentation-card .priority-pill,
+body.present-mode .presentation-card .status-pill {
+  font-size: 0.62rem;
+  min-height: 1.15rem;
+}
+
+body.present-mode .presentation-card .owner-chip {
+  font-size: 0.74rem;
+}
+
+body.present-mode .presentation-card .owner-avatar {
+  width: 18px;
+  height: 18px;
+  font-size: 0.56rem;
+}
+
+body.present-mode .presentation-milestone-line {
+  font-size: 0.72rem;
 }
 
 body.present-mode .presentation-card-remarks {
-  -webkit-line-clamp: 5;
-  font-size: 0.95rem;
+  -webkit-line-clamp: 2;
+  font-size: 0.76rem;
+  line-height: 1.35;
 }
 
-body.present-mode .presentation-thumb,
-body.present-mode .presentation-thumb-more {
-  width: 64px;
-  height: 48px;
+body.present-mode .presentation-files-chip {
+  min-height: 1.3rem;
+  font-size: 0.66rem;
+  padding: 0 0.48rem;
 }
 
 @media (max-width: 900px) {
   .presentation-kanban-column {
-    flex: 0 0 min(300px, 80vw);
-    width: min(300px, 80vw);
-    min-width: min(300px, 80vw);
-    max-width: min(320px, 86vw);
+    flex: 0 0 min(248px, 78vw);
+    width: min(248px, 78vw);
+    min-width: min(248px, 78vw);
+    max-width: min(268px, 84vw);
     min-height: 0;
   }
 
   body.present-mode .presentation-kanban-column {
-    flex: 0 0 min(300px, 82vw);
-    min-width: min(300px, 82vw);
+    flex: 0 0 min(248px, 80vw);
+    min-width: min(248px, 80vw);
   }
 }
 
 @media (max-width: 720px) {
   .presentation-hero-toolbar {
-    padding: 0.55rem 0.75rem;
+    padding: 0.4rem 0.7rem;
   }
 
   .presentation-hero.is-collapsed .presentation-hero-toolbar {
     padding: 0.4rem 0.7rem;
   }
 
-  .presentation-hero-toolbar-label-full {
-    display: none;
-  }
-
-  .presentation-hero-toolbar-label-short {
-    display: inline;
-  }
-
   .presentation-hero-collapsible {
-    padding: 0.85rem 1rem 0.9rem;
+    padding: 0.45rem 0.7rem 0.55rem;
+    gap: 0.4rem 0.55rem;
   }
 
-  .presentation-hero-body {
-    align-items: stretch;
+  .presentation-hero-title {
+    font-size: 0.98rem;
   }
 
-  .presentation-eyebrow {
-    display: none;
+  .presentation-filters {
+    flex: 1 1 100%;
   }
 
-  .presentation-hero-main h2 {
-    font-size: 1.25rem;
-  }
-
-  .presentation-subtitle:not(.presentation-subtitle-short) {
-    display: none;
-  }
-
-  .presentation-subtitle-short {
-    display: block;
+  .presentation-summary {
+    white-space: normal;
   }
 
   .presentation-hero-toolbar-actions {
@@ -8245,7 +8193,7 @@ body.present-mode .presentation-thumb-more {
   }
 
   .presentation-card .owner-chip-name {
-    max-width: 7.5rem;
+    max-width: 5.5rem;
   }
 }
 
@@ -8258,9 +8206,5 @@ body.present-mode .presentation-thumb-more {
   .presentation-card {
     break-inside: avoid;
     box-shadow: none;
-  }
-
-  .presentation-card-remarks-wrap:not(.is-empty)::after {
-    display: none;
   }
 }
