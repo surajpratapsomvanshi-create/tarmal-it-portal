@@ -8157,35 +8157,36 @@ body.presentation-card-dragging .presentation-kanban-column-body {
   word-break: break-word;
 }
 
-.presentation-card-attachments,
-.presentation-card-actions {
-  margin-top: 0.05rem;
-  padding-top: 0;
-  border-top: 0;
-}
-
-.presentation-card-actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.28rem;
-}
-
+.presentation-edit-chip,
 .presentation-files-chip {
   display: inline-flex;
   align-items: center;
-  gap: 0.28rem;
-  min-height: 1.15rem;
-  padding: 0 0.45rem 0 0.35rem;
+  justify-content: center;
+  gap: 0.22rem;
+  min-height: 1.05rem;
+  padding: 0 0.32rem;
   border: 1px solid var(--line);
   border-radius: 999px;
-  background: var(--soft);
+  background: transparent;
   color: var(--ink-secondary);
-  font-size: 0.6rem;
+  font-size: 0.58rem;
   font-weight: 650;
   letter-spacing: 0.01em;
   cursor: pointer;
-  line-height: 1;
+  line-height: 1.15;
+  flex-shrink: 0;
+}
+
+.presentation-files-chip {
+  padding: 0 0.35rem 0 0.28rem;
+  background: var(--soft);
+}
+
+.presentation-edit-chip:hover,
+.presentation-files-chip:hover {
+  border-color: var(--blue);
+  color: var(--blue);
+  background: var(--blue-soft);
 }
 
 .presentation-files-icon {
@@ -8196,12 +8197,6 @@ body.presentation-card-dragging .presentation-kanban-column-body {
   opacity: 0.85;
   -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%23000' d='M16.5 6.5v9.25a4.25 4.25 0 1 1-8.5 0V6.75a2.75 2.75 0 1 1 5.5 0v8.5a1.25 1.25 0 1 1-2.5 0V7.5h-1.5v7.75a2.75 2.75 0 1 0 5.5 0v-8.5a4.25 4.25 0 1 0-8.5 0v9.25a5.75 5.75 0 1 0 11.5 0V6.5h-1.5z'/%3E%3C/svg%3E") center / contain no-repeat;
   mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%23000' d='M16.5 6.5v9.25a4.25 4.25 0 1 1-8.5 0V6.75a2.75 2.75 0 1 1 5.5 0v8.5a1.25 1.25 0 1 1-2.5 0V7.5h-1.5v7.75a2.75 2.75 0 1 0 5.5 0v-8.5a4.25 4.25 0 1 0-8.5 0v9.25a5.75 5.75 0 1 0 11.5 0V6.5h-1.5z'/%3E%3C/svg%3E") center / contain no-repeat;
-}
-
-.presentation-files-chip:hover {
-  border-color: var(--blue);
-  color: var(--blue);
-  background: var(--blue-soft);
 }
 
 .ticket-presentation-pin-button {
@@ -8507,10 +8502,11 @@ body.present-mode .presentation-card-remarks {
   line-height: 1.35;
 }
 
+body.present-mode .presentation-edit-chip,
 body.present-mode .presentation-files-chip {
-  min-height: 1.3rem;
-  font-size: 0.66rem;
-  padding: 0 0.48rem;
+  min-height: 1.15rem;
+  font-size: 0.62rem;
+  padding: 0 0.4rem;
 }
 
 @media (max-width: 900px) {
@@ -8529,8 +8525,14 @@ body.present-mode .presentation-files-chip {
 }
 
 @media (max-width: 720px) {
+  /* Top expand bar already shows the page title — avoid a second "Presentation". */
+  .presentation-hero-toolbar-label {
+    display: none;
+  }
+
   .presentation-hero-toolbar {
     padding: 0.35rem 0.65rem;
+    justify-content: flex-end;
   }
 
   .presentation-hero.is-collapsed .presentation-hero-toolbar {

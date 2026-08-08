@@ -6573,14 +6573,30 @@ function bindPresentationCardDragDrop(root) {
   });
 }
 
+function bindPresentationCardEditButtons(root) {
+  if (!root || !canEditTickets()) return;
+  root.querySelectorAll(".presentation-edit-chip").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      openTicketEditor(button.dataset.sheetRow);
+    });
+  });
+}
+
 function renderPresentationCard(ticket, index) {
   const remarks = getTicketRemarksText(ticket);
   const milestone = formatDate(ticket.Milestone) || "—";
   const priorityClass = normalizePriority(ticket.Priority) === "80" ? "high" : "low";
   const attachHtml = renderPresentationAttachmentThumbs(ticket);
   const idLabel = String(index + 1).padStart(2, "0");
-  const actionsHtml = attachHtml
-    ? `<div class="presentation-card-actions">${attachHtml}</div>`
+  const editHtml = canEditTickets() && ticket.sheetRow
+    ? `<button
+      class="presentation-edit-chip"
+      type="button"
+      data-sheet-row="${ticket.sheetRow}"
+      aria-label="Edit project"
+      title="Edit project"
+    >Edit</button>`
     : "";
 
   return `
@@ -6599,6 +6615,8 @@ function renderPresentationCard(ticket, index) {
           <span class="owner-avatar">${escapeHtml(ownerInitials(ticket.Owner))}</span>
           <span class="owner-chip-name">${escapeHtml(ticket.Owner || "No owner")}</span>
         </span>
+        ${editHtml}
+        ${attachHtml}
       </div>
       <p class="presentation-milestone">
         <span class="presentation-milestone-line">Milestone · ${escapeHtml(milestone)}</span>
@@ -6606,7 +6624,6 @@ function renderPresentationCard(ticket, index) {
       ${remarks
         ? `<p class="presentation-card-remarks">${escapeHtml(remarks)}</p>`
         : ""}
-      ${actionsHtml}
     </article>
   `;
 }
@@ -6704,6 +6721,7 @@ function renderPresentationView(tickets = getValidTickets()) {
     </div>
   `;
   bindScreenshotPreviewButtons(presentationDeck);
+  bindPresentationCardEditButtons(presentationDeck);
   bindPresentationCardDragDrop(presentationDeck);
 }
 
