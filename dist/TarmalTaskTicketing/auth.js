@@ -489,14 +489,31 @@ const Auth = {
     const retries = Math.max(0, Number.isFinite(Number(options.retries)) ? Number(options.retries) : 2);
     const backoffMs = [400, 1000, 1800];
 
-    const fetchOnce = async () => {
-      let payload;
-      try {
-        payload = await this.fetchUsersViaHttp_(timeoutMs);
-      } catch (httpError) {
-        // CORS / opaque gateway failures: fall back to JSONP.
-        payload = await this.fetchUsersViaJsonp_(timeoutMs);
+    const firstSuccessful_ = (promises) => new Promise((resolve, reject) => {
+      let pending = promises.length;
+      let lastError = null;
+      if (!pending) {
+        reject(new Error("Could not load users."));
+        return;
       }
+      promises.forEach((promise) => {
+        Promise.resolve(promise).then(resolve, (error) => {
+          lastError = error;
+          pending -= 1;
+          if (pending === 0) {
+            reject(lastError || new Error("Could not load users."));
+          }
+        });
+      });
+    });
+
+    const fetchOnce = async () => {
+      // Race HTTP + JSONP so a hanging CORS/fetch path cannot burn the full
+      // timeout before JSONP gets a chance (common on GitHub Pages).
+      const payload = await firstSuccessful_([
+        this.fetchUsersViaHttp_(timeoutMs),
+        this.fetchUsersViaJsonp_(timeoutMs)
+      ]);
       return this.applyRemoteUsersPayload_(payload, { deferSync });
     };
 
