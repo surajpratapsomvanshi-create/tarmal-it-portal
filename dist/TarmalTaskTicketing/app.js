@@ -44,6 +44,9 @@ const rows = document.querySelector("#ticketRows");
 const syncText = document.querySelector("#syncText");
 const statusDot = document.querySelector("#statusDot");
 const syncCard = document.querySelector("#syncCard");
+const topbarExpandStatus = document.querySelector("#topbarExpandStatus");
+const topbarExpandStatusDot = document.querySelector("#topbarExpandStatusDot");
+const topbarExpandSyncText = document.querySelector("#topbarExpandSyncText");
 const tabButtons = document.querySelectorAll(".tab-button");
 const tabPanels = document.querySelectorAll(".tab-panel");
 const totalCount = document.querySelector("#totalCount");
@@ -155,6 +158,7 @@ const kanbanShowCompleted = document.querySelector("#kanbanShowCompleted");
 const kanbanFilterSummary = document.querySelector("#kanbanFilterSummary");
 const toggleSidebarButton = document.querySelector("#toggleSidebarButton");
 const expandSidebarButton = document.querySelector("#expandSidebarButton");
+const expandSidebarButtonCompact = document.querySelector("#expandSidebarButtonCompact");
 const collapseTopbarButton = document.querySelector("#collapseTopbarButton");
 const expandTopbarButton = document.querySelector("#expandTopbarButton");
 const topbarExpandBar = document.querySelector("#topbarExpandBar");
@@ -3818,9 +3822,13 @@ function shortenStatusMessageForMobile(message) {
 
 function setStatus(kind, message) {
   const display = isMobileNavLayout() ? shortenStatusMessageForMobile(message) : message;
-  statusDot.className = `status-dot ${kind || ""}`.trim();
-  syncText.textContent = display;
+  const dotClass = `status-dot ${kind || ""}`.trim();
+  if (statusDot) statusDot.className = dotClass;
+  if (syncText) syncText.textContent = display;
   if (syncCard) syncCard.title = message || "";
+  if (topbarExpandStatusDot) topbarExpandStatusDot.className = dotClass;
+  if (topbarExpandSyncText) topbarExpandSyncText.textContent = display;
+  if (topbarExpandStatus) topbarExpandStatus.title = message || "";
 }
 
 function setActiveTab(tabName, options = {}) {
@@ -3923,9 +3931,11 @@ function initChromeCollapse() {
     setSidebarCollapsed(true);
   });
 
-  expandSidebarButton?.addEventListener("click", () => {
+  const openMobileSidebar = () => {
     setSidebarCollapsed(false);
-  });
+  };
+  expandSidebarButton?.addEventListener("click", openMobileSidebar);
+  expandSidebarButtonCompact?.addEventListener("click", openMobileSidebar);
 
   mobileNavBackdrop?.addEventListener("click", () => {
     setSidebarCollapsed(true);
@@ -6328,16 +6338,6 @@ function renderPresentationAttachmentThumbs(ticket) {
   `;
 }
 
-function bindPresentationCardEditButtons(root) {
-  if (!root || !canEditTickets()) return;
-  root.querySelectorAll(".presentation-edit-chip").forEach((button) => {
-    button.addEventListener("click", (event) => {
-      event.stopPropagation();
-      openTicketEditor(button.dataset.sheetRow);
-    });
-  });
-}
-
 const PRESENTATION_LONG_PRESS_MS = 4000;
 let presentationDragMoveInFlight = false;
 
@@ -6579,17 +6579,8 @@ function renderPresentationCard(ticket, index) {
   const priorityClass = normalizePriority(ticket.Priority) === "80" ? "high" : "low";
   const attachHtml = renderPresentationAttachmentThumbs(ticket);
   const idLabel = String(index + 1).padStart(2, "0");
-  const editHtml = canEditTickets() && ticket.sheetRow
-    ? `<button
-      class="presentation-edit-chip"
-      type="button"
-      data-sheet-row="${ticket.sheetRow}"
-      aria-label="Edit project"
-      title="Edit project"
-    >Edit</button>`
-    : "";
-  const actionsHtml = (editHtml || attachHtml)
-    ? `<div class="presentation-card-actions">${editHtml}${attachHtml}</div>`
+  const actionsHtml = attachHtml
+    ? `<div class="presentation-card-actions">${attachHtml}</div>`
     : "";
 
   return `
@@ -6713,7 +6704,6 @@ function renderPresentationView(tickets = getValidTickets()) {
     </div>
   `;
   bindScreenshotPreviewButtons(presentationDeck);
-  bindPresentationCardEditButtons(presentationDeck);
   bindPresentationCardDragDrop(presentationDeck);
 }
 

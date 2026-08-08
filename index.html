@@ -6,11 +6,11 @@
     <title>Tarmal IT Portal</title>
     <link rel="icon" href="./assets/tarmal-mark.png?v=1" type="image/png">
     <link rel="apple-touch-icon" href="./assets/apple-touch-icon.png?v=1">
-    <link rel="stylesheet" href="./styles.css?v=164">
+    <link rel="stylesheet" href="./styles.css?v=167">
     <!-- auth stays blocking so requireLogin runs before app chrome paints -->
     <script src="./auth.js?v=22"></script>
     <!-- Defer main bundles so HTML can parse while ~210KB+ app.js downloads -->
-    <script src="./app.js?v=164" defer></script>
+    <script src="./app.js?v=167" defer></script>
     <script src="./assets.js?v=13" defer></script>
     <script src="./documents.js?v=11" defer></script>
     <script src="./procurement.js?v=5" defer></script>
@@ -101,7 +101,14 @@
         </div>
 
         <div class="topbar-expand-bar" id="topbarExpandBar" hidden>
+          <button class="panel-icon-btn topbar-expand-menu-btn" id="expandSidebarButtonCompact" type="button" aria-label="Open menu" title="Open menu">
+            <span class="panel-icon-glyph panel-icon-glyph-menu" aria-hidden="true"></span>
+          </button>
           <span class="topbar-expand-title" id="topbarExpandPageTitle">Dashboard</span>
+          <div class="sync-card topbar-expand-status" id="topbarExpandStatus" role="status" aria-live="polite">
+            <span class="status-dot" id="topbarExpandStatusDot"></span>
+            <span id="topbarExpandSyncText">Sync not configured</span>
+          </div>
           <button class="topbar-expand-btn" id="expandTopbarButton" type="button" aria-controls="siteTopbar" aria-expanded="false" title="Show header">
             <span class="panel-icon-glyph panel-icon-glyph-expand" aria-hidden="true"></span>
             <span class="topbar-expand-label-full">Show header</span>

@@ -6344,10 +6344,9 @@ body.view-focus .dashboard-layout {
   .topbar-expand-bar {
     display: none;
     align-items: center;
-    justify-content: space-between;
     gap: 8px;
     min-height: 36px;
-    padding: 4px 8px 4px 10px;
+    padding: 4px 8px 4px 6px;
     color: #f8fafc;
     background: var(--navy);
     border: 1px solid rgba(255, 255, 255, 0.08);
@@ -6362,6 +6361,52 @@ body.view-focus .dashboard-layout {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    min-width: 0;
+    flex: 0 1 auto;
+  }
+
+  .topbar-expand-menu-btn {
+    width: 30px;
+    height: 30px;
+    border-color: rgba(255, 255, 255, 0.18);
+    background: rgba(255, 255, 255, 0.1);
+    color: #f8fafc;
+  }
+
+  .topbar-expand-menu-btn:hover,
+  .topbar-expand-menu-btn:focus-visible {
+    background: rgba(255, 255, 255, 0.16);
+    border-color: rgba(255, 255, 255, 0.28);
+    color: #fff;
+  }
+
+  .topbar-expand-status {
+    display: none;
+    align-items: center;
+    gap: 6px;
+    flex: 1 1 auto;
+    justify-content: flex-end;
+    min-width: 0;
+    max-width: 48%;
+    min-height: 0;
+    margin-left: auto;
+    padding: 3px 8px;
+    border-radius: 6px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: rgba(255, 255, 255, 0.08);
+    color: #e2e8f0;
+    font-size: 11px;
+    font-weight: 500;
+    line-height: 1.25;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .topbar-expand-status #topbarExpandSyncText {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
     min-width: 0;
   }
 
@@ -6392,31 +6437,24 @@ body.view-focus .dashboard-layout {
     display: none;
   }
 
+  /* One compact chrome row: [☰] Title · status · Header */
   body.topbar-collapsed .topbar-expand-bar {
     display: flex;
     order: 1;
   }
 
-  body.topbar-collapsed .sidebar-expand-bar {
-    order: 2;
+  body.topbar-collapsed .topbar-expand-status {
+    display: inline-flex;
+  }
+
+  body.topbar-collapsed .sidebar-expand-bar,
+  body.sidebar-collapsed.topbar-collapsed .sidebar-expand-bar {
+    display: none !important;
   }
 
   body.topbar-collapsed .topbar-stack,
   body.sidebar-collapsed.topbar-collapsed .topbar-stack {
-    display: flex;
-    order: 3;
-    padding: 0;
-    gap: 0;
-    background: transparent;
-    border: 0;
-    box-shadow: none;
-  }
-
-  body.topbar-collapsed .topbar-status-strip {
-    color: var(--ink-secondary);
-    background: var(--panel);
-    border: 1px solid var(--line);
-    border-radius: 6px;
+    display: none;
   }
 
   body.topbar-collapsed .app-main > .tab-panel {
@@ -6429,7 +6467,8 @@ body.view-focus .dashboard-layout {
     display: flex;
   }
 
-  body:not(.sidebar-collapsed) .sidebar-expand-bar {
+  body:not(.sidebar-collapsed) .sidebar-expand-bar,
+  body.topbar-collapsed .sidebar-expand-bar {
     display: none;
   }
 
@@ -6504,10 +6543,6 @@ body.view-focus .dashboard-layout {
 
   body.view-focus .topbar-stack {
     padding: 8px 10px;
-  }
-
-  body.view-focus.topbar-collapsed .topbar-stack {
-    padding: 4px 8px;
   }
 
   body.view-focus .topbar h1,
@@ -8007,11 +8042,12 @@ body.presentation-card-dragging .presentation-kanban-column-body {
   50% { outline-color: rgba(29, 78, 216, 0.85); }
 }
 
-.presentation-card.status-progress { border-top-color: var(--blue); }
 .presentation-card.status-completed { border-top-color: var(--green); }
-.presentation-card.status-pending { border-top-color: var(--amber); }
+.presentation-card.status-progress { border-top-color: #d97706; }
 .presentation-card.status-blocked { border-top-color: var(--red); }
-.presentation-card.status-approval { border-top-color: var(--cyan); }
+.presentation-card.status-approval { border-top-color: #ea580c; }
+.presentation-card.status-pending { border-top-color: #dc2626; }
+.presentation-card.status-other { border-top-color: #64748b; }
 
 .presentation-card-title {
   margin: 0;
@@ -8135,29 +8171,6 @@ body.presentation-card-dragging .presentation-kanban-column-body {
   gap: 0.28rem;
 }
 
-.presentation-edit-chip {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 1.15rem;
-  padding: 0 0.45rem;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  background: transparent;
-  color: var(--ink-secondary);
-  font-size: 0.6rem;
-  font-weight: 650;
-  letter-spacing: 0.01em;
-  cursor: pointer;
-  line-height: 1;
-}
-
-.presentation-edit-chip:hover {
-  border-color: var(--blue);
-  color: var(--blue);
-  background: var(--blue-soft);
-}
-
 .presentation-files-chip {
   display: inline-flex;
   align-items: center;
@@ -8264,7 +8277,8 @@ body.present-mode .app-sidebar,
 body.present-mode .topbar-stack,
 body.present-mode .topbar,
 body.present-mode .topbar-expand-bar,
-body.present-mode .sidebar-expand-bar {
+body.present-mode .sidebar-expand-bar,
+body.present-mode .topbar-expand-status {
   display: none !important;
 }
 
@@ -8493,8 +8507,7 @@ body.present-mode .presentation-card-remarks {
   line-height: 1.35;
 }
 
-body.present-mode .presentation-files-chip,
-body.present-mode .presentation-edit-chip {
+body.present-mode .presentation-files-chip {
   min-height: 1.3rem;
   font-size: 0.66rem;
   padding: 0 0.48rem;
