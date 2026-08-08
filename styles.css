@@ -8073,10 +8073,41 @@ body.view-focus .dashboard-layout {
   word-break: break-word;
 }
 
-.presentation-card-attachments {
+.presentation-card-attachments,
+.presentation-card-actions {
   margin-top: 0.05rem;
   padding-top: 0;
   border-top: 0;
+}
+
+.presentation-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.28rem;
+}
+
+.presentation-edit-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 1.15rem;
+  padding: 0 0.45rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--ink-secondary);
+  font-size: 0.6rem;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.presentation-edit-chip:hover {
+  border-color: var(--blue);
+  color: var(--blue);
+  background: var(--blue-soft);
 }
 
 .presentation-files-chip {
@@ -8244,41 +8275,85 @@ body.present-mode .presentation-hero {
   padding: 0;
 }
 
-body.present-mode .presentation-hero-toolbar {
-  padding: 0.45rem clamp(1rem, 3vw, 2.25rem);
+/* Present top bar: Title | Type | Time | Present/Exit | Hide | count — one row */
+body.present-mode .presentation-hero:not(.is-collapsed) {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 0.25rem 0.4rem;
+  padding: 0.2rem clamp(0.85rem, 2.5vw, 1.75rem);
+  min-height: 40px;
 }
 
-body.present-mode .presentation-hero-collapsible {
-  padding: 0.4rem clamp(1rem, 3vw, 2.25rem) 0.5rem;
-}
-
-body.present-mode .presentation-hero.is-collapsed .presentation-hero-toggle {
+body.present-mode .presentation-hero:not(.is-collapsed) .presentation-hero-glow {
   display: none;
 }
 
-body.present-mode .presentation-hero-title {
-  font-size: 1.15rem;
+body.present-mode .presentation-hero:not(.is-collapsed) .presentation-hero-collapsible {
+  display: contents;
+}
+
+body.present-mode .presentation-hero:not(.is-collapsed) .presentation-hero-title {
+  order: 1;
+  font-size: 0.95rem;
+}
+
+body.present-mode .presentation-hero:not(.is-collapsed) .presentation-filters {
+  order: 2;
+  display: flex;
+  flex-wrap: nowrap;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+body.present-mode .presentation-hero:not(.is-collapsed) .presentation-hero-toolbar {
+  order: 3;
+  border-bottom: 0;
+  padding: 0;
+  min-height: 0;
+  gap: 0.3rem;
+  flex: 0 0 auto;
+}
+
+body.present-mode .presentation-hero:not(.is-collapsed) .presentation-hero-toolbar-label {
+  display: none;
+}
+
+body.present-mode .presentation-hero:not(.is-collapsed) .presentation-summary {
+  order: 4;
+}
+
+body.present-mode .presentation-hero:not(.is-collapsed) .presentation-hero-toolbar-actions .primary-button,
+body.present-mode .presentation-hero:not(.is-collapsed) .presentation-hero-toolbar-actions .secondary-button {
+  min-height: 26px;
+  padding: 0 8px;
+  font-size: 0.72rem;
+}
+
+body.present-mode .presentation-hero.is-collapsed .presentation-hero-toolbar {
+  padding: 0.35rem clamp(0.85rem, 2.5vw, 1.75rem);
 }
 
 body.present-mode .presentation-action-secondary,
-body.present-mode .presentation-action-divider,
-body.present-mode .presentation-filters {
+body.present-mode .presentation-action-divider {
   display: none;
 }
 
 body.present-mode .presentation-summary {
   margin: 0;
-  font-size: 0.8rem;
+  font-size: 0.72rem;
   color: #cbd5e1;
 }
 
-@media (min-width: 721px) {
+@media (max-width: 720px) {
   body.present-mode .presentation-hero:not(.is-collapsed) {
-    min-height: 44px;
+    flex-wrap: wrap;
+    padding: 0.35rem 0.75rem;
   }
 
-  body.present-mode .presentation-hero:not(.is-collapsed) .presentation-hero-toolbar {
-    padding: 0;
+  body.present-mode .presentation-hero:not(.is-collapsed) .presentation-filters {
+    flex: 1 1 100%;
+    order: 5;
   }
 }
 
@@ -8370,7 +8445,8 @@ body.present-mode .presentation-card-remarks {
   line-height: 1.35;
 }
 
-body.present-mode .presentation-files-chip {
+body.present-mode .presentation-files-chip,
+body.present-mode .presentation-edit-chip {
   min-height: 1.3rem;
   font-size: 0.66rem;
   padding: 0 0.48rem;

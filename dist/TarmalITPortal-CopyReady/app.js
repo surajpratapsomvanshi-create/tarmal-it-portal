@@ -4048,6 +4048,10 @@ function getStoredPresentationHeroCollapsedPreference() {
 }
 
 function syncPresentationHeroForViewport() {
+  if (document.body.classList.contains("present-mode")) {
+    // Keep Type/Time filters on the present top row unless the user hid them.
+    return;
+  }
   setPresentationHeroCollapsed(getStoredPresentationHeroCollapsedPreference(), { persist: false });
 }
 
@@ -6324,12 +6328,34 @@ function renderPresentationAttachmentThumbs(ticket) {
   `;
 }
 
+function bindPresentationCardEditButtons(root) {
+  if (!root || !canEditTickets()) return;
+  root.querySelectorAll(".presentation-edit-chip").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      openTicketEditor(button.dataset.sheetRow);
+    });
+  });
+}
+
 function renderPresentationCard(ticket, index) {
   const remarks = getTicketRemarksText(ticket);
   const milestone = formatDate(ticket.Milestone) || "—";
   const priorityClass = normalizePriority(ticket.Priority) === "80" ? "high" : "low";
   const attachHtml = renderPresentationAttachmentThumbs(ticket);
   const idLabel = String(index + 1).padStart(2, "0");
+  const editHtml = canEditTickets() && ticket.sheetRow
+    ? `<button
+      class="presentation-edit-chip"
+      type="button"
+      data-sheet-row="${ticket.sheetRow}"
+      aria-label="Edit project"
+      title="Edit project"
+    >Edit</button>`
+    : "";
+  const actionsHtml = (editHtml || attachHtml)
+    ? `<div class="presentation-card-actions">${editHtml}${attachHtml}</div>`
+    : "";
 
   return `
     <article class="presentation-card ${statusClass(ticket.Status)}" data-sheet-row="${ticket.sheetRow}">
@@ -6350,9 +6376,7 @@ function renderPresentationCard(ticket, index) {
       ${remarks
         ? `<p class="presentation-card-remarks">${escapeHtml(remarks)}</p>`
         : ""}
-      ${attachHtml
-        ? `<div class="presentation-card-attachments">${attachHtml}</div>`
-        : ""}
+      ${actionsHtml}
     </article>
   `;
 }
@@ -6445,6 +6469,7 @@ function renderPresentationView(tickets = getValidTickets()) {
     </div>
   `;
   bindScreenshotPreviewButtons(presentationDeck);
+  bindPresentationCardEditButtons(presentationDeck);
 }
 
 function setPresentMode(enabled, { syncFullscreen = true } = {}) {
@@ -6453,6 +6478,12 @@ function setPresentMode(enabled, { syncFullscreen = true } = {}) {
   document.body.classList.toggle("present-mode", on);
   if (enterPresentModeButton) enterPresentModeButton.hidden = on;
   if (exitPresentModeButton) exitPresentModeButton.hidden = !on;
+  // Present mode: keep Type/Time filters on the thin top row by default.
+  if (on) {
+    setPresentationHeroCollapsed(false, { persist: false });
+  } else if (wasOn) {
+    syncPresentationHeroForViewport();
+  }
   if (on && getActiveTabName() !== "presentation") {
     setActiveTab("presentation", { skipRender: true });
     renderPresentationView();
