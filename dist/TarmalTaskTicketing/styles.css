@@ -7017,28 +7017,27 @@ body.view-focus .dashboard-layout {
 .presentation-board {
   display: flex;
   flex-direction: column;
-  gap: 1.25rem;
-  padding: 0.25rem 0 1.5rem;
+  gap: 1.35rem;
+  padding: 0.15rem 0 1.5rem;
 }
 
 .presentation-hero {
   position: relative;
   overflow: hidden;
-  border: 1px solid var(--line);
+  border: 1px solid rgba(148, 163, 184, 0.28);
   border-radius: var(--radius-lg);
   background:
-    linear-gradient(135deg, rgba(15, 23, 42, 0.96), rgba(30, 41, 59, 0.92)),
-    var(--navy);
+    linear-gradient(118deg, #0b1220 0%, #152033 52%, #1a2740 100%);
   color: #f8fafc;
   box-shadow: var(--shadow);
-  padding: 1.35rem 1.5rem 1.15rem;
+  padding: 1.5rem 1.65rem 1.25rem;
 }
 
 .presentation-hero-glow {
   position: absolute;
-  inset: auto -20% -60% 35%;
-  height: 220px;
-  background: radial-gradient(circle, rgba(148, 163, 184, 0.28), transparent 70%);
+  inset: auto -12% -70% 40%;
+  height: 200px;
+  background: radial-gradient(circle, rgba(148, 163, 184, 0.16), transparent 68%);
   pointer-events: none;
 }
 
@@ -7049,67 +7048,113 @@ body.view-focus .dashboard-layout {
   flex-wrap: wrap;
   align-items: flex-end;
   justify-content: space-between;
-  gap: 1rem 1.5rem;
+  gap: 1.15rem 1.75rem;
 }
 
 .presentation-eyebrow {
-  margin: 0 0 0.35rem;
+  margin: 0 0 0.4rem;
   color: #94a3b8;
-  font-size: 0.72rem;
-  font-weight: 650;
-  letter-spacing: 0.08em;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
 }
 
 .presentation-hero-main h2 {
   margin: 0;
-  font-size: clamp(1.35rem, 2.2vw, 1.85rem);
+  font-size: clamp(1.5rem, 2.4vw, 2rem);
   font-weight: 700;
-  letter-spacing: -0.02em;
+  letter-spacing: -0.025em;
+  line-height: 1.15;
   color: #fff;
 }
 
 .presentation-subtitle {
-  margin: 0.45rem 0 0;
-  max-width: 42rem;
+  margin: 0.55rem 0 0;
+  max-width: 40rem;
   color: #cbd5e1;
-  font-size: 0.92rem;
-  line-height: 1.45;
+  font-size: 0.9rem;
+  line-height: 1.5;
 }
 
 .presentation-hero-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.5rem;
+  align-items: center;
+  gap: 0.55rem 0.75rem;
+}
+
+.presentation-action-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.presentation-action-divider {
+  width: 1px;
+  align-self: stretch;
+  min-height: 2rem;
+  background: rgba(226, 232, 240, 0.22);
+  margin: 0 0.15rem;
+}
+
+.presentation-action-secondary {
+  padding: 0.3rem;
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.35);
+  border: 1px solid rgba(226, 232, 240, 0.12);
 }
 
 .presentation-hero-actions .primary-button {
-  background: #e2e8f0;
+  background: #f1f5f9;
   color: var(--navy);
-  border-color: #e2e8f0;
+  border-color: #f1f5f9;
+  font-weight: 650;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.35) inset;
 }
 
 .presentation-hero-actions .primary-button:hover {
   background: #fff;
+  border-color: #fff;
 }
 
 .presentation-hero-actions .secondary-button {
-  background: transparent;
+  background: rgba(248, 250, 252, 0.06);
   color: #e2e8f0;
-  border-color: rgba(226, 232, 240, 0.35);
+  border-color: rgba(226, 232, 240, 0.28);
 }
 
 .presentation-hero-actions .secondary-button:hover {
-  background: rgba(248, 250, 252, 0.08);
-  border-color: rgba(226, 232, 240, 0.55);
+  background: rgba(248, 250, 252, 0.12);
+  border-color: rgba(226, 232, 240, 0.48);
+  color: #fff;
+}
+
+.presentation-hero-actions .presentation-action-secondary .secondary-button {
+  background: transparent;
+  border-color: transparent;
+  color: #cbd5e1;
+}
+
+.presentation-hero-actions .presentation-action-secondary .secondary-button:hover {
+  background: rgba(248, 250, 252, 0.1);
+  border-color: transparent;
+  color: #fff;
 }
 
 .presentation-summary {
   position: relative;
   z-index: 1;
-  margin: 0.9rem 0 0;
+  display: inline-flex;
+  align-items: center;
+  margin: 1rem 0 0;
+  padding: 0.35rem 0.7rem;
+  border-radius: 6px;
+  background: rgba(15, 23, 42, 0.4);
+  border: 1px solid rgba(148, 163, 184, 0.18);
   color: #94a3b8;
-  font-size: 0.82rem;
+  font-size: 0.8rem;
+  letter-spacing: 0.01em;
 }
 
 .presentation-deck {
@@ -7123,36 +7168,53 @@ body.view-focus .dashboard-layout {
 
 .presentation-kanban-columns {
   display: flex;
-  gap: 14px;
+  gap: 1.1rem;
   align-items: stretch;
   flex-wrap: nowrap;
   overflow-x: auto;
   overflow-y: hidden;
   -webkit-overflow-scrolling: touch;
-  padding-bottom: 10px;
+  padding: 2px 2px 12px;
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 transparent;
+}
+
+.presentation-kanban-columns::-webkit-scrollbar {
+  height: 8px;
+}
+
+.presentation-kanban-columns::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.presentation-kanban-columns::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
 }
 
 .presentation-kanban-column {
   display: grid;
-  /* minmax(0, 1fr) lets the body shrink and scroll instead of crushing cards */
   grid-template-rows: auto minmax(0, 1fr);
-  flex: 1 1 280px;
+  flex: 1 1 0;
   width: auto;
-  min-width: 260px;
-  max-width: 420px;
-  min-height: 420px;
-  max-height: calc(100vh - 280px);
+  min-width: 280px;
+  max-width: none;
+  min-height: 460px;
+  max-height: calc(100vh - 270px);
   border: 1px solid var(--line);
   border-radius: var(--radius-md);
   background: var(--soft);
+  box-shadow: var(--shadow-soft);
 }
 
 .presentation-kanban-column-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
-  padding: 12px 14px;
+  gap: 12px;
+  padding: 0.85rem 1rem;
   border-bottom: 1px solid var(--line);
   background: var(--panel);
   border-radius: var(--radius-md) var(--radius-md) 0 0;
@@ -7160,62 +7222,100 @@ body.view-focus .dashboard-layout {
 
 .presentation-kanban-column-head h3 {
   margin: 0;
-  font-size: 13px;
-  font-weight: 650;
-  color: var(--ink-secondary);
+  font-size: 0.84rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: var(--ink);
 }
 
 .presentation-kanban-column-count {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 24px;
-  height: 24px;
-  padding: 0 7px;
+  min-width: 1.65rem;
+  height: 1.65rem;
+  padding: 0 0.45rem;
   border-radius: 999px;
-  background: var(--soft);
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 600;
+  background: var(--canvas);
+  color: var(--ink-secondary);
+  border: 1px solid var(--line);
+  font-size: 0.75rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
 }
 
 .presentation-kanban-column.status-completed .presentation-kanban-column-head {
-  border-top: 4px solid #16a34a;
+  border-top: 3px solid var(--green);
 }
 
 .presentation-kanban-column.status-progress .presentation-kanban-column-head {
-  border-top: 4px solid #f59e0b;
+  border-top: 3px solid #d97706;
 }
 
 .presentation-kanban-column.status-blocked .presentation-kanban-column-head {
-  border-top: 4px solid #7c3aed;
+  border-top: 3px solid var(--red);
 }
 
 .presentation-kanban-column.status-approval .presentation-kanban-column-head {
-  border-top: 4px solid #ea580c;
+  border-top: 3px solid #ea580c;
 }
 
 .presentation-kanban-column.status-pending .presentation-kanban-column-head {
-  border-top: 4px solid #ef4444;
+  border-top: 3px solid #dc2626;
 }
 
 .presentation-kanban-column.status-other .presentation-kanban-column-head {
-  border-top: 4px solid #64748b;
+  border-top: 3px solid #64748b;
+}
+
+.presentation-kanban-column.status-completed .presentation-kanban-column-count {
+  background: var(--green-soft);
+  color: var(--green);
+  border-color: #a7f3d0;
+}
+
+.presentation-kanban-column.status-progress .presentation-kanban-column-count {
+  background: var(--amber-soft);
+  color: var(--amber);
+  border-color: #fde68a;
+}
+
+.presentation-kanban-column.status-pending .presentation-kanban-column-count {
+  background: var(--red-soft);
+  color: var(--red);
+  border-color: #fecaca;
 }
 
 .presentation-kanban-column-body {
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  gap: 10px;
-  padding: 10px;
+  gap: 0.85rem;
+  padding: 0.85rem;
   min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 transparent;
+}
+
+.presentation-kanban-column-body::-webkit-scrollbar {
+  width: 8px;
+}
+
+.presentation-kanban-column-body::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.presentation-kanban-column-body::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
 }
 
 .presentation-kanban-empty {
-  padding: 1.25rem 0.75rem;
+  padding: 2rem 0.85rem;
   text-align: center;
   color: var(--muted);
   font-size: 0.85rem;
@@ -7225,7 +7325,7 @@ body.view-focus .dashboard-layout {
   border: 1px dashed var(--line-strong);
   border-radius: var(--radius-lg);
   background: var(--panel);
-  padding: 2.5rem 1.5rem;
+  padding: 2.75rem 1.5rem;
   text-align: center;
 }
 
@@ -7251,18 +7351,17 @@ body.view-focus .dashboard-layout {
 .presentation-card {
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
-  /* Never shrink below content — min-height:0 inside a capped column caused overlap */
+  gap: 0.85rem;
   flex: 0 0 auto;
   height: auto;
   min-height: min-content;
-  padding: 1rem 1.05rem 1.05rem;
+  padding: 1.1rem 1.15rem 1.15rem;
   border: 1px solid var(--line);
   border-radius: var(--radius-md);
   background: var(--panel);
   box-shadow: var(--shadow-soft);
   border-top: 3px solid var(--line-strong);
-  overflow: visible;
+  overflow: hidden;
 }
 
 .presentation-card.status-progress { border-top-color: var(--blue); }
@@ -7275,25 +7374,27 @@ body.view-focus .dashboard-layout {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 0.75rem;
+  gap: 0.65rem;
 }
 
 .presentation-card-kicker {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 0.4rem;
+  gap: 0.35rem;
+  min-width: 0;
 }
 
 .presentation-slide-index {
-  font-size: 0.78rem;
+  font-size: 0.72rem;
   font-weight: 700;
-  letter-spacing: 0.04em;
-  color: var(--muted);
+  letter-spacing: 0.06em;
+  color: var(--muted-light);
+  font-variant-numeric: tabular-nums;
 }
 
 .presentation-type {
-  font-size: 0.72rem;
+  font-size: 0.68rem;
   font-weight: 650;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -7301,53 +7402,135 @@ body.view-focus .dashboard-layout {
   background: var(--soft);
   border: 1px solid var(--line);
   border-radius: 999px;
-  padding: 0.15rem 0.5rem;
+  padding: 0.12rem 0.45rem;
+}
+
+.presentation-card .priority-pill {
+  font-size: 0.68rem;
+  min-height: 1.35rem;
+  padding: 0.1rem 0.45rem;
 }
 
 .presentation-card-title {
   margin: 0;
-  font-size: 1.12rem;
-  line-height: 1.3;
-  letter-spacing: -0.015em;
+  font-size: 1.05rem;
+  font-weight: 700;
+  line-height: 1.35;
+  letter-spacing: -0.02em;
   color: var(--ink);
 }
 
 .presentation-card-meta {
   display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.55rem;
+}
+
+.presentation-card-meta-primary {
+  display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 0.45rem 0.7rem;
+  gap: 0.5rem 0.75rem;
+}
+
+.presentation-card .owner-chip {
+  gap: 0.45rem;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--ink-secondary);
+  min-width: 0;
+}
+
+.presentation-card .owner-avatar {
+  width: 26px;
+  height: 26px;
+  font-size: 0.68rem;
+}
+
+.presentation-card .owner-chip-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 9.5rem;
 }
 
 .presentation-milestone {
-  font-size: 0.82rem;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.4rem 0.55rem;
+  border-radius: 6px;
+  background: var(--soft);
+  border: 1px solid var(--line);
+}
+
+.presentation-milestone-label {
+  font-size: 0.68rem;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
   color: var(--muted);
+}
+
+.presentation-milestone-date {
+  font-size: 0.84rem;
+  font-weight: 650;
+  color: var(--ink-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.presentation-card-remarks-wrap {
+  position: relative;
+  max-height: 4.7em;
+  overflow: hidden;
+}
+
+.presentation-card-remarks-wrap:not(.is-empty)::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 1.35em;
+  pointer-events: none;
+  background: linear-gradient(to bottom, rgba(255, 255, 255, 0), var(--panel));
+}
+
+.presentation-card-remarks-wrap.is-empty {
+  max-height: none;
 }
 
 .presentation-card-remarks {
   margin: 0;
   color: var(--ink-secondary);
-  font-size: 0.9rem;
+  font-size: 0.86rem;
   line-height: 1.45;
   white-space: pre-wrap;
   display: -webkit-box;
-  -webkit-line-clamp: 5;
+  -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
 
+.presentation-card-remarks-wrap.is-empty .presentation-card-remarks {
+  -webkit-line-clamp: unset;
+  display: block;
+}
+
 .presentation-card-attachments {
   margin-top: auto;
-  padding-top: 0.35rem;
+  padding-top: 0.55rem;
   border-top: 1px solid var(--line);
 }
 
 .presentation-attachments-label {
   display: block;
-  margin-bottom: 0.45rem;
-  font-size: 0.7rem;
+  margin-bottom: 0.4rem;
+  font-size: 0.66rem;
   font-weight: 650;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.07em;
   text-transform: uppercase;
   color: var(--muted);
 }
@@ -7355,16 +7538,16 @@ body.view-focus .dashboard-layout {
 .presentation-thumbs {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.45rem;
+  gap: 0.4rem;
 }
 
 .presentation-thumb,
 .presentation-thumb-more {
-  width: 64px;
-  height: 48px;
+  width: 56px;
+  height: 42px;
   padding: 0;
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: 5px;
   background: var(--soft);
   overflow: hidden;
   cursor: pointer;
@@ -7386,7 +7569,7 @@ body.view-focus .dashboard-layout {
 .presentation-thumb-more {
   display: grid;
   place-items: center;
-  font-size: 0.72rem;
+  font-size: 0.68rem;
   font-weight: 700;
   color: var(--ink-secondary);
 }
@@ -7394,7 +7577,7 @@ body.view-focus .dashboard-layout {
 .presentation-no-attachments,
 .presentation-attachment-fallback {
   margin: 0;
-  font-size: 0.82rem;
+  font-size: 0.8rem;
   color: var(--muted);
 }
 
@@ -7423,6 +7606,30 @@ body.view-focus .dashboard-layout {
   background: var(--amber-soft);
 }
 
+.presentation-card-pin.ticket-presentation-pin-button {
+  width: 24px;
+  height: 24px;
+  border: none;
+  background: transparent;
+  color: #d97706;
+  font-size: 0.85rem;
+  opacity: 0.55;
+}
+
+.presentation-card-pin.ticket-presentation-pin-button:hover,
+.presentation-card-pin.ticket-presentation-pin-button.is-pinned:hover {
+  opacity: 1;
+  background: var(--amber-soft);
+  border: none;
+}
+
+.presentation-card-pin.ticket-presentation-pin-button.is-pinned {
+  border: none;
+  background: transparent;
+  color: #b45309;
+  opacity: 0.7;
+}
+
 /* Accent only — never override status / milestone-today row backgrounds */
 tbody tr.presentation-marked {
   box-shadow: inset 3px 0 0 #f59e0b;
@@ -7447,25 +7654,82 @@ body.present-mode .app-main {
   width: 100%;
   max-width: none;
   margin: 0;
-  padding: 1.25rem clamp(1rem, 3vw, 2.5rem) 2rem;
+  padding: 0 0 1.5rem;
+}
+
+body.present-mode .presentation-board {
+  gap: 1.1rem;
+  padding: 0;
 }
 
 body.present-mode .presentation-hero {
   border-radius: 0;
-  margin: -1.25rem calc(-1 * clamp(1rem, 3vw, 2.5rem)) 0;
-  padding: 1.75rem clamp(1rem, 3vw, 2.5rem) 1.35rem;
+  border-left: none;
+  border-right: none;
+  border-top: none;
+  margin: 0;
+  padding: 1.65rem clamp(1.25rem, 3.5vw, 2.75rem) 1.25rem;
+}
+
+body.present-mode .presentation-eyebrow {
+  font-size: 0.74rem;
+  letter-spacing: 0.16em;
+}
+
+body.present-mode .presentation-hero-main h2 {
+  font-size: clamp(1.75rem, 3vw, 2.35rem);
+}
+
+body.present-mode .presentation-subtitle {
+  display: none;
+}
+
+body.present-mode .presentation-action-secondary,
+body.present-mode .presentation-action-divider {
+  display: none;
+}
+
+body.present-mode .presentation-summary {
+  margin-top: 0.85rem;
+  font-size: 0.88rem;
+  color: #cbd5e1;
+}
+
+body.present-mode .presentation-deck {
+  padding: 0 clamp(1.25rem, 3.5vw, 2.75rem);
+}
+
+body.present-mode .presentation-kanban-columns {
+  gap: 1.25rem;
+  padding-bottom: 0.5rem;
 }
 
 body.present-mode .presentation-kanban-column {
-  flex: 0 0 min(340px, 82vw);
-  width: min(340px, 82vw);
-  min-width: min(340px, 82vw);
-  max-width: min(380px, 90vw);
-  min-height: calc(100vh - 220px);
-  max-height: calc(100vh - 180px);
+  flex: 1 1 0;
+  width: auto;
+  min-width: min(300px, 78vw);
+  max-width: none;
+  min-height: calc(100vh - 200px);
+  max-height: calc(100vh - 170px);
+}
+
+body.present-mode .presentation-kanban-column-head {
+  padding: 1rem 1.1rem;
+}
+
+body.present-mode .presentation-kanban-column-head h3 {
+  font-size: 0.95rem;
+}
+
+body.present-mode .presentation-kanban-column-count {
+  min-width: 1.85rem;
+  height: 1.85rem;
+  font-size: 0.82rem;
 }
 
 body.present-mode .presentation-kanban-column-body {
+  gap: 1rem;
+  padding: 1rem;
   min-height: 0;
   overflow-y: auto;
 }
@@ -7474,29 +7738,58 @@ body.present-mode .presentation-card {
   flex: 0 0 auto;
   height: auto;
   min-height: min-content;
-  padding: 1.2rem 1.25rem 1.25rem;
+  gap: 0.95rem;
+  padding: 1.25rem 1.3rem 1.3rem;
+}
+
+body.present-mode .presentation-card-pin {
+  display: none !important;
 }
 
 body.present-mode .presentation-card-title {
-  font-size: 1.2rem;
+  font-size: 1.22rem;
+  line-height: 1.3;
+}
+
+body.present-mode .presentation-milestone-date {
+  font-size: 0.92rem;
+}
+
+body.present-mode .presentation-card-remarks-wrap {
+  max-height: 7.1em;
 }
 
 body.present-mode .presentation-card-remarks {
-  -webkit-line-clamp: 8;
-  font-size: 0.98rem;
+  -webkit-line-clamp: 5;
+  font-size: 0.95rem;
+}
+
+body.present-mode .presentation-thumb,
+body.present-mode .presentation-thumb-more {
+  width: 64px;
+  height: 48px;
 }
 
 @media (max-width: 900px) {
   .presentation-kanban-column {
-    flex: 0 0 min(280px, 78vw);
-    width: min(280px, 78vw);
-    min-width: min(280px, 78vw);
-    max-width: min(280px, 78vw);
-    min-height: 360px;
+    flex: 0 0 min(300px, 80vw);
+    width: min(300px, 80vw);
+    min-width: min(300px, 80vw);
+    max-width: min(320px, 86vw);
+    min-height: 380px;
+  }
+
+  body.present-mode .presentation-kanban-column {
+    flex: 0 0 min(300px, 82vw);
+    min-width: min(300px, 82vw);
   }
 }
 
 @media (max-width: 720px) {
+  .presentation-hero {
+    padding: 1.25rem 1.15rem 1.05rem;
+  }
+
   .presentation-hero-body {
     align-items: stretch;
   }
@@ -7505,9 +7798,25 @@ body.present-mode .presentation-card-remarks {
     width: 100%;
   }
 
+  .presentation-action-divider {
+    display: none;
+  }
+
+  .presentation-action-group {
+    width: 100%;
+  }
+
+  .presentation-action-secondary {
+    width: 100%;
+  }
+
   .presentation-hero-actions .primary-button,
   .presentation-hero-actions .secondary-button {
     flex: 1 1 auto;
+  }
+
+  .presentation-card .owner-chip-name {
+    max-width: 7.5rem;
   }
 }
 
@@ -7520,5 +7829,9 @@ body.present-mode .presentation-card-remarks {
   .presentation-card {
     break-inside: avoid;
     box-shadow: none;
+  }
+
+  .presentation-card-remarks-wrap:not(.is-empty)::after {
+    display: none;
   }
 }

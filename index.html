@@ -6,11 +6,11 @@
     <title>Tarmal IT Portal</title>
     <link rel="icon" href="./assets/tarmal-mark.png?v=1" type="image/png">
     <link rel="apple-touch-icon" href="./assets/apple-touch-icon.png?v=1">
-    <link rel="stylesheet" href="./styles.css?v=100">
+    <link rel="stylesheet" href="./styles.css?v=101">
     <!-- auth stays blocking so requireLogin runs before app chrome paints -->
     <script src="./auth.js?v=20"></script>
     <!-- Defer main bundles so HTML can parse while ~210KB+ app.js downloads -->
-    <script src="./app.js?v=140" defer></script>
+    <script src="./app.js?v=141" defer></script>
     <script src="./assets.js?v=13" defer></script>
     <script src="./documents.js?v=11" defer></script>
     <script src="./procurement.js?v=5" defer></script>
@@ -578,10 +578,15 @@
                 </p>
               </div>
               <div class="presentation-hero-actions">
-                <button class="primary-button" id="enterPresentModeButton" type="button">Present mode</button>
-                <button class="secondary-button" id="exitPresentModeButton" type="button" hidden>Exit present</button>
-                <button class="secondary-button" id="gotoProjectsFromPresentationButton" type="button" data-goto-tab="projects">Mark from Projects</button>
-                <button class="secondary-button" id="clearPresentationMarksButton" type="button">Clear set</button>
+                <div class="presentation-action-group presentation-action-primary">
+                  <button class="primary-button" id="enterPresentModeButton" type="button">Present mode</button>
+                  <button class="secondary-button" id="exitPresentModeButton" type="button" hidden>Exit present</button>
+                </div>
+                <div class="presentation-action-divider" aria-hidden="true"></div>
+                <div class="presentation-action-group presentation-action-secondary">
+                  <button class="secondary-button" id="gotoProjectsFromPresentationButton" type="button" data-goto-tab="projects">Mark from Projects</button>
+                  <button class="secondary-button" id="clearPresentationMarksButton" type="button">Clear set</button>
+                </div>
               </div>
             </div>
             <p class="presentation-summary" id="presentationSummary"></p>

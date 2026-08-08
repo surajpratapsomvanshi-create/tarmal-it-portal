@@ -6321,14 +6321,23 @@ function renderPresentationCard(ticket, index) {
       </header>
       <h3 class="presentation-card-title">${escapeHtml(ticket.Task || "Untitled project")}</h3>
       <div class="presentation-card-meta">
-        <span class="status-pill ${statusClass(ticket.Status)}">${escapeHtml(ticket.Status || "Blank")}</span>
-        <span class="owner-chip">
-          <span class="owner-avatar">${escapeHtml(ownerInitials(ticket.Owner))}</span>
-          ${escapeHtml(ticket.Owner || "No owner")}
-        </span>
-        <span class="presentation-milestone">Milestone ${escapeHtml(milestone)}</span>
+        <div class="presentation-card-meta-primary">
+          <span class="status-pill ${statusClass(ticket.Status)}">${escapeHtml(ticket.Status || "Blank")}</span>
+          <span class="owner-chip">
+            <span class="owner-avatar">${escapeHtml(ownerInitials(ticket.Owner))}</span>
+            <span class="owner-chip-name">${escapeHtml(ticket.Owner || "No owner")}</span>
+          </span>
+        </div>
+        <div class="presentation-milestone">
+          <span class="presentation-milestone-label">Milestone</span>
+          <span class="presentation-milestone-date">${escapeHtml(milestone)}</span>
+        </div>
       </div>
-      ${remarks ? `<p class="presentation-card-remarks">${escapeHtml(remarks)}</p>` : `<p class="presentation-card-remarks muted-text">No remarks</p>`}
+      <div class="presentation-card-remarks-wrap${remarks ? "" : " is-empty"}">
+        ${remarks
+          ? `<p class="presentation-card-remarks">${escapeHtml(remarks)}</p>`
+          : `<p class="presentation-card-remarks muted-text">No remarks</p>`}
+      </div>
       <div class="presentation-card-attachments">
         <span class="presentation-attachments-label">Attachments</span>
         ${renderPresentationAttachmentThumbs(ticket)}
