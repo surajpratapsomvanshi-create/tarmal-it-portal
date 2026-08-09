@@ -6,11 +6,11 @@
     <title>Tarmal IT Portal</title>
     <link rel="icon" href="./assets/tarmal-mark.png?v=1" type="image/png">
     <link rel="apple-touch-icon" href="./assets/apple-touch-icon.png?v=1">
-    <link rel="stylesheet" href="./styles.css?v=171">
+    <link rel="stylesheet" href="./styles.css?v=173">
     <!-- auth stays blocking so requireLogin runs before app chrome paints -->
     <script src="./auth.js?v=22"></script>
     <!-- Defer main bundles so HTML can parse while ~210KB+ app.js downloads -->
-    <script src="./app.js?v=171" defer></script>
+    <script src="./app.js?v=173" defer></script>
     <script src="./assets.js?v=13" defer></script>
     <script src="./documents.js?v=11" defer></script>
     <script src="./procurement.js?v=5" defer></script>
@@ -593,6 +593,13 @@
                     <option value="all">All types</option>
                     <option value="SAP">SAP</option>
                     <option value="Infra">Infra</option>
+                  </select>
+                </label>
+                <label class="presentation-filter-field presentation-filter-field--owner">
+                  <select id="presentationOwnerFilter" aria-label="Original Owner">
+                    <option value="all">All owners</option>
+                    <option value="Bhanu">Bhanu</option>
+                    <option value="not-bhanu">Not Bhanu</option>
                   </select>
                 </label>
                 <div class="presentation-period-filters" id="presentationPeriodFilters" role="group" aria-label="Time">
@@ -1320,20 +1327,34 @@
           <div class="modal-actions modal-actions-split" id="ticketEditModalActions">
             <div class="ticket-delete-group">
               <button class="secondary-button danger" id="deleteTicketEditButton" type="button">Delete Task</button>
-              <div class="ticket-delete-confirm" id="ticketDeleteConfirm" hidden>
-                <span class="ticket-delete-confirm-text" id="ticketDeleteConfirmText">Delete this task permanently?</span>
-                <button class="secondary-button danger" id="confirmDeleteTicketButton" type="button">Yes, delete</button>
-                <button class="secondary-button" id="cancelDeleteTicketButton" type="button">Cancel</button>
-              </div>
               <p class="ticket-delete-error" id="ticketDeleteError" hidden></p>
             </div>
             <div class="modal-actions-group">
               <button class="secondary-button" id="addSubtaskFromEditButton" type="button" hidden>Add Sub-task</button>
               <button class="secondary-button" id="cancelTicketEditButton" type="button">Cancel</button>
-              <button class="primary-button" type="submit">Save Changes</button>
+              <button class="primary-button" id="ticketEditSaveButton" type="submit">Save Changes</button>
             </div>
           </div>
         </form>
+      </div>
+    </div>
+
+    <div class="modal-overlay confirm-modal-overlay" id="ticketDeleteConfirmModal" hidden>
+      <div class="modal-card confirm-modal-card" role="dialog" aria-modal="true" aria-labelledby="ticketDeleteConfirmTitle">
+        <div class="modal-header">
+          <div>
+            <p class="eyebrow">Confirm delete</p>
+            <h2 id="ticketDeleteConfirmTitle">Delete this task permanently?</h2>
+          </div>
+          <button class="icon-button modal-close-btn" id="closeTicketDeleteConfirmButton" type="button" aria-label="Cancel delete">
+            <span class="clear-icon" aria-hidden="true"></span>
+          </button>
+        </div>
+        <p class="ticket-delete-confirm-text" id="ticketDeleteConfirmText">This cannot be undone.</p>
+        <div class="modal-actions">
+          <button class="secondary-button" id="cancelDeleteTicketButton" type="button">Cancel</button>
+          <button class="secondary-button danger" id="confirmDeleteTicketButton" type="button">Yes, delete</button>
+        </div>
       </div>
     </div>
 

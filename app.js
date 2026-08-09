@@ -146,6 +146,7 @@ const presentationHero = document.querySelector("#presentationHero");
 const presentationBoard = document.querySelector(".presentation-board");
 const togglePresentationHeroButton = document.querySelector("#togglePresentationHeroButton");
 const presentationTypeFilter = document.querySelector("#presentationTypeFilter");
+const presentationOwnerFilter = document.querySelector("#presentationOwnerFilter");
 const presentationPeriodFilters = document.querySelector("#presentationPeriodFilters");
 const presentationCustomRange = document.querySelector("#presentationCustomRange");
 const presentationDateFrom = document.querySelector("#presentationDateFrom");
@@ -179,11 +180,14 @@ const ticketEditSheetRow = document.querySelector("#ticketEditSheetRow");
 const closeTicketEditButton = document.querySelector("#closeTicketEditButton");
 const cancelTicketEditButton = document.querySelector("#cancelTicketEditButton");
 const deleteTicketEditButton = document.querySelector("#deleteTicketEditButton");
-const ticketDeleteConfirm = document.querySelector("#ticketDeleteConfirm");
+const ticketDeleteConfirmModal = document.querySelector("#ticketDeleteConfirmModal");
 const ticketDeleteConfirmText = document.querySelector("#ticketDeleteConfirmText");
+const ticketDeleteConfirmTitle = document.querySelector("#ticketDeleteConfirmTitle");
 const confirmDeleteTicketButton = document.querySelector("#confirmDeleteTicketButton");
 const cancelDeleteTicketButton = document.querySelector("#cancelDeleteTicketButton");
+const closeTicketDeleteConfirmButton = document.querySelector("#closeTicketDeleteConfirmButton");
 const ticketDeleteError = document.querySelector("#ticketDeleteError");
+const ticketEditSaveButton = document.querySelector("#ticketEditSaveButton");
 const ticketFormParentSheetRow = document.querySelector("#ticketFormParentSheetRow");
 const ticketCreateParentContext = document.querySelector("#ticketCreateParentContext");
 const ticketCreateParentLabel = document.querySelector("#ticketCreateParentLabel");
@@ -238,6 +242,7 @@ const PERFORMANCE_FILTERS_COLLAPSED_KEY = "tarmal-performance-filters-collapsed"
 const TOOLBAR_COLLAPSED_PREFIX = "tarmal-toolbar-";
 const PRESENTATION_HERO_COLLAPSED_KEY = "tarmal-presentation-hero-collapsed";
 let selectedPresentationType = "all";
+let selectedPresentationOwner = "all";
 let selectedPresentationPeriod = "all";
 let presentModeFullscreenSync = false;
 const DEFAULT_COLLAPSED_TOOLBARS = new Set(["tickets", "projects", "procurement", "kanban", "assets", "users"]);
@@ -637,6 +642,7 @@ const sampleTickets = [
 
 let ticketsMemoryCache = null;
 let ticketEditSubmitInFlight = false;
+let ticketEditDeleteInFlight = false;
 let ticketsBroadcastChannel = null;
 
 function createTicketId() {
@@ -5339,6 +5345,8 @@ function openTicketEditor(sheetRow, options = {}) {
 
 function closeTicketEditor() {
   if (!ticketEditModal) return;
+  if (ticketEditSubmitInFlight || ticketEditDeleteInFlight) return;
+  closeTicketDeleteConfirm();
   ticketEditModal.hidden = true;
   document.body.classList.remove("modal-open");
   ticketEditForm?.reset();
@@ -5353,6 +5361,7 @@ function closeTicketEditor() {
   if (addSubtaskFromEditButton) addSubtaskFromEditButton.hidden = true;
   activeEditTicket = null;
   resetTicketDeleteUi();
+  resetTicketEditSaveUi();
 }
 
 function ticketFromEditForm() {
@@ -5778,17 +5787,62 @@ async function deleteTicketFromSheet(sheetRow, task = "", owner = "") {
   return { synced: true, ...result };
 }
 
+function resetTicketEditSaveUi() {
+  const saveButton = ticketEditSaveButton || ticketEditForm?.querySelector('button[type="submit"]');
+  if (!saveButton) return;
+  saveButton.disabled = false;
+  saveButton.classList.remove("is-saving", "is-loading");
+  saveButton.textContent = "Save Changes";
+}
+
+function setTicketEditBusyState({ saving = false, deleting = false } = {}) {
+  const busy = saving || deleting;
+  const saveButton = ticketEditSaveButton || ticketEditForm?.querySelector('button[type="submit"]');
+
+  if (saveButton) {
+    saveButton.disabled = busy;
+    saveButton.classList.toggle("is-saving", saving);
+    if (saving) {
+      saveButton.textContent = "Saving…";
+    } else if (!deleting) {
+      saveButton.textContent = "Save Changes";
+      saveButton.classList.remove("is-saving", "is-loading");
+    }
+  }
+
+  if (deleteTicketEditButton) {
+    deleteTicketEditButton.disabled = busy;
+    deleteTicketEditButton.classList.toggle("is-deleting", deleting);
+    deleteTicketEditButton.textContent = deleting ? "Deleting…" : "Delete Task";
+  }
+
+  if (cancelTicketEditButton) cancelTicketEditButton.disabled = busy;
+  if (closeTicketEditButton) closeTicketEditButton.disabled = busy;
+  if (addSubtaskFromEditButton) addSubtaskFromEditButton.disabled = busy;
+  if (confirmDeleteTicketButton) {
+    confirmDeleteTicketButton.disabled = busy;
+    confirmDeleteTicketButton.classList.toggle("is-deleting", deleting);
+    confirmDeleteTicketButton.textContent = deleting ? "Deleting…" : "Yes, delete";
+  }
+  if (cancelDeleteTicketButton) cancelDeleteTicketButton.disabled = busy;
+  if (closeTicketDeleteConfirmButton) closeTicketDeleteConfirmButton.disabled = busy;
+}
+
 function resetTicketDeleteUi() {
+  closeTicketDeleteConfirm();
   if (deleteTicketEditButton) {
     deleteTicketEditButton.hidden = false;
     deleteTicketEditButton.disabled = false;
+    deleteTicketEditButton.classList.remove("is-deleting");
     deleteTicketEditButton.textContent = "Delete Task";
   }
-  if (ticketDeleteConfirm) ticketDeleteConfirm.hidden = true;
   if (confirmDeleteTicketButton) {
     confirmDeleteTicketButton.disabled = false;
+    confirmDeleteTicketButton.classList.remove("is-deleting");
     confirmDeleteTicketButton.textContent = "Yes, delete";
   }
+  if (cancelDeleteTicketButton) cancelDeleteTicketButton.disabled = false;
+  if (closeTicketDeleteConfirmButton) closeTicketDeleteConfirmButton.disabled = false;
   if (ticketDeleteError) {
     ticketDeleteError.hidden = true;
     ticketDeleteError.textContent = "";
@@ -5804,25 +5858,46 @@ function showTicketDeleteError(message) {
   ticketDeleteError.hidden = false;
 }
 
+function openTicketDeleteConfirm(label) {
+  if (!ticketDeleteConfirmModal) return false;
+  const taskLabel = String(label || "this task").trim() || "this task";
+  if (ticketDeleteConfirmTitle) {
+    ticketDeleteConfirmTitle.textContent = "Delete this task permanently?";
+  }
+  if (ticketDeleteConfirmText) {
+    ticketDeleteConfirmText.textContent = `Delete "${taskLabel}" permanently? This cannot be undone.`;
+  }
+  if (ticketDeleteError) ticketDeleteError.hidden = true;
+  ticketDeleteConfirmModal.hidden = false;
+  document.body.classList.add("modal-open");
+  confirmDeleteTicketButton?.focus();
+  return true;
+}
+
+function closeTicketDeleteConfirm() {
+  if (!ticketDeleteConfirmModal || ticketDeleteConfirmModal.hidden) return;
+  if (ticketEditDeleteInFlight) return;
+  ticketDeleteConfirmModal.hidden = true;
+  if (confirmDeleteTicketButton) {
+    confirmDeleteTicketButton.disabled = false;
+    confirmDeleteTicketButton.classList.remove("is-deleting");
+    confirmDeleteTicketButton.textContent = "Yes, delete";
+  }
+  if (cancelDeleteTicketButton) cancelDeleteTicketButton.disabled = false;
+  if (closeTicketDeleteConfirmButton) closeTicketDeleteConfirmButton.disabled = false;
+}
+
 function requestTicketDelete() {
   if (!canEditTickets()) {
     showTicketDeleteError("You do not have permission to delete tickets.");
     return;
   }
-  if (!ticketEditForm) return;
+  if (!ticketEditForm || ticketEditDeleteInFlight || ticketEditSubmitInFlight) return;
 
   const sourceTicket = activeEditTicket || {};
   const label = String(sourceTicket.Task || ticketEditForm.elements.Task?.value || "this task").trim() || "this task";
 
-  if (ticketDeleteConfirm && ticketDeleteConfirmText && deleteTicketEditButton) {
-    ticketDeleteConfirmText.textContent = `Delete "${label}" permanently? This cannot be undone.`;
-    deleteTicketEditButton.hidden = true;
-    ticketDeleteConfirm.hidden = false;
-    if (ticketDeleteError) ticketDeleteError.hidden = true;
-    confirmDeleteTicketButton?.focus();
-    return;
-  }
-
+  if (openTicketDeleteConfirm(label)) return;
   executeTicketDelete();
 }
 
@@ -5831,7 +5906,7 @@ async function executeTicketDelete() {
     showTicketDeleteError("You do not have permission to delete tickets.");
     return;
   }
-  if (!ticketEditForm) return;
+  if (!ticketEditForm || ticketEditDeleteInFlight || ticketEditSubmitInFlight) return;
 
   const sourceTicket = activeEditTicket || {};
   const data = new FormData(ticketEditForm);
@@ -5839,11 +5914,9 @@ async function executeTicketDelete() {
   const owner = cleanText(sourceTicket.Owner || data.get("Owner") || "");
   let sheetRow = Number(sourceTicket.sheetRow) || resolveEditingSheetRow(data, sourceTicket);
 
-  if (confirmDeleteTicketButton) {
-    confirmDeleteTicketButton.disabled = true;
-    confirmDeleteTicketButton.textContent = "Deleting...";
-  }
-  if (deleteTicketEditButton) deleteTicketEditButton.disabled = true;
+  ticketEditDeleteInFlight = true;
+  setTicketEditBusyState({ deleting: true });
+  if (ticketDeleteError) ticketDeleteError.hidden = true;
 
   try {
     if (!sheetRow && task) {
@@ -5853,6 +5926,8 @@ async function executeTicketDelete() {
 
     if (!sheetRow) {
       removeLocalTicketByIdentity(task, owner);
+      ticketEditDeleteInFlight = false;
+      setTicketEditBusyState();
       resetTicketDeleteUi();
       closeTicketEditor();
       renderTickets();
@@ -5870,6 +5945,8 @@ async function executeTicketDelete() {
     });
     removeLocalTicket(sheetRow);
     removeLocalTicketByIdentity(task, owner);
+    ticketEditDeleteInFlight = false;
+    setTicketEditBusyState();
     resetTicketDeleteUi();
     closeTicketEditor();
     await refreshFromSheet({ skipScreenshotSync: true, force: true });
@@ -5879,11 +5956,9 @@ async function executeTicketDelete() {
     const message = error?.message || "Could not delete this task.";
     showTicketDeleteError(`${message} Click Refresh on the Tickets tab, then try again.`);
     setStatus("error", "Delete failed — task kept");
-    if (confirmDeleteTicketButton) {
-      confirmDeleteTicketButton.disabled = false;
-      confirmDeleteTicketButton.textContent = "Yes, delete";
-    }
-    if (deleteTicketEditButton) deleteTicketEditButton.disabled = false;
+    ticketEditDeleteInFlight = false;
+    setTicketEditBusyState();
+    closeTicketDeleteConfirm();
     console.error(error);
   }
 }
@@ -6302,6 +6377,20 @@ function ticketMatchesPresentationPeriod(ticket) {
   return ticketRelevantInPeriod(ticket, selectedPresentationPeriod);
 }
 
+function ticketMatchesPresentationOwner(ticket) {
+  if (selectedPresentationOwner === "all") return true;
+  const owner = getTicketOriginalOwnerValue(ticket);
+  if (selectedPresentationOwner === "Bhanu") return owner === "Bhanu";
+  if (selectedPresentationOwner === "not-bhanu") return owner !== "Bhanu";
+  return true;
+}
+
+function presentationOwnerLabel() {
+  if (selectedPresentationOwner === "Bhanu") return "Bhanu";
+  if (selectedPresentationOwner === "not-bhanu") return "Not Bhanu";
+  return "";
+}
+
 function presentationTicketEndTimestamp(ticket) {
   const date = parseTicketDate(ticket?.["End date"]);
   return date ? date.getTime() : null;
@@ -6340,6 +6429,7 @@ function getPresentationTickets(tickets = getValidTickets()) {
       if (selectedPresentationType === "Infra") return isExactInfraType(ticket.Type);
       return true;
     })
+    .filter((ticket) => ticketMatchesPresentationOwner(ticket))
     .filter((ticket) => ticketMatchesPresentationPeriod(ticket))
     .sort(comparePresentationTickets);
 }
@@ -6669,15 +6759,17 @@ function renderPresentationView(tickets = getValidTickets()) {
 
   const shown = getPresentationTickets(tickets);
   const typeLabel = selectedPresentationType === "all" ? "SAP & Infra" : selectedPresentationType;
+  const ownerLabel = presentationOwnerLabel();
   const periodLabel = selectedPresentationPeriod === "custom"
     ? "custom range"
     : (PERFORMANCE_PERIOD_OPTIONS.find((entry) => entry.id === selectedPresentationPeriod)?.label
       || selectedPresentationPeriod);
+  const filterBits = [typeLabel, ownerLabel, periodLabel].filter(Boolean);
 
   if (presentationSummary) {
     presentationSummary.textContent = shown.length
-      ? `${shown.length} ${typeLabel} project${shown.length === 1 ? "" : "s"} · ${periodLabel}`
-      : `No ${typeLabel} projects match the current filters (${periodLabel})`;
+      ? `${shown.length} project${shown.length === 1 ? "" : "s"} · ${filterBits.join(" · ")}`
+      : `No projects match the current filters (${filterBits.join(" · ")})`;
   }
 
   if (!shown.length) {
@@ -7925,7 +8017,7 @@ ticketEditForm?.addEventListener("submit", async (event) => {
     alert("You do not have permission to edit tickets.");
     return;
   }
-  if (ticketEditSubmitInFlight || ticketEditForm.classList.contains("ticket-form-submitting")) {
+  if (ticketEditSubmitInFlight || ticketEditDeleteInFlight || ticketEditForm.classList.contains("ticket-form-submitting")) {
     return;
   }
 
@@ -7985,8 +8077,8 @@ ticketEditForm?.addEventListener("submit", async (event) => {
 
   ticketEditSubmitInFlight = true;
   ticketEditForm.classList.add("ticket-form-submitting");
-  const saveButton = ticketEditForm.querySelector('button[type="submit"]');
-  if (saveButton) saveButton.disabled = true;
+  setTicketEditBusyState({ saving: true });
+  setStatus("", "Saving ticket...");
 
   updateLocalTicket(localTicket);
   renderTickets();
@@ -7996,6 +8088,10 @@ ticketEditForm?.addEventListener("submit", async (event) => {
     if (extractNoteAttachments(updatedTicket.NotesHtml || "").length) {
       await verifyDriveUploadAfterSave(updatedTicket.sheetRow);
     }
+    ticketEditSubmitInFlight = false;
+    ticketEditForm.classList.remove("ticket-form-submitting");
+    setTicketEditBusyState();
+    resetTicketEditSaveUi();
     closeTicketEditor();
     renderTickets();
   } catch (error) {
@@ -8005,7 +8101,8 @@ ticketEditForm?.addEventListener("submit", async (event) => {
   } finally {
     ticketEditSubmitInFlight = false;
     ticketEditForm.classList.remove("ticket-form-submitting");
-    if (saveButton) saveButton.disabled = false;
+    setTicketEditBusyState();
+    resetTicketEditSaveUi();
   }
 });
 
@@ -8013,7 +8110,14 @@ closeTicketEditButton?.addEventListener("click", closeTicketEditor);
 cancelTicketEditButton?.addEventListener("click", closeTicketEditor);
 deleteTicketEditButton?.addEventListener("click", requestTicketDelete);
 confirmDeleteTicketButton?.addEventListener("click", executeTicketDelete);
-cancelDeleteTicketButton?.addEventListener("click", resetTicketDeleteUi);
+cancelDeleteTicketButton?.addEventListener("click", closeTicketDeleteConfirm);
+closeTicketDeleteConfirmButton?.addEventListener("click", closeTicketDeleteConfirm);
+
+ticketDeleteConfirmModal?.addEventListener("click", (event) => {
+  if (event.target === ticketDeleteConfirmModal && !ticketEditDeleteInFlight) {
+    closeTicketDeleteConfirm();
+  }
+});
 
 ticketEditModal?.addEventListener("click", (event) => {
   if (event.target === ticketEditModal) {
@@ -8022,6 +8126,10 @@ ticketEditModal?.addEventListener("click", (event) => {
 });
 
 document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && ticketDeleteConfirmModal && !ticketDeleteConfirmModal.hidden) {
+    closeTicketDeleteConfirm();
+    return;
+  }
   if (event.key === "Escape" && screenshotPreviewModal && !screenshotPreviewModal.hidden) {
     closeScreenshotPreview();
     return;
@@ -8097,6 +8205,10 @@ document.addEventListener("webkitfullscreenchange", onPresentModeFullscreenChang
 document.addEventListener("MSFullscreenChange", onPresentModeFullscreenChange);
 presentationTypeFilter?.addEventListener("change", () => {
   selectedPresentationType = presentationTypeFilter.value || "all";
+  renderPresentationView();
+});
+presentationOwnerFilter?.addEventListener("change", () => {
+  selectedPresentationOwner = presentationOwnerFilter.value || "all";
   renderPresentationView();
 });
 presentationPeriodFilters?.querySelectorAll("[data-period]").forEach((button) => {
