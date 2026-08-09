@@ -799,24 +799,24 @@ h2 {
 .tab-panel[data-panel="performance"].active {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 12px;
 }
 
 .dashboard-hero {
   position: relative;
   display: grid;
   grid-template-columns: 1.4fr auto;
-  gap: 28px;
+  gap: 24px;
   align-items: center;
-  padding: 32px 36px;
-  border-radius: 20px;
+  padding: 24px 28px;
+  border-radius: 16px;
   overflow: visible;
   flex-shrink: 0;
-  min-height: 160px;
+  min-height: 0;
   color: #f8fafc;
   background: linear-gradient(135deg, #0b1220 0%, #111827 50%, #1a2332 100%);
   border: 1px solid rgba(255, 255, 255, 0.08);
-  box-shadow: 0 20px 40px rgba(15, 23, 42, 0.18);
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.14);
 }
 
 .dashboard-hero-glow {
@@ -864,26 +864,32 @@ h2 {
 .dashboard-hero-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
-  margin-top: 12px;
+  gap: 8px;
+  margin-top: 10px;
 }
 
 .dashboard-hero-cta {
-  padding: 11px 20px;
+  padding: 0 16px;
+  min-height: 36px;
   font-weight: 700;
-  border-radius: 10px;
+  border-radius: 9px;
 }
 
+.dashboard-hero-actions .secondary-button.dashboard-hero-cta-secondary,
 .dashboard-hero-cta-secondary {
-  color: #f1f5f9;
+  color: #e2e8f0;
   background: rgba(255, 255, 255, 0.08);
   border: 1px solid rgba(255, 255, 255, 0.16);
-  border-radius: 10px;
+  border-radius: 9px;
   font-weight: 600;
+  box-shadow: none;
 }
 
+.dashboard-hero-actions .secondary-button.dashboard-hero-cta-secondary:hover,
 .dashboard-hero-cta-secondary:hover {
+  color: #f8fafc;
   background: rgba(255, 255, 255, 0.14);
+  border-color: rgba(255, 255, 255, 0.22);
 }
 
 .dashboard-hero-aside {
@@ -977,7 +983,7 @@ h2 {
 }
 
 .dashboard-metrics {
-  gap: 14px;
+  gap: 10px;
   flex-shrink: 0;
 }
 
@@ -989,48 +995,42 @@ h2 {
 }
 
 .dashboard-metric {
-  padding: 20px 18px;
-  border-radius: 16px;
+  padding: 14px 16px;
+  border-radius: 12px;
   border: 1px solid var(--line);
-  box-shadow: var(--shadow-soft);
-  transition: transform 0.15s ease, box-shadow 0.15s ease;
+  box-shadow: none;
+  transition: border-color 0.15s ease, background 0.15s ease;
 }
 
 .dashboard-metric:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+  transform: none;
+  border-color: var(--line-strong);
+  box-shadow: none;
+  background: #fff;
 }
 
-.dashboard-metric.metric-total {
-  border-top: 3px solid #3b82f6;
-}
-
-.dashboard-metric.metric-progress {
-  border-top: 3px solid #eab308;
-}
-
-.dashboard-metric.metric-pending {
-  border-top: 3px solid #ef4444;
-}
-
+/* Keep a single left accent — avoid stacked top+left borders */
+.dashboard-metric.metric-total,
+.dashboard-metric.metric-progress,
+.dashboard-metric.metric-pending,
 .dashboard-metric.metric-completed {
-  border-top: 3px solid #22c55e;
+  border-top: 1px solid var(--line);
 }
 
 .dashboard-metric strong {
-  font-size: 32px;
+  font-size: 22px;
   font-weight: 800;
   letter-spacing: -0.02em;
 }
 
 .dashboard-metric .metric-icon {
-  width: 44px;
-  height: 44px;
+  width: 36px;
+  height: 36px;
 }
 
 .dashboard-insights .dashboard-panel {
-  border-radius: 16px;
-  box-shadow: var(--shadow-soft);
+  border-radius: 12px;
+  box-shadow: none;
 }
 
 .dashboard-header {
@@ -4382,13 +4382,13 @@ body.sidebar-collapsed.view-focus .sidebar-expand-bar {
 body.view-focus .tab-panel[data-panel="dashboard"].active,
 body.view-focus .tab-panel[data-panel="performance"].active,
 body.view-focus .tab-panel[data-panel="documents"].active {
-  gap: 16px;
+  gap: 12px;
 }
 
 body.view-focus .dashboard-hero {
-  padding: 28px 32px;
+  padding: 22px 26px;
   flex-shrink: 0;
-  min-height: 150px;
+  min-height: 0;
 }
 
 body.view-focus .dashboard-hero-eyebrow {
@@ -6196,23 +6196,27 @@ body.view-focus .dashboard-layout {
 
   .dashboard-hero {
     grid-template-columns: 1fr;
-    padding: 24px 20px;
+    padding: 18px 18px;
+    gap: 14px;
   }
 
   .dashboard-hero-aside {
     justify-content: flex-start;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
     width: 100%;
+    gap: 12px;
   }
 
   .dashboard-hero-kpis {
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
     width: 100%;
+    gap: 8px;
   }
 
   .dashboard-hero-kpi {
     flex: 1;
-    min-width: 90px;
+    min-width: 0;
+    padding: 8px 10px;
   }
 
   .new-ticket-layout {
@@ -6785,24 +6789,30 @@ body.view-focus .dashboard-layout {
     grid-template-columns: 1fr 1fr;
   }
 
+  .tab-panel[data-panel="dashboard"].active {
+    gap: 10px;
+  }
+
   .dashboard-hero {
-    padding: 12px 14px;
-    gap: 12px;
+    padding: 12px 12px;
+    gap: 10px;
     min-height: 0;
-    border-radius: 14px;
+    border-radius: 12px;
+    box-shadow: 0 8px 20px rgba(15, 23, 42, 0.12);
   }
 
   body.view-focus .dashboard-hero {
-    padding: 12px 14px;
+    padding: 12px 12px;
     min-height: 0;
   }
 
   .dashboard-hero-main {
-    gap: 4px;
+    gap: 2px;
   }
 
   .dashboard-hero-title {
-    font-size: 18px;
+    font-size: 17px;
+    letter-spacing: -0.02em;
   }
 
   .dashboard-hero .dashboard-subtitle {
@@ -6817,32 +6827,40 @@ body.view-focus .dashboard-layout {
 
   .dashboard-hero-actions .primary-button,
   .dashboard-hero-actions .secondary-button {
-    min-height: 34px;
+    min-height: 32px;
     padding: 0 10px;
-    font-size: 12px;
+    font-size: 11px;
     border-radius: 8px;
+    flex: 1 1 auto;
+  }
+
+  .dashboard-hero-actions .secondary-button.dashboard-hero-cta-secondary {
+    color: #e2e8f0;
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    box-shadow: none;
   }
 
   .dashboard-hero-aside {
     flex-direction: row;
-    align-items: center;
-    gap: 10px;
+    align-items: stretch;
+    gap: 8px;
   }
 
   .dashboard-completion-ring {
-    width: 56px;
-    height: 56px;
+    width: 52px;
+    height: 52px;
     align-self: center;
     box-shadow: none;
   }
 
   .dashboard-completion-ring-inner {
-    width: 42px;
-    height: 42px;
+    width: 40px;
+    height: 40px;
   }
 
   .dashboard-completion-ring-inner strong {
-    font-size: 12px;
+    font-size: 11px;
   }
 
   .dashboard-completion-ring-inner span {
@@ -6858,15 +6876,89 @@ body.view-focus .dashboard-layout {
   .dashboard-hero-kpi {
     flex: 1 1 0;
     min-width: 0;
-    padding: 6px 8px;
+    padding: 6px 6px;
+    border-radius: 8px;
+    gap: 1px;
   }
 
   .dashboard-hero-kpi strong {
-    font-size: 14px;
+    font-size: 13px;
   }
 
   .dashboard-hero-kpi span {
+    font-size: 9px;
+    letter-spacing: 0.02em;
+  }
+
+  .dashboard-metrics.summary-grid {
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+
+  .dashboard-metric {
+    padding: 10px 12px;
+    border-radius: 10px;
+    gap: 8px;
+  }
+
+  .dashboard-metric strong {
+    font-size: 18px;
+  }
+
+  .dashboard-metric .metric-icon {
+    width: 30px;
+    height: 30px;
+    border-radius: 7px;
+  }
+
+  .dashboard-metric .metric-card-body p {
     font-size: 10px;
+  }
+
+  .dashboard-insights {
+    gap: 8px;
+  }
+
+  .dashboard-panel {
+    padding: 12px;
+    border-radius: 10px;
+  }
+
+  .dashboard-panel .panel-heading {
+    margin-bottom: 8px;
+    align-items: center;
+  }
+
+  .dashboard-panel .panel-heading h2 {
+    font-size: 14px;
+    font-weight: 700;
+  }
+
+  .dashboard-panel .eyebrow {
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    margin-bottom: 2px;
+  }
+
+  .dashboard-panel .panel-total {
+    padding: 3px 8px;
+    font-size: 10px;
+  }
+
+  .breakdown-item {
+    padding: 8px 10px;
+    gap: 6px;
+    border-radius: 8px;
+  }
+
+  .dashboard-recent-item {
+    padding: 10px 12px;
+    gap: 6px;
+  }
+
+  .dashboard-recent-list {
+    gap: 8px;
+    max-height: none;
   }
 
   .ticket-filters,
@@ -7262,6 +7354,11 @@ body.view-focus .dashboard-layout {
     grid-template-columns: 1fr;
   }
 
+  /* Keep dashboard metrics as a compact 2×2 on phones */
+  .dashboard-metrics.summary-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+
   .dashboard-hero-kpis {
     flex-direction: row;
   }
@@ -7269,6 +7366,13 @@ body.view-focus .dashboard-layout {
   .dashboard-hero-kpi {
     min-width: 0;
     flex: 1 1 0;
+  }
+
+  .dashboard-hero-actions .primary-button,
+  .dashboard-hero-actions .secondary-button {
+    min-height: 30px;
+    font-size: 11px;
+    padding: 0 8px;
   }
 
   .brand-tagline {
