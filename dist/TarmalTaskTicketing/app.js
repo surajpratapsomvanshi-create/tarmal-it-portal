@@ -6302,6 +6302,35 @@ function ticketMatchesPresentationPeriod(ticket) {
   return ticketRelevantInPeriod(ticket, selectedPresentationPeriod);
 }
 
+function presentationTicketEndTimestamp(ticket) {
+  const date = parseTicketDate(ticket?.["End date"]);
+  return date ? date.getTime() : null;
+}
+
+function presentationTicketStartTimestamp(ticket) {
+  const date = parseTicketDate(ticket?.["Start date"]);
+  return date ? date.getTime() : null;
+}
+
+/** Presentation Kanban: End date desc when present; otherwise Start date asc. */
+function comparePresentationTickets(a, b) {
+  const aEnd = presentationTicketEndTimestamp(a);
+  const bEnd = presentationTicketEndTimestamp(b);
+  const aHasEnd = aEnd != null;
+  const bHasEnd = bEnd != null;
+
+  if (aHasEnd && bHasEnd) return bEnd - aEnd;
+  if (aHasEnd !== bHasEnd) return aHasEnd ? -1 : 1;
+
+  const aStart = presentationTicketStartTimestamp(a);
+  const bStart = presentationTicketStartTimestamp(b);
+  const aHasStart = aStart != null;
+  const bHasStart = bStart != null;
+  if (aHasStart && bHasStart) return aStart - bStart;
+  if (aHasStart !== bHasStart) return aHasStart ? -1 : 1;
+  return ticketRecentTimestamp(b) - ticketRecentTimestamp(a);
+}
+
 function getPresentationTickets(tickets = getValidTickets()) {
   // Exact Type SAP / Infra only (never Daily variants); top-level projects.
   return tickets
@@ -6312,13 +6341,7 @@ function getPresentationTickets(tickets = getValidTickets()) {
       return true;
     })
     .filter((ticket) => ticketMatchesPresentationPeriod(ticket))
-    .sort((a, b) => {
-      const aToday = isMilestoneToday(a) && isOpenTicket(a) ? 1 : 0;
-      const bToday = isMilestoneToday(b) && isOpenTicket(b) ? 1 : 0;
-      if (bToday !== aToday) return bToday - aToday;
-      return ticketMilestoneTimestamp(b) - ticketMilestoneTimestamp(a)
-        || ticketRecentTimestamp(b) - ticketRecentTimestamp(a);
-    });
+    .sort(comparePresentationTickets);
 }
 
 function renderPresentationAttachmentThumbs(ticket) {
@@ -6638,13 +6661,7 @@ function renderPresentationCard(ticket, index) {
 }
 
 function sortPresentationColumnTickets(tickets) {
-  return [...tickets].sort((a, b) => {
-    const aToday = isMilestoneToday(a) && isOpenTicket(a) ? 1 : 0;
-    const bToday = isMilestoneToday(b) && isOpenTicket(b) ? 1 : 0;
-    if (bToday !== aToday) return bToday - aToday;
-    return ticketMilestoneTimestamp(b) - ticketMilestoneTimestamp(a)
-      || ticketRecentTimestamp(b) - ticketRecentTimestamp(a);
-  });
+  return [...tickets].sort(comparePresentationTickets);
 }
 
 function renderPresentationView(tickets = getValidTickets()) {
