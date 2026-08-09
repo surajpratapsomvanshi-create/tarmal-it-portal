@@ -6933,18 +6933,207 @@ body.view-focus .dashboard-layout {
   }
 
   #ticketTable tbody tr.status-completed,
-  #projectTable tbody tr.status-completed {
+  #projectTable tbody tr.status-completed,
+  #ticketTable tbody tr.milestone-today.status-completed,
+  #projectTable tbody tr.milestone-today.status-completed,
+  #ticketTable tbody tr.milestone-today.status-completed:hover,
+  #projectTable tbody tr.milestone-today.status-completed:hover {
     background: #fafdfa;
   }
 
   #ticketTable tbody tr.status-progress,
-  #projectTable tbody tr.status-progress {
+  #projectTable tbody tr.status-progress,
+  #ticketTable tbody tr.milestone-today.status-progress,
+  #projectTable tbody tr.milestone-today.status-progress,
+  #ticketTable tbody tr.milestone-today.status-progress:hover,
+  #projectTable tbody tr.milestone-today.status-progress:hover {
     background: #fffbeb;
   }
 
   #ticketTable tbody tr.status-pending,
-  #projectTable tbody tr.status-pending {
+  #projectTable tbody tr.status-pending,
+  #ticketTable tbody tr.milestone-today.status-pending,
+  #projectTable tbody tr.milestone-today.status-pending,
+  #ticketTable tbody tr.milestone-today.status-pending:hover,
+  #projectTable tbody tr.milestone-today.status-pending:hover {
     background: #fef2f2;
+  }
+
+  #ticketTable tbody tr.status-approval,
+  #projectTable tbody tr.status-approval,
+  #ticketTable tbody tr.milestone-today.status-approval,
+  #projectTable tbody tr.milestone-today.status-approval,
+  #ticketTable tbody tr.milestone-today.status-approval:hover,
+  #projectTable tbody tr.milestone-today.status-approval:hover {
+    background: #fff7ed;
+  }
+
+  #ticketTable tbody tr.status-blocked,
+  #projectTable tbody tr.status-blocked,
+  #ticketTable tbody tr.milestone-today.status-blocked,
+  #projectTable tbody tr.milestone-today.status-blocked,
+  #ticketTable tbody tr.milestone-today.status-blocked:hover,
+  #projectTable tbody tr.milestone-today.status-blocked:hover {
+    background: #fffafa;
+  }
+
+  /*
+   * Mobile pale status tints beat `tbody tr.milestone-today { background:#7f1d1d }`
+   * via #ticketTable specificity, but left white ink/pills/icons → invisible on pink.
+   * Force dark readable colors + normal pills/actions on stacked cards.
+   */
+  #ticketTable tbody tr.milestone-today,
+  #projectTable tbody tr.milestone-today {
+    color: var(--ink);
+    box-shadow: inset 4px 0 0 #7f1d1d, var(--shadow-sm, 0 1px 2px rgba(15, 23, 42, 0.04));
+  }
+
+  #ticketTable tbody tr.milestone-today td,
+  #ticketTable tbody tr.milestone-today .task-col,
+  #ticketTable tbody tr.milestone-today .ticket-parent-task,
+  #ticketTable tbody tr.milestone-today .remarks-content,
+  #ticketTable tbody tr.milestone-today .remarks-text,
+  #ticketTable tbody tr.milestone-today .subtask-indicator,
+  #projectTable tbody tr.milestone-today td,
+  #projectTable tbody tr.milestone-today .task-col,
+  #projectTable tbody tr.milestone-today .ticket-parent-task,
+  #projectTable tbody tr.milestone-today .remarks-content,
+  #projectTable tbody tr.milestone-today .remarks-text,
+  #projectTable tbody tr.milestone-today .subtask-indicator {
+    color: var(--ink);
+  }
+
+  #ticketTable tbody tr.milestone-today .ticket-col-compact,
+  #projectTable tbody tr.milestone-today .ticket-col-compact,
+  #ticketTable tbody tr.milestone-today .muted-text,
+  #projectTable tbody tr.milestone-today .muted-text {
+    color: var(--muted);
+  }
+
+  #ticketTable tbody tr.milestone-today .remarks-col,
+  #projectTable tbody tr.milestone-today .remarks-col {
+    color: var(--ink-secondary);
+  }
+
+  #ticketTable tbody tr.milestone-today .status-pill.status-completed,
+  #projectTable tbody tr.milestone-today .status-pill.status-completed {
+    color: var(--green);
+    background: var(--green-soft);
+    border-color: #a7f3d0;
+  }
+
+  #ticketTable tbody tr.milestone-today .status-pill.status-progress,
+  #projectTable tbody tr.milestone-today .status-pill.status-progress {
+    color: #b45309;
+    background: #fffbeb;
+    border-color: #fde68a;
+  }
+
+  #ticketTable tbody tr.milestone-today .status-pill.status-pending,
+  #projectTable tbody tr.milestone-today .status-pill.status-pending {
+    color: #b91c1c;
+    background: #fef2f2;
+    border-color: #fecaca;
+  }
+
+  #ticketTable tbody tr.milestone-today .status-pill.status-approval,
+  #projectTable tbody tr.milestone-today .status-pill.status-approval {
+    color: #c2410c;
+    background: #fff7ed;
+    border-color: #fdba74;
+  }
+
+  #ticketTable tbody tr.milestone-today .status-pill.status-blocked,
+  #projectTable tbody tr.milestone-today .status-pill.status-blocked {
+    color: var(--red);
+    background: var(--red-soft);
+    border-color: #fecaca;
+  }
+
+  #ticketTable tbody tr.milestone-today .status-pill.status-other,
+  #projectTable tbody tr.milestone-today .status-pill.status-other {
+    color: var(--muted);
+    background: var(--soft);
+    border-color: var(--line);
+  }
+
+  #ticketTable tbody tr.milestone-today .priority-pill.priority-high,
+  #projectTable tbody tr.milestone-today .priority-pill.priority-high {
+    color: #c2410c;
+    background: #fff7ed;
+    border-color: #fed7aa;
+  }
+
+  #ticketTable tbody tr.milestone-today .priority-pill.priority-low,
+  #projectTable tbody tr.milestone-today .priority-pill.priority-low {
+    color: #1d4ed8;
+    background: var(--blue-soft);
+    border-color: #bfdbfe;
+  }
+
+  #ticketTable tbody tr.milestone-today .ticket-edit-button,
+  #ticketTable tbody tr.milestone-today .ticket-duplicate-button,
+  #ticketTable tbody tr.milestone-today .ticket-subtask-toggle,
+  #ticketTable tbody tr.milestone-today .ticket-presentation-pin-button,
+  #projectTable tbody tr.milestone-today .ticket-edit-button,
+  #projectTable tbody tr.milestone-today .ticket-duplicate-button,
+  #projectTable tbody tr.milestone-today .ticket-subtask-toggle,
+  #projectTable tbody tr.milestone-today .ticket-presentation-pin-button {
+    background: var(--panel);
+    border-color: var(--line-strong);
+    color: var(--ink-secondary);
+  }
+
+  #ticketTable tbody tr.milestone-today .ticket-subtask-button,
+  #projectTable tbody tr.milestone-today .ticket-subtask-button {
+    background: var(--panel);
+    border-color: var(--line);
+    color: var(--blue);
+  }
+
+  #ticketTable tbody tr.milestone-today .ticket-milestone-today-button,
+  #projectTable tbody tr.milestone-today .ticket-milestone-today-button {
+    background: var(--panel);
+    border-color: var(--line);
+    color: #b45309;
+  }
+
+  #ticketTable tbody tr.milestone-today .ticket-milestone-today-button.is-today,
+  #projectTable tbody tr.milestone-today .ticket-milestone-today-button.is-today {
+    background: #fef3c7;
+    border-color: #f59e0b;
+    color: #92400e;
+  }
+
+  #ticketTable tbody tr.milestone-today .ticket-milestone-today-button.is-tomorrow,
+  #projectTable tbody tr.milestone-today .ticket-milestone-today-button.is-tomorrow {
+    background: #ecfeff;
+    border-color: #22d3ee;
+    color: #0e7490;
+  }
+
+  #ticketTable tbody tr.milestone-today .ticket-subtask-count,
+  #projectTable tbody tr.milestone-today .ticket-subtask-count {
+    background: var(--soft);
+    border-color: var(--line);
+    color: var(--ink-secondary);
+  }
+
+  #ticketTable tbody tr.milestone-today .ticket-presentation-pin-button,
+  #projectTable tbody tr.milestone-today .ticket-presentation-pin-button {
+    color: var(--muted);
+    border-color: var(--line);
+  }
+
+  #ticketTable tbody tr.milestone-today .screenshot-preview-btn,
+  #ticketTable tbody tr.milestone-today .screenshot-upload-btn,
+  #ticketTable tbody tr.milestone-today .local-screenshot-badge,
+  #projectTable tbody tr.milestone-today .screenshot-preview-btn,
+  #projectTable tbody tr.milestone-today .screenshot-upload-btn,
+  #projectTable tbody tr.milestone-today .local-screenshot-badge {
+    background: var(--panel);
+    border-color: var(--line);
+    color: var(--ink-secondary);
   }
 
   #ticketTable tbody tr.empty-row,

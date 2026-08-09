@@ -3811,6 +3811,9 @@ function renderKanbanBoard(tickets) {
 function shortenStatusMessageForMobile(message) {
   const text = String(message || "");
   if (/^Could not refresh tickets$/i.test(text)) return "Refresh failed";
+  if (/^Could not refresh procurement$/i.test(text)) return "Procure sync failed";
+  if (/^Refreshing procurement\.\.\.$/i.test(text)) return "Refreshing…";
+  if (/^Procurement refreshed$/i.test(text)) return "Procure updated";
   if (/^Using cached tickets$/i.test(text)) return "Cached tickets";
   if (/^Refreshing tickets\.\.\.$/i.test(text)) return "Refreshing…";
   if (/^Ready to sync$/i.test(text)) return "Ready";
