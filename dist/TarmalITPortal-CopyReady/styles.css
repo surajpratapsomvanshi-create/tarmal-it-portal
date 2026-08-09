@@ -7992,7 +7992,8 @@ body.view-focus .dashboard-layout {
   box-shadow: none;
   border-top: 2px solid var(--line-strong);
   overflow: hidden;
-  touch-action: none;
+  /* Allow native scroll until long-press drag arms */
+  touch-action: pan-x pan-y;
   user-select: none;
   -webkit-user-select: none;
   cursor: grab;
@@ -8006,6 +8007,7 @@ body.view-focus .dashboard-layout {
 
 .presentation-card.is-dragging {
   opacity: 0.35;
+  touch-action: none;
 }
 
 .presentation-card-ghost {
@@ -8524,6 +8526,80 @@ body.present-mode .presentation-files-chip {
   }
 }
 
+/* Mobile: page-level vertical scroll + horizontal column pan (no nested column scroll) */
+@media (max-width: 768px) {
+  body.view-focus .tab-panel[data-panel="presentation"].active,
+  body.present-mode .tab-panel[data-panel="presentation"].active {
+    overflow-x: hidden;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-y: contain;
+  }
+
+  body.view-focus .presentation-board,
+  body.present-mode .presentation-board {
+    overflow: visible;
+    flex: 0 0 auto;
+    min-height: auto;
+    height: auto;
+  }
+
+  .presentation-deck.presentation-kanban,
+  body.view-focus .presentation-deck.presentation-kanban,
+  body.present-mode .presentation-deck.presentation-kanban,
+  body.view-focus .presentation-board.presentation-hero-collapsed .presentation-deck.presentation-kanban,
+  body.view-focus .presentation-hero.is-collapsed ~ .presentation-deck.presentation-kanban,
+  .presentation-hero.is-collapsed ~ .presentation-deck.presentation-kanban,
+  .presentation-board.presentation-hero-collapsed .presentation-deck.presentation-kanban {
+    overflow: visible;
+    flex: 0 0 auto;
+    min-height: auto;
+    height: auto;
+  }
+
+  .presentation-kanban-columns,
+  body.view-focus .presentation-kanban-columns,
+  body.present-mode .presentation-kanban-columns {
+    flex: 0 0 auto;
+    min-height: auto;
+    align-items: flex-start;
+    overflow-x: auto;
+    overflow-y: visible;
+    -webkit-overflow-scrolling: touch;
+    scroll-snap-type: x mandatory;
+    overscroll-behavior-x: contain;
+    touch-action: pan-x pan-y;
+    padding-bottom: 12px;
+  }
+
+  .presentation-kanban-column,
+  body.view-focus .presentation-kanban-column,
+  body.present-mode .presentation-kanban-column {
+    flex: 0 0 88vw;
+    width: 88vw;
+    min-width: 88vw;
+    max-width: 88vw;
+    height: auto;
+    min-height: auto;
+    max-height: none;
+    align-self: flex-start;
+    scroll-snap-align: start;
+    scroll-snap-stop: normal;
+  }
+
+  .presentation-kanban-column-body,
+  body.view-focus .presentation-kanban-column-body,
+  body.present-mode .presentation-kanban-column-body {
+    overflow: visible;
+    overflow-y: visible;
+    min-height: auto;
+  }
+
+  body.presentation-card-dragging .presentation-kanban-column-body {
+    overflow: visible;
+  }
+}
+
 @media (max-width: 720px) {
   /* Top expand bar already shows the page title — avoid a second "Presentation". */
   .presentation-hero-toolbar-label {
@@ -8580,12 +8656,6 @@ body.present-mode .presentation-files-chip {
     min-height: 32px;
     padding: 0 8px;
     font-size: 11px;
-  }
-
-  .presentation-hero.is-collapsed ~ .presentation-deck.presentation-kanban,
-  .presentation-board.presentation-hero-collapsed .presentation-deck.presentation-kanban {
-    flex: 1 1 auto;
-    min-height: 0;
   }
 
   .presentation-card .owner-chip-name {

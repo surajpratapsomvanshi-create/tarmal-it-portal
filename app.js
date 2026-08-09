@@ -6460,6 +6460,7 @@ function bindPresentationCardDragDrop(root) {
       originColumnId = "";
       clearColumnTargets();
       card.classList.remove("is-dragging");
+      card.style.touchAction = "";
       document.body.classList.remove("presentation-card-dragging");
       if (ghost) {
         ghost.remove();
@@ -6480,7 +6481,15 @@ function bindPresentationCardDragDrop(root) {
       dragging = true;
       card.classList.remove("is-long-pressing");
       card.classList.add("is-dragging");
+      card.style.touchAction = "none";
       document.body.classList.add("presentation-card-dragging");
+      if (pointerId != null) {
+        try {
+          card.setPointerCapture(pointerId);
+        } catch (_error) {
+          /* ignore */
+        }
+      }
       if (navigator.vibrate) {
         try {
           navigator.vibrate(30);
@@ -6513,11 +6522,7 @@ function bindPresentationCardDragDrop(root) {
       lastX = event.clientX;
       lastY = event.clientY;
       card.classList.add("is-long-pressing");
-      try {
-        card.setPointerCapture(event.pointerId);
-      } catch (_error) {
-        /* ignore */
-      }
+      /* Do not capture yet — native vertical/horizontal scroll must keep working */
 
       pressTimer = window.setTimeout(() => {
         pressTimer = null;
@@ -6533,8 +6538,9 @@ function bindPresentationCardDragDrop(root) {
       if (!dragging) {
         const dx = event.clientX - startX;
         const dy = event.clientY - startY;
-        if (Math.hypot(dx, dy) > 12) {
+        if (Math.hypot(dx, dy) > 10) {
           clearPress();
+          pointerId = null;
         }
         return;
       }
