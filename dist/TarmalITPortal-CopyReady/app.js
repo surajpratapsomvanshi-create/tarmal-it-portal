@@ -6379,15 +6379,18 @@ function ticketMatchesPresentationPeriod(ticket) {
 
 function ticketMatchesPresentationOwner(ticket) {
   if (selectedPresentationOwner === "all") return true;
-  const owner = getTicketOriginalOwnerValue(ticket);
-  if (selectedPresentationOwner === "Bhanu") return owner === "Bhanu";
-  if (selectedPresentationOwner === "not-bhanu") return owner !== "Bhanu";
+  if (selectedPresentationOwner === "Bhanu") {
+    return getTicketOriginalOwnerValue(ticket) === "Bhanu";
+  }
+  if (selectedPresentationOwner === "Suraj") {
+    return cleanText(ticket?.Owner).toLowerCase() === "suraj";
+  }
   return true;
 }
 
 function presentationOwnerLabel() {
   if (selectedPresentationOwner === "Bhanu") return "Bhanu";
-  if (selectedPresentationOwner === "not-bhanu") return "Not Bhanu";
+  if (selectedPresentationOwner === "Suraj") return "Suraj";
   return "";
 }
 
