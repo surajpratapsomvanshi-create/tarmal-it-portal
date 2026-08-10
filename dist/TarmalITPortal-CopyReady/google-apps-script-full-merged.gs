@@ -104,6 +104,14 @@ const DEFERRED_POST_SAVE_LEASE_KEY_ = "deferredPostSaveLease";
 const DEFERRED_POST_SAVE_LEASE_TTL_SEC_ = 180;
 // Fail-fast write lock: client retries quietly. ScriptLock also auto-expires ~30s.
 const WRITE_LOCK_WAIT_MS_ = 8000;
+// Short-lived caches cut repeated sheet reads within / across nearby GET/POST runs.
+const TASK_AUDIT_CACHE_KEY_ = "taskAuditMapV1";
+const TASK_AUDIT_CACHE_TTL_SEC_ = 90;
+const USERS_CACHE_KEY_ = "usersJsonV1";
+const HIERARCHY_CACHE_KEY_ = "hierarchyJsonV1";
+const META_CACHE_TTL_SEC_ = 120;
+// Per-execution Tasks header cache (Apps Script keeps globals for one invocation).
+var tasksHeaderCache_ = null;
 
 function sanitizeAttachmentName_(value) {
   return String(value || "")
@@ -489,14 +497,18 @@ function doGet(e) {
 
     // compact=1: list payload for portal boot/refresh — tickets + users + hierarchy only,
     // with heavy note/base64 content trimmed. Frontend requests this on every refresh.
+    // lite=1: skip TaskAudit join (faster auto-refresh; Performance dates catch up on full refresh).
     if (compact) {
-      const tickets = readTickets_().map(compactTicketForList_);
+      const lite = e && e.parameter && (String(e.parameter.lite || "") === "1"
+        || String(e.parameter.lite || "").toLowerCase() === "true");
+      const tickets = readTickets_({ includeAudit: !lite }).map(compactTicketForList_);
       return buildResponse_({
         ok: true,
         compact: true,
+        lite: Boolean(lite),
         tickets: tickets,
-        users: readUsers_(),
-        hierarchy: readUserMaster_()
+        users: readUsersCached_(),
+        hierarchy: readUserMasterCached_()
       }, e);
     }
 
@@ -583,8 +595,8 @@ function clearDeferredPostSaveTriggers_() {
 /**
  * Coalesce non-critical post-save work into one ~30s one-shot trigger so
  * doPost can return immediately after writing ticket rows.
- * Approval emails for the saved ticket are still attempted inline in
- * appendTicket_ / updateTicket_; this queue only covers full-sheet scans.
+ * Approval emails are deferred here too (not on the save critical path).
+ * Creating/deleting ScriptApp triggers is slow — only schedule when none exists.
  */
 function scheduleDeferredPostSaveWork_(options) {
   const opts = options || {};
@@ -596,7 +608,11 @@ function scheduleDeferredPostSaveWork_(options) {
   queue.requestedAt = Date.now();
   writeDeferredPostSaveQueue_(queue);
 
-  clearDeferredPostSaveTriggers_();
+  const hasTrigger = ScriptApp.getProjectTriggers().some(function(trigger) {
+    return trigger.getHandlerFunction() === DEFERRED_POST_SAVE_HANDLER_;
+  });
+  if (hasTrigger) return;
+
   ScriptApp.newTrigger(DEFERRED_POST_SAVE_HANDLER_)
     .timeBased()
     .after(DEFERRED_POST_SAVE_DELAY_MS_)
@@ -770,42 +786,31 @@ function doPost(e) {
     }
 
     if (data.action === "updateTicket") {
-      // Sheet write under lock; approval email after release so Gmail latency cannot
-      // hold the concurrent-write lock.
+      // Sheet write under lock; approval email is fully deferred so Gmail latency
+      // never blocks the save response (client already treats approval as pending).
       data.deferApprovalEmail = true;
       const result = updateTicket_(data);
-      const pendingApproval = result && result._pendingApprovalEmail;
-      const approvalCtx = result && result._approvalEmailContext;
       lockAcquired = releaseWriteLock_(lock, lockAcquired);
 
-      var approvalEmailResult = {
-        to: result.approvalSentTo || "",
-        error: result.approvalEmailError || ""
-      };
-      if (pendingApproval && approvalCtx) {
-        try {
-          approvalEmailResult = sendApprovalEmailIfNeeded_(
-            approvalCtx.data,
-            approvalCtx.savedTicket,
-            approvalCtx.workflow,
-            approvalCtx.sheet,
-            approvalCtx.sheetRow
-          );
-        } catch (emailError) {
-          Logger.log(emailError);
-          approvalEmailResult = { to: "", error: String(emailError.message || emailError) };
-        }
-      }
+      const needsApprovalEmail = result
+        && result.approvalPending === true
+        && (result._pendingApprovalEmail === true || !result.approvalSentTo);
 
       try {
         scheduleDeferredPostSaveWork_({
           audit: true,
           projects: true,
-          approvalEmails: result.approvalPending === true && !approvalEmailResult.to
+          approvalEmails: needsApprovalEmail
         });
       } catch (postUpdateError) {
         Logger.log(postUpdateError);
       }
+
+      if (result) {
+        delete result._pendingApprovalEmail;
+        delete result._approvalEmailContext;
+      }
+
       return buildResponse_({
         ok: result.ok !== false,
         conflict: result.conflict === true,
@@ -818,16 +823,18 @@ function doPost(e) {
         datesPersisted: result.datesPersisted === true,
         parentRemarkAppended: result.parentRemarkAppended === true,
         parentSheetRow: result.parentSheetRow || 0,
+        parentNotes: result.parentNotes || "",
         status: result.status || "",
         ticketId: result.ticketId || "",
         lastUpdated: result.lastUpdated || "",
         approvalPending: result.approvalPending === true,
-        approvalSentTo: approvalEmailResult.to || result.approvalSentTo || "",
-        approvalEmailError: approvalEmailResult.error || result.approvalEmailError || "",
+        approvalSentTo: result.approvalSentTo || "",
+        approvalEmailError: result.approvalEmailError || "",
         approvalMessage: result.approvalMessage || "",
         approved: result.approved === true,
         error: result.error || "",
-        deferredPostSave: true
+        deferredPostSave: true,
+        deferredApprovalEmail: needsApprovalEmail
       }, e);
     }
 
@@ -854,6 +861,11 @@ function doPost(e) {
           ticketData.deferApprovalEmail = true;
           const item = appendTicket_(ticketData);
           item.ok = true;
+          if (item._pendingApprovalEmail) {
+            item.deferredApprovalEmail = true;
+          }
+          delete item._pendingApprovalEmail;
+          delete item._approvalEmailContext;
           return item;
         } catch (itemError) {
           Logger.log(itemError);
@@ -866,30 +878,7 @@ function doPost(e) {
         }
       });
 
-      const pendingEmails = results.filter(function(item) {
-        return item && item.ok !== false && item._pendingApprovalEmail && item._approvalEmailContext;
-      });
       lockAcquired = releaseWriteLock_(lock, lockAcquired);
-
-      pendingEmails.forEach(function(item) {
-        try {
-          const ctx = item._approvalEmailContext;
-          const emailResult = sendApprovalEmailIfNeeded_(
-            ctx.data,
-            ctx.savedTicket,
-            ctx.workflow,
-            ctx.sheet,
-            ctx.sheetRow
-          );
-          item.approvalSentTo = emailResult.to || "";
-          item.approvalEmailError = emailResult.error || "";
-        } catch (emailError) {
-          Logger.log(emailError);
-          item.approvalEmailError = String(emailError.message || emailError);
-        }
-        delete item._pendingApprovalEmail;
-        delete item._approvalEmailContext;
-      });
 
       const successCount = results.filter(function(item) { return item.ok !== false; }).length;
       try {
@@ -898,7 +887,7 @@ function doPost(e) {
           projects: true,
           taskEmails: true,
           approvalEmails: results.some(function(item) {
-            return item.ok !== false && item.approvalPending === true && !item.approvalSentTo;
+            return item.ok !== false && item.approvalPending === true;
           })
         });
       } catch (postAppendError) {
@@ -920,25 +909,12 @@ function doPost(e) {
 
     data.deferApprovalEmail = true;
     const appendResult = appendTicket_(data);
-    const appendPending = appendResult && appendResult._pendingApprovalEmail;
-    const appendCtx = appendResult && appendResult._approvalEmailContext;
+    const needsAppendApprovalEmail = appendResult
+      && appendResult.approvalPending === true
+      && appendResult._pendingApprovalEmail === true;
     lockAcquired = releaseWriteLock_(lock, lockAcquired);
 
-    if (appendPending && appendCtx) {
-      try {
-        const emailResult = sendApprovalEmailIfNeeded_(
-          appendCtx.data,
-          appendCtx.savedTicket,
-          appendCtx.workflow,
-          appendCtx.sheet,
-          appendCtx.sheetRow
-        );
-        appendResult.approvalSentTo = emailResult.to || "";
-        appendResult.approvalEmailError = emailResult.error || "";
-      } catch (emailError) {
-        Logger.log(emailError);
-        appendResult.approvalEmailError = String(emailError.message || emailError);
-      }
+    if (appendResult) {
       delete appendResult._pendingApprovalEmail;
       delete appendResult._approvalEmailContext;
     }
@@ -948,7 +924,7 @@ function doPost(e) {
         audit: true,
         projects: true,
         taskEmails: true,
-        approvalEmails: appendResult.approvalPending === true && !appendResult.approvalSentTo
+        approvalEmails: needsAppendApprovalEmail
       });
     } catch (postAppendError) {
       Logger.log(postAppendError);
@@ -969,7 +945,8 @@ function doPost(e) {
       approvalSentTo: appendResult.approvalSentTo || "",
       approvalMessage: appendResult.approvalMessage || "",
       approved: appendResult.approved === true,
-      deferredPostSave: true
+      deferredPostSave: true,
+      deferredApprovalEmail: needsAppendApprovalEmail
     }, e);
   } catch (error) {
     return buildResponse_({ ok: false, error: error.message }, e);
@@ -979,7 +956,9 @@ function doPost(e) {
   }
 }
 
-function readTickets_() {
+function readTickets_(options) {
+  const opts = options || {};
+  const includeAudit = opts.includeAudit !== false;
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(TASKS_SHEET);
   if (!sheet) {
     throw new Error(`Sheet "${TASKS_SHEET}" was not found.`);
@@ -991,7 +970,7 @@ function readTickets_() {
 
   const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
   const columnMap = buildColumnMap_(headers);
-  const auditMap = readTaskAuditMap_();
+  const auditMap = includeAudit ? readTaskAuditMap_() : {};
   const values = sheet.getRange(2, 1, lastRow, lastCol).getValues();
   const tickets = [];
 
@@ -1000,7 +979,7 @@ function readTickets_() {
     const ticket = rowToTicket_(values[i], columnMap, sheetRow);
     if (!String(ticket.Task || "").trim()) continue;
     if (isSoftDeletedStatus_(ticket.Status)) continue;
-    tickets.push(attachTicketAudit_(ticket, auditMap));
+    tickets.push(includeAudit ? attachTicketAudit_(ticket, auditMap) : ticket);
   }
 
   return tickets;
@@ -1094,19 +1073,39 @@ function writeOwnerCell_(sheet, sheetRow, columnMap, ownerValue) {
   sheet.getRange(sheetRow, ownerIndex + 1).setValue(owner);
 }
 
+function invalidateTasksHeaderCache_() {
+  tasksHeaderCache_ = null;
+}
+
 function getTasksSheetHeaders_(sheet) {
-  const headerValues = sheet.getRange(1, 1, 1, sheet.getMaxColumns()).getValues()[0];
-  let lastColumn = 1;
-  for (let i = headerValues.length - 1; i >= 0; i--) {
-    if (String(headerValues[i] || "").trim()) {
-      lastColumn = i + 1;
-      break;
-    }
+  const sheetId = sheet.getSheetId();
+  if (tasksHeaderCache_ && tasksHeaderCache_.sheetId === sheetId) {
+    return {
+      headers: tasksHeaderCache_.headers.slice(),
+      lastColumn: tasksHeaderCache_.lastColumn
+    };
   }
-  lastColumn = Math.max(lastColumn, sheet.getLastColumn(), 1);
-  return {
-    headers: sheet.getRange(1, 1, 1, lastColumn).getValues()[0],
+
+  // Read only used columns once (avoid getMaxColumns + second getValues).
+  const lastColumn = Math.max(sheet.getLastColumn(), 1);
+  const headers = sheet.getRange(1, 1, 1, lastColumn).getValues()[0];
+  tasksHeaderCache_ = {
+    sheetId: sheetId,
+    headers: headers.slice(),
     lastColumn: lastColumn
+  };
+  return {
+    headers: headers.slice(),
+    lastColumn: lastColumn
+  };
+}
+
+function setTasksHeaderCache_(sheet, headers) {
+  const trimmed = headers.slice();
+  tasksHeaderCache_ = {
+    sheetId: sheet.getSheetId(),
+    headers: trimmed,
+    lastColumn: Math.max(trimmed.length, 1)
   };
 }
 
@@ -1135,62 +1134,73 @@ function sheetDatesMatch_(left, right) {
   return a === b;
 }
 
-function ensureTasksMilestoneColumn_(sheet) {
+function ensureTasksColumns_(sheet) {
+  // Single header read + at most one header write for all missing columns.
   const sheetInfo = getTasksSheetHeaders_(sheet);
   const headers = sheetInfo.headers.slice();
+  let changed = false;
+
   const columnMap = buildColumnMap_(headers);
-  if (columnMap.milestone >= 0) return columnMap;
+  if (columnMap.milestone < 0) {
+    const milestoneIndex = COLUMN_FALLBACK_INDICES_.milestone;
+    while (headers.length <= milestoneIndex) headers.push("");
+    headers[milestoneIndex] = "Milestone";
+    changed = true;
+  }
 
-  const milestoneIndex = COLUMN_FALLBACK_INDICES_.milestone;
-  while (headers.length <= milestoneIndex) headers.push("");
-  headers[milestoneIndex] = "Milestone";
-  sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
-  return buildColumnMap_(headers);
-}
-
-function ensureTasksParentColumn_(sheet) {
-  const sheetInfo = getTasksSheetHeaders_(sheet);
-  const headers = sheetInfo.headers.slice();
-  const columnMap = buildColumnMap_(headers);
-  if (columnMap.parentSheetRow >= 0) return columnMap;
-
-  const parentIndex = COLUMN_FALLBACK_INDICES_.parentSheetRow;
-  while (headers.length <= parentIndex) headers.push("");
-  headers[parentIndex] = "Parent Sheet Row";
-  sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
-  return buildColumnMap_(headers);
-}
-
-function ensureTasksApprovalEmailColumn_(sheet) {
-  const sheetInfo = getTasksSheetHeaders_(sheet);
-  const headers = sheetInfo.headers.slice();
   const normalized = headers.map(function(header) {
     return normalizeHeader_(header);
   });
-  let approvalCol = normalized.indexOf("approval email sent");
-  if (approvalCol >= 0) return approvalCol;
+  if (normalized.indexOf("approval email sent") < 0) {
+    headers.push("Approval Email Sent");
+    changed = true;
+  }
 
-  headers.push("Approval Email Sent");
-  sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
-  return headers.length - 1;
-}
+  const mapAfterApproval = buildColumnMap_(headers);
+  if (mapAfterApproval.parentSheetRow < 0) {
+    const parentIndex = COLUMN_FALLBACK_INDICES_.parentSheetRow;
+    while (headers.length <= parentIndex) headers.push("");
+    if (!String(headers[parentIndex] || "").trim()) {
+      headers[parentIndex] = "Parent Sheet Row";
+    } else {
+      headers.push("Parent Sheet Row");
+    }
+    changed = true;
+  }
 
-function ensureTasksTicketIdColumn_(sheet) {
-  const sheetInfo = getTasksSheetHeaders_(sheet);
-  const headers = sheetInfo.headers.slice();
-  const columnMap = buildColumnMap_(headers);
-  if (columnMap.ticketId >= 0) return columnMap;
+  const mapAfterParent = buildColumnMap_(headers);
+  if (mapAfterParent.ticketId < 0) {
+    headers.push(TICKET_ID_HEADER_);
+    changed = true;
+  }
 
-  headers.push(TICKET_ID_HEADER_);
-  sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+  if (changed) {
+    sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+    setTasksHeaderCache_(sheet, headers);
+  }
+
   return buildColumnMap_(headers);
 }
 
-function ensureTasksColumns_(sheet) {
-  const columnMap = ensureTasksMilestoneColumn_(sheet);
-  ensureTasksApprovalEmailColumn_(sheet);
-  ensureTasksParentColumn_(sheet);
-  return ensureTasksTicketIdColumn_(sheet);
+function ensureTasksMilestoneColumn_(sheet) {
+  return ensureTasksColumns_(sheet);
+}
+
+function ensureTasksParentColumn_(sheet) {
+  return ensureTasksColumns_(sheet);
+}
+
+function ensureTasksApprovalEmailColumn_(sheet) {
+  ensureTasksColumns_(sheet);
+  const sheetInfo = getTasksSheetHeaders_(sheet);
+  const normalized = sheetInfo.headers.map(function(header) {
+    return normalizeHeader_(header);
+  });
+  return normalized.indexOf("approval email sent");
+}
+
+function ensureTasksTicketIdColumn_(sheet) {
+  return ensureTasksColumns_(sheet);
 }
 
 function shouldAppendSubtaskCompletion_(oldStatus, ticket) {
@@ -1272,15 +1282,15 @@ function nowIsoStamp_() {
 
 function appendSubtaskCompletionToParent_(sheet, columnMap, subtask) {
   const parentRow = Number(subtask.parentSheetRow || subtask["Parent Sheet Row"]);
-  if (!parentRow || parentRow < 2 || parentRow > sheet.getLastRow()) return false;
+  if (!parentRow || parentRow < 2 || parentRow > sheet.getLastRow()) return null;
 
   const sheetInfo = getTasksSheetHeaders_(sheet);
   const notesIndex = resolveColumnIndex_(columnMap, "notes");
-  if (notesIndex < 0) return false;
+  if (notesIndex < 0) return null;
 
   const parentRowValues = sheet.getRange(parentRow, 1, 1, sheetInfo.lastColumn).getValues()[0];
   const parent = rowToTicket_(parentRowValues, columnMap, parentRow);
-  if (isSoftDeletedStatus_(parent.Status)) return false;
+  if (isSoftDeletedStatus_(parent.Status)) return null;
 
   // Prefer parent ticketId when provided; otherwise require Task match when available.
   const expectedParentTask = String(subtask.parentTask || "").trim();
@@ -1296,7 +1306,11 @@ function appendSubtaskCompletionToParent_(sheet, columnMap, subtask) {
   const existingNotes = String(parentRowValues[notesIndex] || parent.Notes || "").trim();
   parentRowValues[notesIndex] = mergeScreenshotNotes_(existingNotes, appendLine);
   sheet.getRange(parentRow, 1, 1, sheetInfo.lastColumn).setValues([parentRowValues]);
-  return true;
+  return {
+    appended: true,
+    parentSheetRow: parentRow,
+    notes: String(parentRowValues[notesIndex] || "")
+  };
 }
 
 function isSoftDeletedStatus_(status) {
@@ -1405,8 +1419,8 @@ function sendApprovalEmailIfNeeded_(data, savedTicket, workflow, sheet, sheetRow
 }
 
 function writeTicketToSheetRow_(sheet, sheetRow, data) {
-  const sheetInfo = getTasksSheetHeaders_(sheet);
   const columnMap = ensureTasksColumns_(sheet);
+  const sheetInfo = getTasksSheetHeaders_(sheet);
   const lastColumn = Math.max(sheetInfo.lastColumn, COLUMN_FALLBACK_INDICES_.ticketId + 1);
   const existingRow = sheet.getRange(sheetRow, 1, 1, lastColumn).getValues()[0].slice();
   const oldTicket = rowToTicket_(existingRow, columnMap, sheetRow);
@@ -1512,8 +1526,8 @@ function writeTicketToSheetRow_(sheet, sheetRow, data) {
   applyTicketFieldsToRow_(row, columnMap, fields);
   sheet.getRange(sheetRow, 1, 1, lastColumn).setValues([row]);
 
-  const writtenRow = sheet.getRange(sheetRow, 1, 1, lastColumn).getValues()[0];
-  const savedTicket = rowToTicket_(writtenRow, columnMap, sheetRow);
+  // Trust the values we just wrote — avoid an extra getValues round-trip on the critical path.
+  const savedTicket = rowToTicket_(row, columnMap, sheetRow);
   const expectedMilestone = formatTicketFieldDate_(data.Milestone);
   const expectedStart = formatTicketFieldDate_(data["Start date"]) || expectedMilestone;
   const expectedEnd = formatTicketFieldDate_(data["End date"]);
@@ -1523,9 +1537,14 @@ function writeTicketToSheetRow_(sheet, sheetRow, data) {
 
   let parentRemarkAppended = false;
   let parentSheetRow = 0;
+  let parentNotes = "";
   if (shouldAppendSubtaskCompletion_(oldStatus, savedTicket)) {
-    parentRemarkAppended = appendSubtaskCompletionToParent_(sheet, columnMap, savedTicket);
-    parentSheetRow = Number(savedTicket.parentSheetRow) || 0;
+    const parentResult = appendSubtaskCompletionToParent_(sheet, columnMap, savedTicket);
+    if (parentResult && parentResult.appended) {
+      parentRemarkAppended = true;
+      parentSheetRow = Number(parentResult.parentSheetRow) || Number(savedTicket.parentSheetRow) || 0;
+      parentNotes = String(parentResult.notes || "");
+    }
   }
 
   const approvalEmailResult = data.deferApprovalEmail === true
@@ -1544,6 +1563,7 @@ function writeTicketToSheetRow_(sheet, sheetRow, data) {
     datesPersisted: datesPersisted,
     parentRemarkAppended: parentRemarkAppended,
     parentSheetRow: parentSheetRow,
+    parentNotes: parentNotes,
     status: savedTicket.Status,
     ticketId: savedTicket.ticketId || fields.ticketId || "",
     lastUpdated: lastUpdated,
@@ -1636,8 +1656,8 @@ function appendTicket_(data) {
     throw new Error(`Sheet "${TASKS_SHEET}" was not found.`);
   }
 
-  const sheetInfo = getTasksSheetHeaders_(sheet);
   const columnMap = ensureTasksColumns_(sheet);
+  const sheetInfo = getTasksSheetHeaders_(sheet);
   if (!data.ticketId) {
     data = Object.assign({}, data, { ticketId: createTicketId_() });
   }
@@ -1658,8 +1678,8 @@ function appendTicket_(data) {
   const sheetRow = sheet.getLastRow();
   writeOwnerCell_(sheet, sheetRow, columnMap, fields.owner);
 
-  const writtenRow = sheet.getRange(sheetRow, 1, 1, row.length).getValues()[0];
-  const savedTicket = rowToTicket_(writtenRow, columnMap, sheetRow);
+  // Trust the appended row — skip a post-write getValues on the create path.
+  const savedTicket = rowToTicket_(row, columnMap, sheetRow);
   if (shouldAppendSubtaskCompletion_("", savedTicket)) {
     appendSubtaskCompletionToParent_(sheet, columnMap, savedTicket);
   }
@@ -1717,6 +1737,7 @@ function removeTaskAuditEntry_(taskKey) {
       auditSheet.deleteRow(i + 2);
     }
   }
+  invalidateScriptCacheKey_(TASK_AUDIT_CACHE_KEY_);
 }
 
 function normalizeTicketIdentity_(value) {
@@ -1763,22 +1784,52 @@ function deleteTicket_(data) {
   return { sheetRow: sheetRow, task: ticket.Task, owner: ticket.Owner, ticketId: ticket.ticketId || "" };
 }
 
+function invalidateScriptCacheKey_(key) {
+  try {
+    CacheService.getScriptCache().remove(key);
+  } catch (error) {
+    Logger.log(error);
+  }
+}
+
 function readTaskAuditMap_() {
+  const cache = CacheService.getScriptCache();
+  try {
+    const cached = cache.get(TASK_AUDIT_CACHE_KEY_);
+    if (cached) {
+      return JSON.parse(cached) || {};
+    }
+  } catch (cacheError) {
+    Logger.log(cacheError);
+  }
+
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("TaskAudit");
   if (!sheet) return {};
 
-  const auditData = sheet.getDataRange().getValues();
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return {};
+
+  // Read only key + date columns (A, C–E) instead of getDataRange across all columns.
+  const keyValues = sheet.getRange(2, 1, lastRow, 1).getValues();
+  const dateValues = sheet.getRange(2, 3, lastRow, 5).getValues();
   const map = {};
 
-  for (let i = 1; i < auditData.length; i++) {
-    const key = String(auditData[i][0] || "").trim();
+  for (let i = 0; i < keyValues.length; i++) {
+    const key = String(keyValues[i][0] || "").trim();
     if (!key) continue;
 
     map[key] = {
-      createdOn: auditData[i][2],
-      lastUpdated: auditData[i][3],
-      closedOn: auditData[i][4]
+      createdOn: dateValues[i][0],
+      lastUpdated: dateValues[i][1],
+      closedOn: dateValues[i][2]
     };
+  }
+
+  try {
+    cache.put(TASK_AUDIT_CACHE_KEY_, JSON.stringify(map), TASK_AUDIT_CACHE_TTL_SEC_);
+  } catch (putError) {
+    // Cache has a size limit; skip when the audit map is too large.
+    Logger.log(putError);
   }
 
   return map;
@@ -1821,6 +1872,22 @@ function readUsers_() {
     .map((row) => rowToUser_(row));
 }
 
+function readUsersCached_() {
+  const cache = CacheService.getScriptCache();
+  try {
+    const cached = cache.get(USERS_CACHE_KEY_);
+    if (cached) return JSON.parse(cached) || [];
+  } catch (error) {
+    Logger.log(error);
+  }
+  const users = readUsers_();
+  try {
+    cache.put(USERS_CACHE_KEY_, JSON.stringify(users), META_CACHE_TTL_SEC_);
+  } catch (putError) {
+    Logger.log(putError);
+  }
+  return users;
+}
 
 function readUserMaster_() {
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(USER_MASTER_SHEET);
@@ -1848,6 +1915,24 @@ function readUserMaster_() {
     })
     .filter(function(entry) { return entry.user; });
 }
+
+function readUserMasterCached_() {
+  const cache = CacheService.getScriptCache();
+  try {
+    const cached = cache.get(HIERARCHY_CACHE_KEY_);
+    if (cached) return JSON.parse(cached) || [];
+  } catch (error) {
+    Logger.log(error);
+  }
+  const hierarchy = readUserMaster_();
+  try {
+    cache.put(HIERARCHY_CACHE_KEY_, JSON.stringify(hierarchy), META_CACHE_TTL_SEC_);
+  } catch (putError) {
+    Logger.log(putError);
+  }
+  return hierarchy;
+}
+
 function writeUsers_(users) {
   const sheet = ensureUsersSheet_();
   const rows = users.map((user) => userToRow_(user));
@@ -1858,6 +1943,7 @@ function writeUsers_(users) {
   if (output.length) {
     sheet.getRange(1, 1, output.length, USER_HEADERS.length).setValues(output);
   }
+  invalidateScriptCacheKey_(USERS_CACHE_KEY_);
 }
 
 function ensureAssetsSheet_() {
@@ -2418,6 +2504,7 @@ function updateHiddenTaskAudit() {
   }
 
   auditSheet.hideSheet();
+  invalidateScriptCacheKey_(TASK_AUDIT_CACHE_KEY_);
 }
 
 

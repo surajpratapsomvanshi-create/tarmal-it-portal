@@ -6035,6 +6035,8 @@ async function sendTicketUpdateToSheet(ticket) {
       setStatus("online", `Approval email sent to ${result.approvalSentTo}`);
     } else if (result.approvalEmailError) {
       setStatus("error", `Pending approval saved — email failed: ${result.approvalEmailError}`);
+    } else if (result.deferredApprovalEmail || result.deferredPostSave) {
+      setStatus("online", "Pending approval saved — email will send shortly");
     } else {
       setStatus("online", "Sent for manager approval (check Tasks sheet Approval Email Sent column)");
     }
@@ -6046,10 +6048,19 @@ async function sendTicketUpdateToSheet(ticket) {
       : (result.parentRemarkAppended ? "Sub-task completed — parent task updated" : "Ticket updated"));
   }
 
+  // Prefer local parent-notes ack over a blocking full-sheet refresh after save.
   if (result.parentRemarkAppended) {
-    await refreshFromSheet({ skipScreenshotSync: true });
+    const parentRow = Number(result.parentSheetRow) || 0;
+    if (parentRow && result.parentNotes) {
+      applyDriveLinksToLocalTicket(parentRow, result.parentNotes);
+    } else {
+      window.setTimeout(() => {
+        refreshFromSheet({ skipScreenshotSync: true, silent: true, lite: true }).catch(() => {});
+      }, 1200);
+    }
   }
 
+  lastSheetRefreshAt = Date.now();
   return { synced: true, ...result };
 }
 
@@ -7529,7 +7540,7 @@ function firstSuccessfulPromise(promises, fallbackMessage) {
   });
 }
 
-function fetchTicketsViaHttp(timeoutMs) {
+function fetchTicketsViaHttp(timeoutMs, options = {}) {
   if (!SHEET_WEB_APP_URL) {
     return Promise.reject(new Error("Sync is not configured."));
   }
@@ -7537,8 +7548,9 @@ function fetchTicketsViaHttp(timeoutMs) {
   const separator = SHEET_WEB_APP_URL.includes("?") ? "&" : "?";
   const controller = typeof AbortController === "function" ? new AbortController() : null;
   let timer = null;
+  const lite = options.lite ? "&lite=1" : "";
 
-  const request = fetch(`${SHEET_WEB_APP_URL}${separator}compact=1`, {
+  const request = fetch(`${SHEET_WEB_APP_URL}${separator}compact=1${lite}`, {
     method: "GET",
     redirect: "follow",
     credentials: "omit",
@@ -7569,7 +7581,7 @@ function fetchTicketsViaHttp(timeoutMs) {
   });
 }
 
-function fetchTicketsViaJsonp(timeoutMs) {
+function fetchTicketsViaJsonp(timeoutMs, options = {}) {
   return new Promise((resolve, reject) => {
     if (!SHEET_WEB_APP_URL) {
       reject(new Error("Sync is not configured."));
@@ -7579,6 +7591,7 @@ function fetchTicketsViaJsonp(timeoutMs) {
     const callbackName = `handleSheetTickets_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
     const script = document.createElement("script");
     const separator = SHEET_WEB_APP_URL.includes("?") ? "&" : "?";
+    const lite = options.lite ? "&lite=1" : "";
     let settled = false;
     let timer = null;
     const cleanup = () => {
@@ -7602,9 +7615,10 @@ function fetchTicketsViaJsonp(timeoutMs) {
     };
 
     // compact=1 omits assets/documents/procurement and trims heavy note payloads.
+    // lite=1 skips TaskAudit join (requires redeployed full-merged script).
     // Requires Apps Script redeploy of google-apps-script-full-merged.gs; older
     // deployments ignore the flag and still return a full payload.
-    script.src = `${SHEET_WEB_APP_URL}${separator}callback=${callbackName}&compact=1`;
+    script.src = `${SHEET_WEB_APP_URL}${separator}callback=${callbackName}&compact=1${lite}`;
     document.body.appendChild(script);
 
     if (timeoutMs > 0) {
@@ -7648,14 +7662,17 @@ function loadSheetTickets(options = {}) {
   const timeoutMs = Number(options.timeoutMs) > 0 ? Number(options.timeoutMs) : 35000;
   const retries = Math.max(0, Number.isFinite(Number(options.retries)) ? Number(options.retries) : 2);
   const backoffMs = [400, 1000, 1800];
+  const fetchOptions = { lite: Boolean(options.lite) };
 
   const fetchOnce = async () => {
-    // Race HTTP + JSONP so a hanging CORS/fetch path cannot burn the full
-    // timeout before JSONP gets a chance (common on GitHub Pages / mobile).
-    const payload = await firstSuccessfulPromise([
-      fetchTicketsViaHttp(timeoutMs),
-      fetchTicketsViaJsonp(timeoutMs)
-    ], "Could not load ticket data.");
+    // Prefer a single HTTP GET. Racing HTTP+JSONP doubled Apps Script load and
+    // made refreshes slower under contention. Fall back to JSONP only on failure.
+    let payload;
+    try {
+      payload = await fetchTicketsViaHttp(timeoutMs, fetchOptions);
+    } catch (httpError) {
+      payload = await fetchTicketsViaJsonp(Math.min(timeoutMs, 25000), fetchOptions);
+    }
     return applyRemoteTicketsPayload(payload);
   };
 
@@ -7760,7 +7777,10 @@ async function autoRefreshTickets() {
     const ok = await refreshFromSheet({
       skipScreenshotSync: true,
       deferSecondary: true,
-      silent: true
+      silent: true,
+      lite: true,
+      retries: 1,
+      timeoutMs: 25000
     });
     if (ok) {
       setStatus("online", `Auto-refreshed at ${new Date().toLocaleTimeString()}`);
