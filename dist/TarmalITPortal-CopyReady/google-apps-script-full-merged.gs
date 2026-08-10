@@ -1088,20 +1088,66 @@ function shouldAppendSubtaskCompletion_(oldStatus, ticket) {
   return !isCompletedStatus(oldStatus) && isCompletedStatus(ticket.Status);
 }
 
+function identityFieldCandidates_(data, keys) {
+  const values = [];
+  const seen = {};
+  keys.forEach(function(key) {
+    const value = String(data[key] || "").trim();
+    if (!value) return;
+    const normalized = normalizeTicketIdentity_(value);
+    if (seen[normalized]) return;
+    seen[normalized] = true;
+    values.push(value);
+  });
+  return values;
+}
+
 function assertRowIdentityMatch_(ticket, data, sheetRow) {
   const expectedTicketId = String(data.ticketId || data.TicketId || data["Ticket ID"] || "").trim();
   const actualTicketId = String(ticket.ticketId || "").trim();
-  if (expectedTicketId && actualTicketId && expectedTicketId !== actualTicketId) {
-    throw new Error("Ticket row " + sheetRow + " does not match ticketId. Refresh and try again.");
+
+  // Stable Ticket ID is authoritative: allow Task/Owner renames on the same row.
+  if (expectedTicketId && actualTicketId) {
+    if (expectedTicketId !== actualTicketId) {
+      throw new Error("Ticket row " + sheetRow + " does not match ticketId. Refresh and try again.");
+    }
+    return;
   }
 
-  const expectedTask = String(data.Task || "").trim();
-  const expectedOwner = String(data.Owner || "").trim();
-  if (expectedTask && normalizeTicketIdentity_(ticket.Task) !== normalizeTicketIdentity_(expectedTask)) {
-    throw new Error("Ticket row " + sheetRow + " does not match the selected task. Refresh and try again.");
+  // Fall back when Ticket ID is missing on either side.
+  // Prefer pre-edit identity fields so renaming Task/Owner is not treated as a wrong-row write.
+  // Also accept the incoming Task/Owner so a retry after a successful-but-unacked write still matches.
+  const taskCandidates = identityFieldCandidates_(data, [
+    "identityTask",
+    "expectedTask",
+    "originalTask",
+    "Task"
+  ]);
+  const ownerCandidates = identityFieldCandidates_(data, [
+    "identityOwner",
+    "expectedOwner",
+    "originalOwner",
+    "Owner"
+  ]);
+
+  if (taskCandidates.length) {
+    const actualTask = normalizeTicketIdentity_(ticket.Task);
+    const taskMatched = taskCandidates.some(function(candidate) {
+      return normalizeTicketIdentity_(candidate) === actualTask;
+    });
+    if (!taskMatched) {
+      throw new Error("Ticket row " + sheetRow + " does not match the selected task. Refresh and try again.");
+    }
   }
-  if (expectedOwner && normalizeTicketIdentity_(ticket.Owner) !== normalizeTicketIdentity_(expectedOwner)) {
-    throw new Error("Ticket row " + sheetRow + " does not match the selected owner. Refresh and try again.");
+
+  if (ownerCandidates.length) {
+    const actualOwner = normalizeTicketIdentity_(ticket.Owner);
+    const ownerMatched = ownerCandidates.some(function(candidate) {
+      return normalizeTicketIdentity_(candidate) === actualOwner;
+    });
+    if (!ownerMatched) {
+      throw new Error("Ticket row " + sheetRow + " does not match the selected owner. Refresh and try again.");
+    }
   }
 }
 

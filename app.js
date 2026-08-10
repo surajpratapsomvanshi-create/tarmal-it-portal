@@ -1592,12 +1592,15 @@ async function autoUploadTicketScreenshots(ticket) {
       Notes: stripScreenshotMetadata(ticket.Notes),
       Remarks: stripScreenshotMetadata(ticket.Remarks)
     });
+    const identity = rowIdentityFields(ticket);
     const result = await postToSheetWithResponse({
       action: "uploadAttachments",
       sheetRow: ticket.sheetRow,
       Task: ticket.Task,
       Owner: ticket.Owner,
       ticketId: ticketStableId(ticket) || undefined,
+      identityTask: identity.identityTask,
+      identityOwner: identity.identityOwner,
       Notes: notesBase,
       Remarks: notesBase,
       attachments
@@ -1962,15 +1965,27 @@ function extractNoteAttachments(html) {
 function buildScreenshotUploadPayload(ticket) {
   const attachments = extractNoteAttachments(ticket.NotesHtml || "");
   const notesText = buildNotesTextForSheet(ticket);
+  const identity = rowIdentityFields(ticket);
 
   return {
     action: "uploadAttachments",
     sheetRow: ticket.sheetRow,
     Task: ticket.Task,
     Owner: ticket.Owner,
+    ticketId: ticketStableId(ticket) || undefined,
+    identityTask: identity.identityTask,
+    identityOwner: identity.identityOwner,
     Notes: notesText,
     Remarks: notesText,
     attachments
+  };
+}
+
+function rowIdentityFields(ticket, original = null) {
+  const source = original || ticket || {};
+  return {
+    identityTask: cleanText(ticket?.identityTask || source.Task) || undefined,
+    identityOwner: cleanText(ticket?.identityOwner || source.Owner) || undefined
   };
 }
 
@@ -1979,6 +1994,7 @@ function buildTicketSheetPayload(ticket, options = {}) {
   const notesText = buildNotesTextForSheet(ticket);
   // Skip Drive uploads in the critical-path POST; screenshots upload after the row write.
   const includeAttachments = options.deferAttachments !== true;
+  const identity = rowIdentityFields(ticket);
 
   const payload = {
     Task: ticket.Task,
@@ -1995,6 +2011,8 @@ function buildTicketSheetPayload(ticket, options = {}) {
     Remarks: notesText,
     "Bhanu List": ticket["Bhanu List"],
     ticketId: ticketStableId(ticket) || undefined,
+    identityTask: identity.identityTask,
+    identityOwner: identity.identityOwner,
     submissionId: cleanText(ticket.submissionId) || undefined,
     lastUpdated: cleanText(ticket.lastUpdated) || undefined,
     expectedStatus: cleanText(ticket.expectedStatus || ticket.lastKnownStatus) || undefined
@@ -5772,12 +5790,18 @@ async function deleteTicketFromSheet(sheetRow, task = "", owner = "") {
     return { synced: false };
   }
 
+  const identity = rowIdentityFields(
+    { Task: task, Owner: owner, identityTask: task, identityOwner: owner },
+    activeEditTicket
+  );
   const result = await postToSheetWithResponse({
     action: "deleteTicket",
     sheetRow: Number(sheetRow),
     Task: task,
     Owner: owner,
-    ticketId: ticketStableId(activeEditTicket || {}) || undefined
+    ticketId: ticketStableId(activeEditTicket || {}) || undefined,
+    identityTask: identity.identityTask,
+    identityOwner: identity.identityOwner
   });
 
   if (!result?.ok) {
@@ -6121,6 +6145,7 @@ async function setTicketMilestoneFromAction(sheetRow) {
 
     const result = await sendTicketUpdateToSheet({
       ...updatedTicket,
+      ...rowIdentityFields(updatedTicket, ticket),
       Milestone: nextMilestone,
       pendingFields: ["Milestone"]
     });
@@ -6511,7 +6536,10 @@ async function movePresentationTicketToColumn(sheetRow, columnId) {
     updated["End date"] = getTodayDateValue();
   }
 
-  const sheetTicket = { ...updated };
+  const sheetTicket = {
+    ...updated,
+    ...rowIdentityFields(updated, ticket)
+  };
   const localTicket = applyTicketApprovalPreview(normalizeTicket(updated), ticket);
   const pendingFields = ["Status"];
   if (cleanText(localTicket["End date"]) !== cleanText(ticket["End date"])) {
@@ -8067,6 +8095,7 @@ ticketEditForm?.addEventListener("submit", async (event) => {
 
   const sheetTicket = {
     ...updatedTicket,
+    ...rowIdentityFields(updatedTicket, activeEditTicket),
     ticketId: ticketStableId(updatedTicket) || ticketStableId(activeEditTicket) || createTicketId(),
     expectedStatus: priorStatus || nextStatus,
     lastKnownStatus: priorStatus || nextStatus,
