@@ -1,9 +1,11 @@
 # Save / Sync Fixes (Waves A–C) — Deploy Notes
 
 **Date:** 2026-08-07  
-**Cache buster:** `app.js?v=137`, `styles.css?v=100`
+**Cache buster:** `app.js?v=176`, `styles.css?v=175`
 
 ## Apps Script redeploy (required)
+
+**2026-08-10 busy-lock fix:** Redeploy is required. Background deferred work no longer shares `LockService` with saves; write locks fail fast and always release; busy messages no longer imply another person is editing.
 
 Portal sheet writes will not pick up server-side identity checks, soft-delete, Ticket ID column, busy/lock handling, or status conflict guards until you redeploy:
 

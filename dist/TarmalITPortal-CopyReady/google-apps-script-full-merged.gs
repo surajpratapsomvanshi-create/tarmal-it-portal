@@ -98,6 +98,12 @@ const PROCUREMENT_FOLDER_ID_KEY = "PROCUREMENT_FOLDER_ID";
 const DEFERRED_POST_SAVE_PROP_ = "deferredPostSaveQueue";
 const DEFERRED_POST_SAVE_HANDLER_ = "processDeferredPostSaveWork";
 const DEFERRED_POST_SAVE_DELAY_MS_ = 30000;
+// Deferred work must NEVER take LockService.getScriptLock() — that lock serializes
+// user saves. Use a CacheService lease with TTL so a crashed run cannot block forever.
+const DEFERRED_POST_SAVE_LEASE_KEY_ = "deferredPostSaveLease";
+const DEFERRED_POST_SAVE_LEASE_TTL_SEC_ = 180;
+// Fail-fast write lock: client retries quietly. ScriptLock also auto-expires ~30s.
+const WRITE_LOCK_WAIT_MS_ = 8000;
 
 function sanitizeAttachmentName_(value) {
   return String(value || "")
@@ -597,10 +603,38 @@ function scheduleDeferredPostSaveWork_(options) {
     .create();
 }
 
+function tryAcquireDeferredPostSaveLease_() {
+  const cache = CacheService.getScriptCache();
+  if (cache.get(DEFERRED_POST_SAVE_LEASE_KEY_)) {
+    return false;
+  }
+  // putIfAbsent is not available on all runtimes; check-then-put is enough with TTL reclaim.
+  cache.put(DEFERRED_POST_SAVE_LEASE_KEY_, String(Date.now()), DEFERRED_POST_SAVE_LEASE_TTL_SEC_);
+  return true;
+}
+
+function releaseDeferredPostSaveLease_() {
+  try {
+    CacheService.getScriptCache().remove(DEFERRED_POST_SAVE_LEASE_KEY_);
+  } catch (error) {
+    Logger.log(error);
+  }
+}
+
+function releaseWriteLock_(lock, lockAcquired) {
+  if (!lockAcquired || !lock) return false;
+  try {
+    lock.releaseLock();
+  } catch (releaseError) {
+    Logger.log(releaseError);
+  }
+  return false;
+}
+
 function processDeferredPostSaveWork() {
-  const lock = LockService.getScriptLock();
-  if (!lock.tryLock(10000)) {
-    // Another run is in progress; reschedule so queued work is not dropped.
+  // Intentionally does NOT use LockService.getScriptLock(): that lock is reserved for
+  // mutating doPost sheet writes so background audit/email work cannot block saves.
+  if (!tryAcquireDeferredPostSaveLease_()) {
     clearDeferredPostSaveTriggers_();
     ScriptApp.newTrigger(DEFERRED_POST_SAVE_HANDLER_)
       .timeBased()
@@ -647,7 +681,7 @@ function processDeferredPostSaveWork() {
       }
     }
   } finally {
-    lock.releaseLock();
+    releaseDeferredPostSaveLease_();
   }
 }
 
@@ -655,7 +689,9 @@ function doPost(e) {
   const lock = LockService.getScriptLock();
   var lockAcquired = false;
   try {
-    lockAcquired = lock.tryLock(30000);
+    // Short wait so a contended lock fails fast; client retries quietly.
+    // LockService also auto-expires held locks (~30s) if a run dies mid-flight.
+    lockAcquired = lock.tryLock(WRITE_LOCK_WAIT_MS_);
   } catch (lockError) {
     lockAcquired = false;
   }
@@ -664,7 +700,8 @@ function doPost(e) {
     return buildResponse_({
       ok: false,
       busy: true,
-      error: "Sheet is busy saving another change. Try again shortly."
+      retryAfterMs: 2000,
+      error: "Sheet sync is temporarily locked. Retrying is safe — no data was written."
     }, e);
   }
 
@@ -710,11 +747,14 @@ function doPost(e) {
     }
 
     if (data.action === "uploadDocument") {
+      // Drive I/O outside the write lock so ticket saves are never blocked by uploads.
+      lockAcquired = releaseWriteLock_(lock, lockAcquired);
       const fileInfo = saveDocumentFile_(data);
       return buildResponse_({ ok: true, file: fileInfo }, e);
     }
 
     if (data.action === "uploadProcurementAttachment") {
+      lockAcquired = releaseWriteLock_(lock, lockAcquired);
       const fileInfo = saveProcurementFile_(data);
       return buildResponse_({ ok: true, file: fileInfo }, e);
     }
@@ -730,11 +770,33 @@ function doPost(e) {
     }
 
     if (data.action === "updateTicket") {
+      // Sheet write under lock; approval email after release so Gmail latency cannot
+      // hold the concurrent-write lock.
+      data.deferApprovalEmail = true;
       const result = updateTicket_(data);
+      const pendingApproval = result && result._pendingApprovalEmail;
+      const approvalCtx = result && result._approvalEmailContext;
+      lockAcquired = releaseWriteLock_(lock, lockAcquired);
+
       var approvalEmailResult = {
         to: result.approvalSentTo || "",
         error: result.approvalEmailError || ""
       };
+      if (pendingApproval && approvalCtx) {
+        try {
+          approvalEmailResult = sendApprovalEmailIfNeeded_(
+            approvalCtx.data,
+            approvalCtx.savedTicket,
+            approvalCtx.workflow,
+            approvalCtx.sheet,
+            approvalCtx.sheetRow
+          );
+        } catch (emailError) {
+          Logger.log(emailError);
+          approvalEmailResult = { to: "", error: String(emailError.message || emailError) };
+        }
+      }
+
       try {
         scheduleDeferredPostSaveWork_({
           audit: true,
@@ -771,8 +833,7 @@ function doPost(e) {
 
     if (data.action === "uploadAttachments") {
       // Release the script lock before Drive uploads so concurrent waiters are not blocked.
-      lock.releaseLock();
-      lockAcquired = false;
+      lockAcquired = releaseWriteLock_(lock, lockAcquired);
       const result = uploadTicketAttachmentsOnly_(data);
       return buildResponse_({
         ok: true,
@@ -790,6 +851,7 @@ function doPost(e) {
 
       const results = items.map(function(ticketData) {
         try {
+          ticketData.deferApprovalEmail = true;
           const item = appendTicket_(ticketData);
           item.ok = true;
           return item;
@@ -803,6 +865,32 @@ function doPost(e) {
           };
         }
       });
+
+      const pendingEmails = results.filter(function(item) {
+        return item && item.ok !== false && item._pendingApprovalEmail && item._approvalEmailContext;
+      });
+      lockAcquired = releaseWriteLock_(lock, lockAcquired);
+
+      pendingEmails.forEach(function(item) {
+        try {
+          const ctx = item._approvalEmailContext;
+          const emailResult = sendApprovalEmailIfNeeded_(
+            ctx.data,
+            ctx.savedTicket,
+            ctx.workflow,
+            ctx.sheet,
+            ctx.sheetRow
+          );
+          item.approvalSentTo = emailResult.to || "";
+          item.approvalEmailError = emailResult.error || "";
+        } catch (emailError) {
+          Logger.log(emailError);
+          item.approvalEmailError = String(emailError.message || emailError);
+        }
+        delete item._pendingApprovalEmail;
+        delete item._approvalEmailContext;
+      });
+
       const successCount = results.filter(function(item) { return item.ok !== false; }).length;
       try {
         scheduleDeferredPostSaveWork_({
@@ -830,7 +918,31 @@ function doPost(e) {
       throw new Error(`Unsupported action "${data.action}". Redeploy the Apps Script web app with the latest code.`);
     }
 
+    data.deferApprovalEmail = true;
     const appendResult = appendTicket_(data);
+    const appendPending = appendResult && appendResult._pendingApprovalEmail;
+    const appendCtx = appendResult && appendResult._approvalEmailContext;
+    lockAcquired = releaseWriteLock_(lock, lockAcquired);
+
+    if (appendPending && appendCtx) {
+      try {
+        const emailResult = sendApprovalEmailIfNeeded_(
+          appendCtx.data,
+          appendCtx.savedTicket,
+          appendCtx.workflow,
+          appendCtx.sheet,
+          appendCtx.sheetRow
+        );
+        appendResult.approvalSentTo = emailResult.to || "";
+        appendResult.approvalEmailError = emailResult.error || "";
+      } catch (emailError) {
+        Logger.log(emailError);
+        appendResult.approvalEmailError = String(emailError.message || emailError);
+      }
+      delete appendResult._pendingApprovalEmail;
+      delete appendResult._approvalEmailContext;
+    }
+
     try {
       scheduleDeferredPostSaveWork_({
         audit: true,
@@ -862,9 +974,8 @@ function doPost(e) {
   } catch (error) {
     return buildResponse_({ ok: false, error: error.message }, e);
   } finally {
-    if (lockAcquired) {
-      try { lock.releaseLock(); } catch (releaseError) { Logger.log(releaseError); }
-    }
+    // Always release on success, failure, timeout, and exception paths.
+    releaseWriteLock_(lock, lockAcquired);
   }
 }
 
@@ -1417,10 +1528,12 @@ function writeTicketToSheetRow_(sheet, sheetRow, data) {
     parentSheetRow = Number(savedTicket.parentSheetRow) || 0;
   }
 
-  const approvalEmailResult = sendApprovalEmailIfNeeded_(data, savedTicket, workflow, sheet, sheetRow);
+  const approvalEmailResult = data.deferApprovalEmail === true
+    ? { to: "", error: "" }
+    : sendApprovalEmailIfNeeded_(data, savedTicket, workflow, sheet, sheetRow);
   const lastUpdated = nowIsoStamp_();
 
-  return {
+  const result = {
     ok: true,
     conflict: Boolean(clientLastUpdated && serverLastUpdated && clientLastUpdated !== serverLastUpdated),
     notes: String(savedTicket.Notes || savedTicket.Remarks || enriched.Notes || enriched.Remarks || "").trim(),
@@ -1440,6 +1553,19 @@ function writeTicketToSheetRow_(sheet, sheetRow, data) {
     approvalMessage: workflow.message || "",
     approved: workflow.approved === true
   };
+
+  if (data.deferApprovalEmail === true && workflow && workflow.approvalSent) {
+    result._pendingApprovalEmail = true;
+    result._approvalEmailContext = {
+      data: data,
+      savedTicket: savedTicket,
+      workflow: workflow,
+      sheet: sheet,
+      sheetRow: sheetRow
+    };
+  }
+
+  return result;
 }
 
 function uploadTicketAttachmentsOnly_(data) {
@@ -1541,9 +1667,22 @@ function appendTicket_(data) {
   const result = buildTicketSyncResult_(data, enriched, fields, sheetRow, workflow);
   result.ticketId = savedTicket.ticketId || fields.ticketId || "";
   result.lastUpdated = nowIsoStamp_();
-  const approvalEmailResult = sendApprovalEmailIfNeeded_(data, savedTicket, workflow, sheet, sheetRow);
-  result.approvalSentTo = approvalEmailResult.to || "";
-  result.approvalEmailError = approvalEmailResult.error || "";
+  if (data.deferApprovalEmail === true && workflow && workflow.approvalSent) {
+    result.approvalSentTo = "";
+    result.approvalEmailError = "";
+    result._pendingApprovalEmail = true;
+    result._approvalEmailContext = {
+      data: data,
+      savedTicket: savedTicket,
+      workflow: workflow,
+      sheet: sheet,
+      sheetRow: sheetRow
+    };
+  } else {
+    const approvalEmailResult = sendApprovalEmailIfNeeded_(data, savedTicket, workflow, sheet, sheetRow);
+    result.approvalSentTo = approvalEmailResult.to || "";
+    result.approvalEmailError = approvalEmailResult.error || "";
+  }
   return result;
 }
 

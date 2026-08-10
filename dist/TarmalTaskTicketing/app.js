@@ -20,8 +20,8 @@ const CLEARED_TICKET_SORT = "recent";
 const PENDING_SYNC_TTL_MS = 180000;
 const UNSYNCED_LOCAL_RETENTION_MS = 600000;
 const SOFT_DELETED_STATUS = "Deleted";
-const BUSY_RETRY_ATTEMPTS = 3;
-const BUSY_RETRY_DELAY_MS = 1200;
+const BUSY_RETRY_ATTEMPTS = 8;
+const BUSY_RETRY_DELAY_MS = 1500;
 /** Initial DOM rows for ticket/project tables — keeps first paint fast with 700+ tickets. */
 const TABLE_PAGE_SIZE = 80;
 const TABLE_PAGE_STEP = 80;
@@ -5660,10 +5660,14 @@ function friendlySheetSyncError(error) {
   if (/JSON|Unexpected token|Expected property|SyntaxError/i.test(raw)) {
     return "Saved locally, but sheet sync response was invalid. Click Refresh to confirm.";
   }
-  if (/busy|lock|try again shortly/i.test(raw)) {
-    return "Sheet is busy saving another change — retrying shortly.";
+  if (/busy|lock|temporarily locked|try again shortly/i.test(raw)) {
+    return "Sheet sync was temporarily locked after several retries. Your edits are saved locally — click Save again.";
   }
   return raw;
+}
+
+function isSheetBusyError(error) {
+  return /busy|lock|temporarily locked|try again shortly/i.test(String(error?.message || error || ""));
 }
 
 function sleepMs(ms) {
@@ -5694,10 +5698,18 @@ async function postToSheetWithResponse(payload, options = {}) {
 
     const text = await response.text();
     const parsed = parseAppsScriptResponseText(text);
-    if (parsed?.busy || /busy|lock timed out|could not obtain lock/i.test(String(parsed?.error || ""))) {
-      lastError = new Error(parsed?.error || "Sheet is busy. Try again shortly.");
+    if (parsed?.busy || /busy|lock timed out|could not obtain lock|temporarily locked/i.test(String(parsed?.error || ""))) {
+      lastError = new Error(parsed?.error || "Sheet sync is temporarily locked.");
       if (attempt < maxAttempts) {
-        await sleepMs(BUSY_RETRY_DELAY_MS * attempt);
+        const retryAfter = Number(parsed?.retryAfterMs) > 0
+          ? Number(parsed.retryAfterMs)
+          : BUSY_RETRY_DELAY_MS * attempt;
+        if (typeof options.onBusy === "function") {
+          options.onBusy(attempt, maxAttempts, retryAfter);
+        } else {
+          setStatus("", `Sheet sync busy — retrying (${attempt}/${maxAttempts - 1})…`);
+        }
+        await sleepMs(retryAfter);
         continue;
       }
       throw lastError;
@@ -5997,7 +6009,14 @@ async function sendTicketUpdateToSheet(ticket) {
     return { synced: false };
   }
 
-  const result = await postToSheetWithResponse(buildTicketSheetPayload(ticket, { deferAttachments: true }));
+  const result = await postToSheetWithResponse(
+    buildTicketSheetPayload(ticket, { deferAttachments: true }),
+    {
+      onBusy(attempt, maxAttempts) {
+        setStatus("", `Sheet sync busy — retrying (${attempt}/${maxAttempts - 1})…`);
+      }
+    }
+  );
   if (!result?.ok) {
     if (result?.conflict || result?.stale) {
       throw new Error(result?.error || "Ticket was updated elsewhere. Refresh and try again.");
@@ -8127,9 +8146,14 @@ ticketEditForm?.addEventListener("submit", async (event) => {
     closeTicketEditor();
     renderTickets();
   } catch (error) {
-    setStatus("error", "Saved locally, but update failed");
+    const message = friendlySheetSyncError(error);
+    setStatus("error", message);
     console.error(error);
-    alert(`${friendlySheetSyncError(error)}\n\nThe editor will stay open so you can retry.`);
+    // Quiet retries already happened for transient lock contention. Only alert
+    // for non-busy failures; busy exhaustion stays in the status bar.
+    if (!isSheetBusyError(error)) {
+      alert(`${message}\n\nThe editor will stay open so you can retry.`);
+    }
   } finally {
     ticketEditSubmitInFlight = false;
     ticketEditForm.classList.remove("ticket-form-submitting");
