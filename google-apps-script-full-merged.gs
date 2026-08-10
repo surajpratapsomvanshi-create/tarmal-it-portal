@@ -3941,3 +3941,5 @@ function setupDriveAccess() {
   Logger.log("Files in folder: " + info.fileCount);
   return info;
 }
+
+// END google-apps-script-full-merged.gs — if this line is missing in Apps Script Code.gs, the paste was truncated.
