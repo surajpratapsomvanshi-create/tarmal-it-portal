@@ -1566,14 +1566,18 @@ function ticketNotesIncludeDriveLinks(ticket) {
   return extractDriveLinksFromNotes(ticket).length > 0;
 }
 
-function ticketHasLocalScreenshotsOnly(ticket) {
+function ticketHasPendingScreenshotUploads(ticket) {
   if (!ticket) return false;
-  if (ticketNotesIncludeDriveLinks(ticket)) return false;
-  return getTicketScreenshots(ticket).some(isDataImageUrl);
+  return extractNoteAttachments(ticket.NotesHtml || "")
+    .some((attachment) => /^data:image\//i.test(attachment.dataUrl || ""));
 }
 
-async function autoUploadTicketScreenshots(ticket) {
-  if (!ticket?.sheetRow || !ticketHasLocalScreenshotsOnly(ticket)) {
+function ticketHasLocalScreenshotsOnly(ticket) {
+  return ticketHasPendingScreenshotUploads(ticket);
+}
+
+async function autoUploadTicketScreenshots(ticket, identitySource = null) {
+  if (!ticket?.sheetRow || !ticketHasPendingScreenshotUploads(ticket)) {
     return { ok: true, skipped: true };
   }
 
@@ -1592,7 +1596,7 @@ async function autoUploadTicketScreenshots(ticket) {
       Notes: stripScreenshotMetadata(ticket.Notes),
       Remarks: stripScreenshotMetadata(ticket.Remarks)
     });
-    const identity = rowIdentityFields(ticket);
+    const identity = rowIdentityFields(ticket, identitySource || ticket);
     const result = await postToSheetWithResponse({
       action: "uploadAttachments",
       sheetRow: ticket.sheetRow,
@@ -1610,16 +1614,21 @@ async function autoUploadTicketScreenshots(ticket) {
       throw new Error(result?.error || "Screenshot upload failed.");
     }
 
+    const uploadedCount = Number(result.uploadedCount) || 0;
+    if (uploadedCount <= 0) {
+      throw new Error(result?.error || "Screenshot upload did not save any files to Drive.");
+    }
+
     if (result.notes) {
       applyDriveLinksToLocalTicket(ticket.sheetRow, result.notes);
     }
 
     const refreshed = findTicketBySheetRow(ticket.sheetRow);
-    if (refreshed && ticketNotesIncludeDriveLinks(refreshed)) {
-      return { ok: true };
+    if (refreshed && !ticketHasPendingScreenshotUploads(refreshed)) {
+      return { ok: true, uploadedCount };
     }
 
-    return { ok: false };
+    return { ok: false, error: "Screenshot upload finished but local copies are still pending." };
   } catch (error) {
     console.error(error);
     return { ok: false, error };
@@ -1631,7 +1640,7 @@ let screenshotSyncInProgress = false;
 async function syncPendingScreenshotsToDrive(tickets = getValidTickets()) {
   if (!SHEET_WEB_APP_URL || screenshotSyncInProgress) return { uploaded: 0, failed: 0 };
 
-  const pending = tickets.filter(ticketHasLocalScreenshotsOnly);
+  const pending = tickets.filter(ticketHasPendingScreenshotUploads);
   if (!pending.length) return { uploaded: 0, failed: 0 };
 
   screenshotSyncInProgress = true;
@@ -1665,27 +1674,30 @@ async function verifyDriveUploadAfterSave(sheetRow) {
   const ticket = findTicketBySheetRow(sheetRow);
   if (!ticket) return false;
 
-  if (ticketHasLocalScreenshotsOnly(ticket)) {
-    const result = await autoUploadTicketScreenshots(ticket);
+  if (ticketHasPendingScreenshotUploads(ticket)) {
+    const result = await autoUploadTicketScreenshots(ticket, activeEditTicket || ticket);
     if (result.ok && !result.skipped) {
       renderTickets();
+      setStatus("online", "Screenshot saved to Google Drive");
       return true;
     }
 
     await refreshFromSheet({ skipScreenshotSync: true });
     const refreshed = findTicketBySheetRow(sheetRow);
-    if (refreshed && ticketNotesIncludeDriveLinks(refreshed)) {
+    if (refreshed && !ticketHasPendingScreenshotUploads(refreshed)) {
       setStatus("online", "Screenshot saved to Google Drive");
       renderTickets();
       return true;
     }
 
-    setStatus("error", "Screenshot saved locally but not on Drive — check Apps Script Drive setup");
+    const detail = cleanText(result?.error?.message || result?.error || "");
+    setStatus(
+      "error",
+      detail
+        ? `Screenshot not saved to Drive — ${detail}`
+        : "Screenshot saved locally but not on Drive — check Apps Script Drive setup"
+    );
     return false;
-  }
-
-  if (ticketNotesIncludeDriveLinks(ticket)) {
-    setStatus("online", "Screenshot saved to Google Drive");
   }
 
   return true;
@@ -8142,6 +8154,7 @@ ticketEditForm?.addEventListener("submit", async (event) => {
   };
   const localTicket = applyTicketApprovalPreview({
     ...updatedTicket,
+    ...rowIdentityFields(updatedTicket, activeEditTicket),
     ticketId: sheetTicket.ticketId,
     lastUpdated: new Date().toISOString()
   }, activeEditTicket);
@@ -8156,14 +8169,18 @@ ticketEditForm?.addEventListener("submit", async (event) => {
 
   try {
     await sendTicketUpdateToSheet(sheetTicket);
-    if (extractNoteAttachments(updatedTicket.NotesHtml || "").length) {
-      await verifyDriveUploadAfterSave(updatedTicket.sheetRow);
-    }
+    const hasPendingAttachments = extractNoteAttachments(updatedTicket.NotesHtml || "").length > 0;
+    const attachmentsSaved = !hasPendingAttachments
+      || await verifyDriveUploadAfterSave(updatedTicket.sheetRow);
     ticketEditSubmitInFlight = false;
     ticketEditForm.classList.remove("ticket-form-submitting");
     setTicketEditBusyState();
     resetTicketEditSaveUi();
-    closeTicketEditor();
+    if (attachmentsSaved) {
+      closeTicketEditor();
+    } else {
+      alert("Ticket fields saved, but screenshot upload to Google Drive failed.\n\nKeep the editor open and click Save again, or run setupDriveAccess in Apps Script.");
+    }
     renderTickets();
   } catch (error) {
     const message = friendlySheetSyncError(error);

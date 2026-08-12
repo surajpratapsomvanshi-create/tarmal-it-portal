@@ -391,12 +391,31 @@ function dedupeScreenshotUrls_(urls) {
 function mergeScreenshotNotes_(existingNotes, incomingNotes) {
   const existingLinks = extractScreenshotLinksFromNotes_(existingNotes);
   const incomingLinks = extractScreenshotLinksFromNotes_(incomingNotes);
-  const baseText = stripScreenshotMetadata_(incomingNotes) || stripScreenshotMetadata_(existingNotes);
+  const incomingBase = stripScreenshotMetadata_(incomingNotes);
+  const existingBase = stripScreenshotMetadata_(existingNotes);
+  // Prefer the longer remark base so stale attachment-only uploads cannot clobber newer sheet text.
+  var baseText = incomingBase;
+  if (existingBase && (!incomingBase || existingBase.length > incomingBase.length)) {
+    baseText = existingBase;
+  } else if (!incomingBase) {
+    baseText = existingBase;
+  }
   const allLinks = dedupeScreenshotUrls_(existingLinks.concat(incomingLinks));
   const linkLines = allLinks.map(function(url, index) {
     return "Screenshot " + (index + 1) + ": " + url;
   });
   return [baseText].concat(linkLines).filter(Boolean).join("\n");
+}
+
+function mergeNotesWithNewDriveLinks_(baseText, existingNotes, newLinks) {
+  const existingLinks = extractScreenshotLinksFromNotes_(existingNotes);
+  const allLinks = dedupeScreenshotUrls_(existingLinks.concat(newLinks || []));
+  const text = stripScreenshotMetadata_(baseText) || stripScreenshotMetadata_(existingNotes);
+  if (!allLinks.length) return text;
+  const linkLines = allLinks.map(function(url, index) {
+    return "Screenshot " + (index + 1) + ": " + url;
+  });
+  return [text].concat(linkLines).filter(Boolean).join("\n");
 }
 
 function saveTicketAttachments_(data) {
@@ -839,7 +858,7 @@ function doPost(e) {
     }
 
     if (data.action === "uploadAttachments") {
-      // Release the script lock before Drive uploads so concurrent waiters are not blocked.
+      // Drive uploads run inside uploadTicketAttachmentsOnly_; release the doPost lock first.
       lockAcquired = releaseWriteLock_(lock, lockAcquired);
       const result = uploadTicketAttachmentsOnly_(data);
       return buildResponse_({
@@ -1594,44 +1613,67 @@ function uploadTicketAttachmentsOnly_(data) {
     throw new Error("A valid sheet row is required to upload attachments.");
   }
 
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(TASKS_SHEET);
-  if (!sheet) {
-    throw new Error(`Sheet "${TASKS_SHEET}" was not found.`);
+  const attachments = data.attachments || [];
+  if (!attachments.length) {
+    throw new Error("No screenshot attachments were provided.");
   }
 
-  if (sheetRow > sheet.getLastRow()) {
-    throw new Error(`Ticket row ${sheetRow} was not found in the sheet.`);
+  // Upload to Drive outside the sheet write lock so concurrent saves are not blocked.
+  const driveLinks = saveTicketAttachments_(data);
+  if (!driveLinks.length) {
+    throw new Error("Could not upload screenshots to Google Drive. Redeploy Apps Script and allow Drive access.");
   }
 
-  const sheetInfo = getTasksSheetHeaders_(sheet);
-  const columnMap = ensureTasksColumns_(sheet);
-  const notesIndex = columnMap.notes;
+  const lock = LockService.getScriptLock();
+  var lockAcquired = false;
+  try {
+    lockAcquired = lock.tryLock(WRITE_LOCK_WAIT_MS_);
+    if (!lockAcquired) {
+      throw new Error("Sheet sync is temporarily locked. Retrying is safe — no data was written.");
+    }
 
-  if (notesIndex < 0) {
-    throw new Error('Missing "Notes" column in Tasks sheet.');
+    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(TASKS_SHEET);
+    if (!sheet) {
+      throw new Error('Sheet "' + TASKS_SHEET + '" was not found.');
+    }
+
+    if (sheetRow > sheet.getLastRow()) {
+      throw new Error("Ticket row " + sheetRow + " was not found in the sheet.");
+    }
+
+    const sheetInfo = getTasksSheetHeaders_(sheet);
+    const columnMap = ensureTasksColumns_(sheet);
+    const notesIndex = columnMap.notes;
+
+    if (notesIndex < 0) {
+      throw new Error('Missing "Notes" column in Tasks sheet.');
+    }
+
+    const row = sheet.getRange(sheetRow, 1, 1, sheetInfo.lastColumn).getValues()[0].slice();
+    const existingTicket = rowToTicket_(row, columnMap, sheetRow);
+    assertRowIdentityMatch_(existingTicket, data, sheetRow);
+    if (isSoftDeletedStatus_(existingTicket.Status)) {
+      throw new Error("Ticket row " + sheetRow + " was deleted. Refresh and try again.");
+    }
+
+    const existingNotes = String(row[notesIndex] || "").trim();
+    const clientBase = stripScreenshotMetadata_(data.Notes || data.Remarks || "");
+    const sheetBase = stripScreenshotMetadata_(existingNotes);
+    const baseText = sheetBase && (!clientBase || sheetBase.length >= clientBase.length)
+      ? sheetBase
+      : (clientBase || sheetBase);
+    const notes = mergeNotesWithNewDriveLinks_(baseText, existingNotes, driveLinks);
+    row[notesIndex] = notes;
+    sheet.getRange(sheetRow, 1, 1, sheetInfo.lastColumn).setValues([row]);
+
+    return {
+      notes: notes,
+      uploadedCount: driveLinks.length,
+      ticketId: existingTicket.ticketId || ""
+    };
+  } finally {
+    releaseWriteLock_(lock, lockAcquired);
   }
-
-  const row = sheet.getRange(sheetRow, 1, 1, sheetInfo.lastColumn).getValues()[0].slice();
-  const existingTicket = rowToTicket_(row, columnMap, sheetRow);
-  assertRowIdentityMatch_(existingTicket, data, sheetRow);
-  if (isSoftDeletedStatus_(existingTicket.Status)) {
-    throw new Error("Ticket row " + sheetRow + " was deleted. Refresh and try again.");
-  }
-
-  const existingNotes = String(row[notesIndex] || "").trim();
-  const mergedInput = Object.assign({}, data, {
-    Notes: mergeScreenshotNotes_(existingNotes, data.Notes || data.Remarks || "")
-  });
-  const enriched = enrichTicketNotesWithDriveAttachments_(mergedInput);
-  const notes = String(enriched.Notes || enriched.Remarks || "").trim();
-  row[notesIndex] = notes;
-  sheet.getRange(sheetRow, 1, 1, sheetInfo.lastColumn).setValues([row]);
-
-  return {
-    notes: notes,
-    uploadedCount: (data.attachments || []).length,
-    ticketId: existingTicket.ticketId || ""
-  };
 }
 
 function ticketToRow_(data) {
