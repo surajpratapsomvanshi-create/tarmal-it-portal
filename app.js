@@ -836,7 +836,109 @@ function removeNotesAttachmentRow(row, panel, editor, hiddenInput) {
   if (!row || !panel) return;
   row.remove();
   panel.hidden = !panel.children.length;
+  panel.classList.toggle("has-attachments", panel.children.length > 0);
   syncTicketNotesHiddenInput(editor, hiddenInput);
+}
+
+function clearNotesAttachmentDropIndicators(panel) {
+  panel?.querySelectorAll(".ticket-notes-attachment-item.is-drop-before, .ticket-notes-attachment-item.is-drop-after")
+    .forEach((row) => row.classList.remove("is-drop-before", "is-drop-after"));
+}
+
+function initNotesAttachmentDragDrop(panel, editor, hiddenInput) {
+  if (!panel || panel.dataset.attachmentDragReady === "true") return;
+  panel.dataset.attachmentDragReady = "true";
+
+  let dragRow = null;
+  let dragPointerId = null;
+  let dragActive = false;
+  let startX = 0;
+  let startY = 0;
+
+  const cleanupDrag = () => {
+    dragRow?.classList.remove("is-dragging");
+    clearNotesAttachmentDropIndicators(panel);
+    panel.classList.remove("is-reordering-attachments");
+    dragRow = null;
+    dragPointerId = null;
+    dragActive = false;
+  };
+
+  const rowAtPoint = (x, y) => {
+    panel.querySelectorAll(".ticket-notes-attachment-item.is-dragging").forEach((row) => {
+      row.style.pointerEvents = "none";
+    });
+    const target = document.elementFromPoint(x, y)?.closest(".ticket-notes-attachment-item") || null;
+    panel.querySelectorAll(".ticket-notes-attachment-item.is-dragging").forEach((row) => {
+      row.style.pointerEvents = "";
+    });
+    return target;
+  };
+
+  const showDropIndicator = (target, clientX) => {
+    clearNotesAttachmentDropIndicators(panel);
+    if (!target || target === dragRow) return;
+    const rect = target.getBoundingClientRect();
+    target.classList.add(clientX < rect.left + rect.width / 2 ? "is-drop-before" : "is-drop-after");
+  };
+
+  panel.addEventListener("pointerdown", (event) => {
+    const handle = event.target.closest(".ticket-notes-attachment-drag-handle");
+    if (!handle || event.button !== 0) return;
+
+    const row = handle.closest(".ticket-notes-attachment-item");
+    if (!row) return;
+
+    event.preventDefault();
+    dragRow = row;
+    dragPointerId = event.pointerId;
+    dragActive = false;
+    startX = event.clientX;
+    startY = event.clientY;
+    handle.setPointerCapture(event.pointerId);
+  });
+
+  panel.addEventListener("pointermove", (event) => {
+    if (dragPointerId !== event.pointerId || !dragRow) return;
+
+    if (!dragActive) {
+      const moved = Math.hypot(event.clientX - startX, event.clientY - startY);
+      if (moved < 6) return;
+      dragActive = true;
+      dragRow.classList.add("is-dragging");
+      panel.classList.add("is-reordering-attachments");
+    }
+
+    event.preventDefault();
+    showDropIndicator(rowAtPoint(event.clientX, event.clientY), event.clientX);
+  });
+
+  const finishDrag = (event) => {
+    if (dragPointerId !== event.pointerId || !dragRow) return;
+
+    if (dragActive) {
+      const target = rowAtPoint(event.clientX, event.clientY);
+      if (target && target !== dragRow) {
+        const rect = target.getBoundingClientRect();
+        if (event.clientX < rect.left + rect.width / 2) {
+          target.before(dragRow);
+        } else {
+          target.after(dragRow);
+        }
+        syncTicketNotesHiddenInput(editor, hiddenInput);
+      }
+    }
+
+    try {
+      event.target.closest(".ticket-notes-attachment-drag-handle")?.releasePointerCapture?.(event.pointerId);
+    } catch (_error) {
+      /* ignore */
+    }
+    cleanupDrag();
+  };
+
+  panel.addEventListener("pointerup", finishDrag);
+  panel.addEventListener("pointercancel", finishDrag);
 }
 
 function migrateInlineEditorImagesToPanel(editor, hiddenInput) {
@@ -862,12 +964,20 @@ function migrateInlineEditorImagesToPanel(editor, hiddenInput) {
 function renderNotesAttachmentsPanel(panel, attachments, editor, hiddenInput) {
   if (!panel) return;
 
+  initNotesAttachmentDragDrop(panel, editor, hiddenInput);
   panel.replaceChildren();
   attachments.forEach((item, index) => {
     const row = document.createElement("div");
     row.className = "ticket-notes-attachment-item";
     row.dataset.src = item.src || "";
     row.dataset.driveUrl = item.driveUrl || "";
+
+    const dragHandle = document.createElement("button");
+    dragHandle.type = "button";
+    dragHandle.className = "ticket-notes-attachment-drag-handle";
+    dragHandle.setAttribute("aria-label", `Drag screenshot ${index + 1} to reorder`);
+    dragHandle.title = "Drag to reorder";
+    dragHandle.innerHTML = "<span aria-hidden=\"true\"></span><span aria-hidden=\"true\"></span>";
 
     const previewTile = document.createElement("div");
     previewTile.className = "ticket-notes-attachment-preview";
@@ -919,7 +1029,7 @@ function renderNotesAttachmentsPanel(panel, attachments, editor, hiddenInput) {
       }
     });
 
-    row.append(previewTile, removeButton, removeLink);
+    row.append(dragHandle, previewTile, removeButton, removeLink);
     panel.appendChild(row);
   });
 
