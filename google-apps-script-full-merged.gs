@@ -832,6 +832,7 @@ function doPost(e) {
 
       return buildResponse_({
         ok: result.ok !== false,
+        sheetRow: Number(data.sheetRow) || Number(result.sheetRow) || 0,
         conflict: result.conflict === true,
         stale: result.stale === true,
         notes: result.notes,

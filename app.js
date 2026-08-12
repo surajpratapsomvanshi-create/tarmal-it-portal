@@ -1608,6 +1608,8 @@ async function autoUploadTicketScreenshots(ticket, identitySource = null) {
       Notes: notesBase,
       Remarks: notesBase,
       attachments
+    }, {
+      expectedTicket: ticket
     });
 
     if (!result?.ok) {
@@ -5616,18 +5618,166 @@ function isAppsScriptResponseShape(parsed) {
   if (Number(parsed.sheetRow) > 0) return true;
   if (Array.isArray(parsed.results)) return true;
   if (Array.isArray(parsed.tickets)) return true;
+  if (typeof parsed.notes === "string" && parsed.notes.length) return true;
+  if (Number(parsed.uploadedCount) > 0) return true;
+  if (Number(parsed.count) > 0) return true;
   return false;
+}
+
+function sheetSyncStatusesEquivalent(expectedStatus, remoteStatus) {
+  const expected = cleanText(expectedStatus);
+  const remote = cleanText(remoteStatus);
+  if (!expected || expected === remote) return true;
+  if (/^completed$/i.test(expected) && /^pending approval$/i.test(remote)) return true;
+  if (/^pending approval$/i.test(expected) && /^completed$/i.test(remote)) return false;
+  return false;
+}
+
+function ticketSaveAppearsOnSheet(expected, remote) {
+  if (!expected || !remote) return false;
+
+  const expectedTask = cleanText(expected.Task || expected.identityTask);
+  const remoteTask = cleanText(remote.Task);
+  if (expectedTask && remoteTask && expectedTask !== remoteTask) return false;
+
+  const expectedOwner = cleanText(expected.Owner || expected.identityOwner);
+  const remoteOwner = cleanText(remote.Owner);
+  if (expectedOwner && remoteOwner && expectedOwner !== remoteOwner) return false;
+
+  const expectedStatus = cleanText(expected.Status || expected.expectedStatus);
+  if (expectedStatus && !sheetSyncStatusesEquivalent(expectedStatus, remote.Status)) return false;
+
+  const comparableFields = ["Priority", "Type", "Milestone", "Start date", "End date", "Bhanu List"];
+  let compared = 0;
+  let matched = 0;
+  comparableFields.forEach((field) => {
+    const expectedValue = cleanText(expected[field]);
+    if (!expectedValue) return;
+    compared += 1;
+    if (cleanText(remote[field]) === expectedValue) matched += 1;
+  });
+
+  const expectedNotes = normalizeNotesForCompare(expected);
+  if (expectedNotes) {
+    compared += 1;
+    const remoteNotes = normalizeNotesForCompare(remote);
+    if (remoteNotes === expectedNotes
+      || remoteNotes.includes(expectedNotes)
+      || expectedNotes.includes(remoteNotes)) {
+      matched += 1;
+    }
+  }
+
+  if (!compared) {
+    return Boolean(cleanText(remote.Task) && cleanText(remote.Owner));
+  }
+  return matched >= Math.max(1, compared - 1);
+}
+
+function remoteTicketFromPayload(payload) {
+  if (!payload || typeof payload !== "object") return null;
+  if (Array.isArray(payload.tickets) && payload.tickets.length === 1) {
+    return payload.tickets[0];
+  }
+  if (cleanText(payload.Task) || Number(payload.sheetRow) > 0) {
+    return payload;
+  }
+  return null;
+}
+
+function buildReconciledSyncResult(remote, payload, expectedTicket = null) {
+  const source = expectedTicket || remoteTicketFromPayload(payload) || {};
+  return {
+    ok: true,
+    reconciled: true,
+    sheetRow: Number(remote.sheetRow) || Number(payload?.sheetRow) || 0,
+    notes: String(remote.Notes || remote.Remarks || "").trim(),
+    milestone: remote.Milestone || source.Milestone || "",
+    startDate: remote["Start date"] || source["Start date"] || "",
+    endDate: remote["End date"] || source["End date"] || "",
+    status: remote.Status || source.Status || "",
+    ticketId: ticketStableId(remote) || ticketStableId(source) || "",
+    lastUpdated: cleanText(remote.lastUpdated) || cleanText(source.lastUpdated) || "",
+    uploadedCount: Number(payload?.attachments?.length) || 0
+  };
+}
+
+async function reconcileAmbiguousSheetSave(payload, expectedTicket = null) {
+  if (!SHEET_WEB_APP_URL || !payload) return null;
+
+  const action = String(payload.action || "").trim();
+  const isTicketWrite = action === "updateTicket"
+    || action === "uploadAttachments"
+    || action === "createTickets"
+    || (!action && (cleanText(payload.Task) || Number(payload.sheetRow) > 0));
+  if (!isTicketWrite) return null;
+
+  try {
+    const remotePayload = await fetchTicketsViaHttp(22000, { lite: true });
+    const remoteTickets = Array.isArray(remotePayload?.tickets) ? remotePayload.tickets : [];
+    if (!remoteTickets.length) return null;
+
+    if (action === "createTickets" && Array.isArray(payload.tickets)) {
+      const results = payload.tickets.map((ticket) => {
+        const remote = remoteTickets.find((entry) => {
+          const submissionId = cleanText(ticket.submissionId);
+          if (submissionId && cleanText(entry.submissionId) === submissionId) return true;
+          const ticketId = ticketStableId(ticket);
+          if (ticketId && ticketStableId(entry) === ticketId) return true;
+          return ticketIdentityKey(entry) === ticketIdentityKey(ticket);
+        });
+        if (!remote || !ticketSaveAppearsOnSheet(ticket, remote)) {
+          return { ok: false };
+        }
+        return buildReconciledSyncResult(remote, { tickets: [ticket] }, ticket);
+      });
+      const successCount = results.filter((item) => item.ok !== false).length;
+      if (!successCount) return null;
+      return {
+        ok: true,
+        reconciled: true,
+        count: successCount,
+        results
+      };
+    }
+
+    const expected = expectedTicket || remoteTicketFromPayload(payload);
+    if (!expected) return null;
+
+    const sheetRow = Number(expected.sheetRow || payload.sheetRow) || 0;
+    let remote = sheetRow
+      ? remoteTickets.find((entry) => Number(entry.sheetRow) === sheetRow)
+      : null;
+
+    if (!remote) {
+      const ticketId = ticketStableId(expected);
+      if (ticketId) {
+        remote = remoteTickets.find((entry) => ticketStableId(entry) === ticketId) || null;
+      }
+    }
+    if (!remote) {
+      remote = remoteTickets.find((entry) => ticketIdentityKey(entry) === ticketIdentityKey(expected)) || null;
+    }
+    if (!remote || !ticketSaveAppearsOnSheet(expected, remote)) return null;
+
+    return buildReconciledSyncResult(remote, payload, expected);
+  } catch (error) {
+    console.warn("Ambiguous sheet save reconciliation failed:", error);
+    return null;
+  }
 }
 
 /**
  * Apps Script should return JSON via ContentService, but Google sometimes
  * answers with HTML/JS error pages. Never let a raw SyntaxError bubble to alert().
  */
-function parseAppsScriptResponseText(text) {
+function parseAppsScriptResponseText(text, options = {}) {
   const raw = String(text ?? "").replace(/^\uFEFF/, "").trim();
 
   if (!raw) {
-    throw new Error("Empty response from Apps Script. Ticket may still be saved — click Refresh.");
+    const error = new Error("Empty response from Apps Script. Ticket may still be saved — click Refresh.");
+    error.sheetSyncParseError = true;
+    throw error;
   }
 
   // Rare gateway / legacy tokens
@@ -5636,13 +5786,13 @@ function parseAppsScriptResponseText(text) {
   }
 
   let parsed = tryParseJsonText(raw);
-  if (parsed.ok) return parsed.value;
+  if (parsed.ok && isAppsScriptResponseShape(parsed.value)) return parsed.value;
 
   // Tolerate callback(...) JSONP envelopes (same soft-parse path as auth users sync).
   const jsonpMatch = raw.match(/^[a-zA-Z_$][\w$]*\s*\(\s*([\s\S]*)\s\)\s*;?\s*$/);
   if (jsonpMatch) {
     parsed = tryParseJsonText(jsonpMatch[1]);
-    if (parsed.ok) return parsed.value;
+    if (parsed.ok && isAppsScriptResponseShape(parsed.value)) return parsed.value;
   }
 
   // Prefer a real JSON object that includes the "ok" key.
@@ -5660,17 +5810,32 @@ function parseAppsScriptResponseText(text) {
   }
 
   console.error("Apps Script non-JSON response:", truncateForLog(raw));
+  let message;
   if (looksLikeHtmlResponse(raw)) {
-    throw new Error("Sheet sync returned an HTML error page instead of JSON. Redeploy Apps Script and try again.");
+    message = "Sheet sync returned an HTML error page. The save may still have gone through — click Refresh to confirm.";
+  } else if (options.httpStatus && Number(options.httpStatus) >= 500) {
+    message = `Sheet sync server error (HTTP ${options.httpStatus}). Your changes may still be saved — click Refresh.`;
+  } else {
+    message = "Could not read a response from Apps Script. Your changes may still be saved — click Refresh.";
   }
-  throw new Error("Could not read a response from Apps Script. Redeploy the web app, then Refresh.");
+  const error = new Error(message);
+  error.sheetSyncParseError = true;
+  throw error;
+}
+
+function isSheetSyncResponseParseError(error) {
+  if (!error) return false;
+  if (error.sheetSyncParseError === true) return true;
+  if (error.name === "SyntaxError") return true;
+  const raw = String(error.message || error || "");
+  return /Unexpected token|Unterminated string|Expected property name|is not valid JSON/i.test(raw);
 }
 
 function friendlySheetSyncError(error) {
   const raw = String(error?.message || error || "").trim();
   if (!raw) return "Saved locally, but sync failed";
-  if (/JSON|Unexpected token|Expected property|SyntaxError/i.test(raw)) {
-    return "Saved locally, but sheet sync response was invalid. Click Refresh to confirm.";
+  if (isSheetSyncResponseParseError(error)) {
+    return "Saved locally, but sheet sync response was unclear. Click Refresh to confirm.";
   }
   if (/busy|lock|temporarily locked|try again shortly/i.test(raw)) {
     return "Sheet sync was temporarily locked after several retries. Your edits are saved locally — click Save again.";
@@ -5699,17 +5864,38 @@ async function postToSheetWithResponse(payload, options = {}) {
   let lastError = null;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-    const response = await fetch(SHEET_WEB_APP_URL, {
-      method: "POST",
-      redirect: "follow",
-      headers: {
-        "Content-Type": "text/plain;charset=utf-8"
-      },
-      body
-    });
+    let parsed = null;
+    try {
+      const response = await fetch(SHEET_WEB_APP_URL, {
+        method: "POST",
+        redirect: "follow",
+        headers: {
+          "Content-Type": "text/plain;charset=utf-8"
+        },
+        body
+      });
 
-    const text = await response.text();
-    const parsed = parseAppsScriptResponseText(text);
+      const text = await response.text();
+      if (!response.ok && !String(text || "").trim()) {
+        const httpError = new Error(`Sheet sync HTTP ${response.status}. Your changes may still be saved — click Refresh.`);
+        httpError.sheetSyncParseError = true;
+        throw httpError;
+      }
+
+      parsed = parseAppsScriptResponseText(text, { httpStatus: response.status });
+    } catch (error) {
+      if (isSheetSyncResponseParseError(error)) {
+        const reconciled = await reconcileAmbiguousSheetSave(payload, options.expectedTicket);
+        if (reconciled?.ok) {
+          if (reconciled.reconciled) {
+            setStatus("online", "Ticket saved — confirmed on sheet after an unclear response");
+          }
+          return reconciled;
+        }
+      }
+      throw error;
+    }
+
     if (parsed?.busy || /busy|lock timed out|could not obtain lock|temporarily locked/i.test(String(parsed?.error || ""))) {
       lastError = new Error(parsed?.error || "Sheet sync is temporarily locked.");
       if (attempt < maxAttempts) {
@@ -5726,6 +5912,12 @@ async function postToSheetWithResponse(payload, options = {}) {
       }
       throw lastError;
     }
+
+    if (parsed?.assumedOk && options.expectedTicket) {
+      const reconciled = await reconcileAmbiguousSheetSave(payload, options.expectedTicket);
+      if (reconciled?.ok) return reconciled;
+    }
+
     return parsed;
   }
 
@@ -6024,6 +6216,7 @@ async function sendTicketUpdateToSheet(ticket) {
   const result = await postToSheetWithResponse(
     buildTicketSheetPayload(ticket, { deferAttachments: true }),
     {
+      expectedTicket: ticket,
       onBusy(attempt, maxAttempts) {
         setStatus("", `Sheet sync busy — retrying (${attempt}/${maxAttempts - 1})…`);
       }
@@ -7434,7 +7627,9 @@ async function sendToSheet(ticket, options = {}) {
     throw new Error("Owner is required before syncing.");
   }
 
-  const result = await postToSheetWithResponse(buildTicketSheetPayload(ticket, options));
+  const result = await postToSheetWithResponse(buildTicketSheetPayload(ticket, options), {
+    expectedTicket: ticket
+  });
   if (!result?.ok) {
     throw new Error(result?.error || "Ticket submit failed.");
   }
@@ -7464,6 +7659,8 @@ async function sendNewTicketsToSheet(tickets, onProgress) {
     const result = await postToSheetWithResponse({
       action: "createTickets",
       tickets: tickets.map((ticket) => buildTicketSheetPayload(ticket, createOptions))
+    }, {
+      expectedTicket: tickets.length === 1 ? tickets[0] : null
     });
 
     if (!result?.ok && !Array.isArray(result?.results)) {
