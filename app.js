@@ -2843,6 +2843,35 @@ function isProjectTypeTicket(ticket) {
   return isExactSapType(ticket?.Type) || isExactInfraType(ticket?.Type);
 }
 
+/** Normalize Presentation type dropdown → "all" | "SAP" | "Infra". */
+function normalizePresentationTypeFilter(value) {
+  const raw = cleanText(value).toLowerCase();
+  if (raw === "sap") return "SAP";
+  if (raw === "infra") return "Infra";
+  return "all";
+}
+
+function getActivePresentationTypeFilter() {
+  // Prefer live DOM so browser form restore / programmatic value changes stay in sync.
+  return normalizePresentationTypeFilter(
+    presentationTypeFilter?.value ?? selectedPresentationType ?? "all"
+  );
+}
+
+function ticketMatchesPresentationType(ticket, typeFilter = getActivePresentationTypeFilter()) {
+  const selected = normalizePresentationTypeFilter(typeFilter);
+  if (selected === "SAP") return isExactSapType(ticket?.Type);
+  if (selected === "Infra") return isExactInfraType(ticket?.Type);
+  return true;
+}
+
+function syncPresentationFiltersFromDom() {
+  selectedPresentationType = getActivePresentationTypeFilter();
+  if (presentationOwnerFilter) {
+    selectedPresentationOwner = cleanText(presentationOwnerFilter.value) || "all";
+  }
+}
+
 function isPresentationEligible(ticket) {
   // Exact Type SAP or Infra only (not Daily - SAP / Daily - Infra).
   return isProjectTypeTicket(ticket);
@@ -6795,13 +6824,12 @@ function comparePresentationTickets(a, b) {
 
 function getPresentationTickets(tickets = getValidTickets()) {
   // Exact Type SAP / Infra only (never Daily variants); top-level projects.
+  // Type filter is applied here once; every Kanban column renders from this list.
+  syncPresentationFiltersFromDom();
+  const typeFilter = selectedPresentationType;
   return tickets
     .filter((ticket) => isProjectTypeTicket(ticket) && !isSubtaskTicket(ticket))
-    .filter((ticket) => {
-      if (selectedPresentationType === "SAP") return isExactSapType(ticket.Type);
-      if (selectedPresentationType === "Infra") return isExactInfraType(ticket.Type);
-      return true;
-    })
+    .filter((ticket) => ticketMatchesPresentationType(ticket, typeFilter))
     .filter((ticket) => ticketMatchesPresentationOwner(ticket))
     .filter((ticket) => ticketMatchesPresentationPeriod(ticket))
     .sort(comparePresentationTickets);
@@ -7101,6 +7129,7 @@ function renderPresentationCard(ticket, index) {
     <article
       class="presentation-card ${statusClass(ticket.Status)}"
       data-sheet-row="${ticket.sheetRow}"
+      data-ticket-type="${escapeHtml(cleanText(ticket.Type))}"
       title="${canEditTickets() ? "Hold 4 seconds, then drag to another column" : ""}"
     >
       <h3 class="presentation-card-title">${escapeHtml(ticket.Task || "Untitled project")}</h3>
@@ -7132,6 +7161,12 @@ function sortPresentationColumnTickets(tickets) {
 
 function renderPresentationView(tickets = getValidTickets()) {
   if (!presentationDeck) return;
+
+  syncPresentationFiltersFromDom();
+  if (presentationTypeFilter && presentationTypeFilter.value !== selectedPresentationType) {
+    // Keep the visible select aligned with the normalized filter ("SAP" / "Infra" / "all").
+    presentationTypeFilter.value = selectedPresentationType;
+  }
 
   const shown = getPresentationTickets(tickets);
   const typeLabel = selectedPresentationType === "all" ? "SAP & Infra" : selectedPresentationType;
@@ -7169,6 +7204,8 @@ function renderPresentationView(tickets = getValidTickets()) {
 
   const grouped = Object.fromEntries(PRESENTATION_KANBAN_COLUMNS.map((column) => [column.id, []]));
   shown.forEach((ticket) => {
+    // Defensive: never let a mismatched type into any column.
+    if (!ticketMatchesPresentationType(ticket, selectedPresentationType)) return;
     const columnId = kanbanColumnId(ticket.Status);
     if (grouped[columnId]) {
       grouped[columnId].push(ticket);
@@ -8088,7 +8125,8 @@ async function autoRefreshTickets() {
   if (document.hidden) return;
   if (autoRefreshInProgress || bootRefreshInProgress) return;
   if (isAnyModalOpen()) return;
-  if (hasRecentPendingTicketSync()) return;
+  // Do not skip auto-refresh when other tickets are pending — mergeTicketFromSheet
+  // already preserves only the fields this client is still syncing per ticket.
   if (lastSheetRefreshAt && (Date.now() - lastSheetRefreshAt) < AUTO_REFRESH_MIN_GAP_MS) return;
 
   autoRefreshInProgress = true;
@@ -8603,12 +8641,15 @@ exitPresentModeButton?.addEventListener("click", () => setPresentMode(false));
 document.addEventListener("fullscreenchange", onPresentModeFullscreenChange);
 document.addEventListener("webkitfullscreenchange", onPresentModeFullscreenChange);
 document.addEventListener("MSFullscreenChange", onPresentModeFullscreenChange);
-presentationTypeFilter?.addEventListener("change", () => {
-  selectedPresentationType = presentationTypeFilter.value || "all";
+function onPresentationTypeFilterChange() {
+  selectedPresentationType = normalizePresentationTypeFilter(presentationTypeFilter?.value);
+  if (presentationTypeFilter) presentationTypeFilter.value = selectedPresentationType;
   renderPresentationView();
-});
+}
+presentationTypeFilter?.addEventListener("change", onPresentationTypeFilterChange);
+presentationTypeFilter?.addEventListener("input", onPresentationTypeFilterChange);
 presentationOwnerFilter?.addEventListener("change", () => {
-  selectedPresentationOwner = presentationOwnerFilter.value || "all";
+  selectedPresentationOwner = cleanText(presentationOwnerFilter.value) || "all";
   renderPresentationView();
 });
 presentationPeriodFilters?.querySelectorAll("[data-period]").forEach((button) => {
@@ -8670,7 +8711,7 @@ ticketCreateModal?.addEventListener("click", (event) => {
 async function confirmManualSheetRefresh() {
   if (!hasRecentPendingTicketSync()) return true;
   return confirm(
-    "You have recent unsynced ticket edits. Refreshing now may replace them with sheet data if the save has not finished.\n\nContinue with Refresh?"
+    "You have recent local edits still syncing. Refresh will pull the latest sheet data for other tickets; fields you edited here stay protected until the save finishes.\n\nUse Clear Local on both machines if you need a full reset.\n\nContinue with Refresh?"
   );
 }
 
@@ -8725,11 +8766,38 @@ function bindClearTicketFiltersButtons() {
   });
 }
 
-clearLocalButton?.addEventListener("click", () => {
-  if (!confirm("Clear locally saved ticket previews? This does not delete synced tickets.")) return;
-  writeTickets([]);
-  renderTickets();
-  setStatus("", SHEET_WEB_APP_URL ? "Local preview cleared" : "Sync not configured");
+async function forceAlignTicketsFromSheet() {
+  writeDeletedTicketTombstones([]);
+  invalidateTicketsMemoryCache();
+  try {
+    localStorage.removeItem(LOCAL_KEY);
+    localStorage.removeItem(LOCAL_BACKUP_KEY);
+  } catch (error) {
+    console.warn("Could not clear local ticket cache.", error);
+  }
+  ticketsMemoryCache = null;
+
+  if (!SHEET_WEB_APP_URL) {
+    writeTickets([]);
+    renderTickets();
+    setStatus("", "Sync not configured");
+    return false;
+  }
+
+  setStatus("", "Pulling tickets from Google Sheet...");
+  const ok = await refreshFromSheet({ forceRender: true, immediateRender: true });
+  if (ok) {
+    setStatus("online", `Aligned ${getValidTickets().length} tickets from sheet`);
+  }
+  return ok;
+}
+
+clearLocalButton?.addEventListener("click", async () => {
+  const message = SHEET_WEB_APP_URL
+    ? "Discard this device's local ticket cache and reload everything from the Google Sheet?\n\nUse this on both machines if they show different data. Synced sheet rows are not deleted."
+    : "Clear locally saved ticket previews? This does not delete synced tickets.";
+  if (!confirm(message)) return;
+  await forceAlignTicketsFromSheet();
 });
 
 userForm?.addEventListener("submit", async (event) => {
