@@ -1440,7 +1440,7 @@ function scheduleRenderTickets(options = {}) {
     const opts = pendingRenderTicketsOptions || {};
     pendingRenderTicketsOptions = null;
     renderTickets(opts);
-  }, 48);
+  }, 80);
 }
 
 function mergeRemoteTicketsWithLocal(remoteTickets) {
@@ -1507,11 +1507,16 @@ const PENDING_SYNC_FIELD_KEYS = [
   "Notes",
   "Remarks",
   "Bhanu List",
-  "parentSheetRow"
+  "parentSheetRow",
+  "Recurrence",
+  "RecurrenceNext",
+  "RecurrenceParentId"
 ];
 
 function ticketFieldMatches(field, local, remote) {
   if (!local || !remote) return false;
+  // lite GET omits Notes — never treat empty remote notes as a real mismatch.
+  if ((field === "Notes" || field === "Remarks") && remote.notesOmitted) return true;
   switch (field) {
     case "Task":
       return cleanText(local.Task) === cleanText(remote.Task);
@@ -1538,6 +1543,12 @@ function ticketFieldMatches(field, local, remote) {
       return cleanText(local["Bhanu List"]) === cleanText(remote["Bhanu List"]);
     case "parentSheetRow":
       return Number(local.parentSheetRow || 0) === Number(remote.parentSheetRow || 0);
+    case "Recurrence":
+      return normalizeRecurrenceValue(local.Recurrence) === normalizeRecurrenceValue(remote.Recurrence);
+    case "RecurrenceNext":
+      return ticketDatesMatch(local.RecurrenceNext, remote.RecurrenceNext);
+    case "RecurrenceParentId":
+      return cleanText(local.RecurrenceParentId) === cleanText(remote.RecurrenceParentId);
     default:
       return cleanText(local[field]) === cleanText(remote[field]);
   }
@@ -1610,13 +1621,22 @@ function mergeTicketFromSheet(remoteTicket, index, localBySheetRow = null, local
       return Number(ticket.sheetRow) === rowKey;
     });
   }
-  const notesRaw = [remoteTicket.Notes, remoteTicket.Remarks].filter(Boolean).join("\n");
+  // lite GET skips Notes column — keep local remarks/screenshots until a full refresh.
+  const notesOmitted = Boolean(remoteTicket.notesOmitted);
+  const remoteNotesRaw = notesOmitted
+    ? ""
+    : [remoteTicket.Notes, remoteTicket.Remarks].filter(Boolean).join("\n");
+  const localNotesRaw = local
+    ? [local.Notes, local.Remarks].filter(Boolean).join("\n")
+    : "";
+  const notesRaw = notesOmitted && localNotesRaw ? localNotesRaw : remoteNotesRaw;
   const screenshotUrls = dedupeScreenshotUrls([
-    ...collectTicketScreenshotUrls({ ...remoteTicket, NotesRaw: notesRaw }),
+    ...(notesOmitted ? [] : collectTicketScreenshotUrls({ ...remoteTicket, NotesRaw: remoteNotesRaw })),
+    ...collectTicketScreenshotUrls(local || {}),
     ...collectScreenshotUrlsFromHtml(local?.NotesHtml || "")
   ]);
   const notesHtml = ensureTicketNotesHtml(
-    { NotesHtml: local?.NotesHtml || remoteTicket.NotesHtml },
+    { NotesHtml: local?.NotesHtml || (notesOmitted ? "" : remoteTicket.NotesHtml) },
     screenshotUrls
   );
 
@@ -1631,7 +1651,7 @@ function mergeTicketFromSheet(remoteTicket, index, localBySheetRow = null, local
       local,
       remoteTicket,
       Array.isArray(rawPendingFields) ? normalizePendingFieldsList(rawPendingFields) : null
-    )
+    ).filter((field) => !(notesOmitted && (field === "Notes" || field === "Remarks")))
     : [];
   const preservePendingEdits = remainingPendingFields.length > 0;
 
@@ -1657,18 +1677,30 @@ function mergeTicketFromSheet(remoteTicket, index, localBySheetRow = null, local
     preserveFields.pendingFields = remainingPendingFields;
   }
 
+  const notesFromLocal = notesOmitted && local && (
+    cleanText(local.Notes) || cleanText(local.Remarks) || local.NotesHtml || screenshotUrls.length
+  );
+  const mergedNotes = notesFromLocal
+    ? (local.Notes || local.Remarks || "")
+    : (preservePendingEdits && remainingPendingFields.includes("Notes")
+      ? String(local.Notes || local.Remarks || notesRaw || "")
+      : (remoteTicket.Notes || remoteTicket.Remarks || notesRaw || ""));
+
   return normalizeTicket({
     ...remoteTicket,
     ...preserveFields,
     ticketId: preserveFields.ticketId || remoteTicket.ticketId || local?.ticketId || "",
     sheetRow,
+    Notes: notesFromLocal ? (local.Notes || mergedNotes) : (preserveFields.Notes ?? remoteTicket.Notes ?? mergedNotes),
+    Remarks: notesFromLocal ? (local.Remarks || local.Notes || mergedNotes) : (preserveFields.Remarks ?? remoteTicket.Remarks ?? mergedNotes),
     NotesRaw: preservePendingEdits && remainingPendingFields.includes("Notes")
       ? String(local.Notes || local.Remarks || notesRaw || "")
       : notesRaw,
-    NotesHtml: notesHtml,
+    NotesHtml: notesFromLocal ? (local.NotesHtml || notesHtml) : notesHtml,
     ScreenshotUrls: screenshotUrls,
     pendingSheetSync: preservePendingEdits ? pending : 0,
-    pendingFields: preservePendingEdits ? remainingPendingFields : []
+    pendingFields: preservePendingEdits ? remainingPendingFields : [],
+    notesOmitted: undefined
   });
 }
 
@@ -2131,6 +2163,9 @@ function buildTicketSheetPayload(ticket, options = {}) {
     "End date": ticket["End date"],
     Milestone: ticket.Milestone,
     parentSheetRow: Number(ticket.parentSheetRow) || 0,
+    Recurrence: normalizeRecurrenceValue(ticket.Recurrence || ""),
+    RecurrenceNext: canonicalizeTicketDate(ticket.RecurrenceNext || ""),
+    RecurrenceParentId: cleanText(ticket.RecurrenceParentId || ""),
     Notes: notesText,
     Remarks: notesText,
     "Bhanu List": ticket["Bhanu List"],
@@ -2225,24 +2260,67 @@ function insertImageIntoNotesEditor(editor, hiddenInput, dataUrl) {
   addAttachmentToNotesEditor(editor, hiddenInput, { src: dataUrl, driveUrl: "" });
 }
 
-function compressImageFile(file, maxWidth = 960, quality = 0.72) {
+/** Longest-edge cap for pasted/dropped screenshots before upload (~1080p class). */
+const IMAGE_COMPRESS_MAX_DIM = 1680;
+const IMAGE_COMPRESS_QUALITY = 0.76;
+let canvasWebpSupported = null;
+
+function canvasSupportsWebp() {
+  if (canvasWebpSupported != null) return canvasWebpSupported;
+  try {
+    canvasWebpSupported = document
+      .createElement("canvas")
+      .toDataURL("image/webp")
+      .startsWith("data:image/webp");
+  } catch (_error) {
+    canvasWebpSupported = false;
+  }
+  return canvasWebpSupported;
+}
+
+function compressImageFile(file, maxDimension = IMAGE_COMPRESS_MAX_DIM, quality = IMAGE_COMPRESS_QUALITY) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => {
+      const sourceDataUrl = String(reader.result || "");
       const image = new Image();
       image.onload = () => {
-        const scale = Math.min(1, maxWidth / image.width);
+        const longest = Math.max(image.width || 1, image.height || 1);
+        const scale = Math.min(1, maxDimension / longest);
         const width = Math.max(1, Math.round(image.width * scale));
         const height = Math.max(1, Math.round(image.height * scale));
+        // Already small enough — keep original bytes (avoids re-encoding tiny JPEGs).
+        if (
+          scale >= 1
+          && file
+          && Number(file.size) > 0
+          && Number(file.size) <= 220000
+          && /^image\/(jpeg|jpg|webp)$/i.test(String(file.type || ""))
+        ) {
+          resolve(sourceDataUrl);
+          return;
+        }
         const canvas = document.createElement("canvas");
         canvas.width = width;
         canvas.height = height;
         const context = canvas.getContext("2d");
+        if (!context) {
+          reject(new Error("Could not prepare image canvas."));
+          return;
+        }
         context.drawImage(image, 0, 0, width, height);
-        resolve(canvas.toDataURL("image/jpeg", quality));
+        const mime = canvasSupportsWebp() ? "image/webp" : "image/jpeg";
+        let compressed = canvas.toDataURL(mime, quality);
+        // Prefer the smaller of WebP/JPEG when both are available.
+        if (mime === "image/webp") {
+          const jpegFallback = canvas.toDataURL("image/jpeg", quality);
+          if (jpegFallback.length < compressed.length) compressed = jpegFallback;
+        }
+        // Never ship a "compressed" result larger than the source (rare for PNG→JPEG wins).
+        resolve(compressed.length < sourceDataUrl.length ? compressed : sourceDataUrl);
       };
       image.onerror = () => reject(new Error("Could not load pasted image."));
-      image.src = String(reader.result || "");
+      image.src = sourceDataUrl;
     };
     reader.onerror = () => reject(new Error("Could not read pasted image."));
     reader.readAsDataURL(file);
@@ -2407,6 +2485,14 @@ function normalizeTicket(ticket) {
     ScreenshotUrls: screenshotUrls,
     "Bhanu List": cleanText(ticket["Bhanu List"]),
     ticketId: cleanText(ticket.ticketId || ticket.TicketId || ticket["Ticket ID"] || ""),
+    Recurrence: normalizeRecurrenceValue(ticket.Recurrence || ticket.recurrence || ""),
+    RecurrenceNext: canonicalizeTicketDate(ticket.RecurrenceNext || ticket["Recurrence Next"] || ""),
+    RecurrenceParentId: cleanText(
+      ticket.RecurrenceParentId
+      || ticket["Recurrence Parent Id"]
+      || ticket.recurrenceParentId
+      || ""
+    ),
     submissionId: cleanText(ticket.submissionId || ""),
     sheetRow: Number(ticket.sheetRow) || 0,
     pendingSheetSync: Number(ticket.pendingSheetSync) || 0,
@@ -3912,6 +3998,7 @@ function renderKanbanCard(ticket) {
       <div class="kanban-card-head">
         <span class="priority-pill priority-${priorityClass}">${escapeHtml(formatPriorityLabel(ticket.Priority))}</span>
         ${ticket.Type ? `<span class="kanban-card-type">${escapeHtml(ticket.Type)}</span>` : ""}
+        ${isRecurringTemplateTicket(ticket) ? `<span class="recurring-badge" title="${escapeHtml(formatRecurrenceLabel(ticket.Recurrence))}">Recurring</span>` : ""}
       </div>
       <h3 class="kanban-card-title">${escapeHtml(ticket.Task)}</h3>
       <div class="kanban-card-meta">
@@ -3935,11 +4022,40 @@ function renderKanbanCard(ticket) {
   `;
 }
 
+let lastKanbanBoardSignature = "";
+
+function computeKanbanBoardSignature(filteredTickets, totalCount) {
+  const showCompleted = kanbanShowCompleted?.checked ? "1" : "0";
+  const search = cleanText(kanbanSearchFilter?.value);
+  const owner = cleanText(kanbanOwnerFilter?.value);
+  const priority = cleanText(kanbanPriorityFilter?.value);
+  let body = `${showCompleted}|${search}|${owner}|${priority}|${totalCount}|${filteredTickets.length}`;
+  for (let i = 0; i < filteredTickets.length; i += 1) {
+    const ticket = filteredTickets[i];
+    body += `|${ticket.sheetRow || ""}:${ticket.Status || ""}:${ticket.Priority || ""}:${ticket.Owner || ""}:${ticket.Task || ""}:${ticket["Start date"] || ""}:${String(ticket.Notes || ticket.Remarks || "").length}`;
+  }
+  return body;
+}
+
 function renderKanbanBoard(tickets) {
   if (!kanbanColumns) return;
 
   populateKanbanOwnerFilter(tickets);
   const filteredTickets = applyKanbanFilters(tickets);
+  const boardSignature = computeKanbanBoardSignature(filteredTickets, tickets.length);
+
+  if (kanbanFilterSummary) {
+    kanbanFilterSummary.textContent = filteredTickets.length === tickets.length
+      ? `${filteredTickets.length} task${filteredTickets.length === 1 ? "" : "s"} on board`
+      : `${filteredTickets.length} of ${tickets.length} tasks shown`;
+  }
+
+  // Skip full DOM rebuild when filters/data paint the same board.
+  if (boardSignature === lastKanbanBoardSignature && kanbanColumns.children.length) {
+    return;
+  }
+  lastKanbanBoardSignature = boardSignature;
+
   const grouped = Object.fromEntries(KANBAN_COLUMNS.map((column) => [column.id, []]));
 
   filteredTickets.forEach((ticket) => {
@@ -3975,12 +4091,6 @@ function renderKanbanBoard(tickets) {
       `;
     })
     .join("");
-
-  if (kanbanFilterSummary) {
-    kanbanFilterSummary.textContent = filteredTickets.length === tickets.length
-      ? `${filteredTickets.length} task${filteredTickets.length === 1 ? "" : "s"} on board`
-      : `${filteredTickets.length} of ${tickets.length} tasks shown`;
-  }
 
   bindScreenshotPreviewButtons(kanbanColumns);
 }
@@ -5443,6 +5553,7 @@ function openTicketCreateModal() {
   resetSurajTicketCreateTracking();
   applyDefaultTicketFormOwner();
   applySurajTicketCreateDefaults({ force: true });
+  setRecurrenceFormState("ticketForm", null);
   if (form?.elements?.Status) {
     form.elements.Status.value = "Not started";
   }
@@ -5502,6 +5613,7 @@ function openTicketEditor(sheetRow, options = {}) {
   setDateFieldValue(ticketEditForm, "Start date", ticket["Start date"]);
   setDateFieldValue(ticketEditForm, "End date", ticket["End date"]);
   setDateFieldValue(ticketEditForm, "Milestone", ticket.Milestone);
+  setRecurrenceFormState("ticketEdit", ticket);
   populateTicketEditParentContext(ticket);
   populateTicketEditApprovalNote(ticket);
 
@@ -5531,6 +5643,7 @@ function closeTicketEditor() {
   }
   if (addSubtaskFromEditButton) addSubtaskFromEditButton.hidden = true;
   activeEditTicket = null;
+  setRecurrenceFormState("ticketEdit", null);
   resetTicketDeleteUi();
   resetTicketEditSaveUi();
 }
@@ -5538,15 +5651,20 @@ function closeTicketEditor() {
 function ticketFromEditForm() {
   const data = new FormData(ticketEditForm);
   const sheetRow = resolveEditingSheetRow(data, activeEditTicket || {});
-  return normalizeTicket(applyTicketNotesToPayload({
+  const payload = normalizeTicket(applyTicketNotesToPayload({
     ...ticketFromFormData(data),
     sheetRow,
     ticketId: ticketStableId(activeEditTicket) || createTicketId(),
     lastUpdated: cleanText(activeEditTicket?.lastUpdated) || ""
   }, ticketEditNotesEditor));
+  if (!payload.Recurrence && activeEditTicket?.RecurrenceParentId) {
+    payload.RecurrenceParentId = cleanText(activeEditTicket.RecurrenceParentId);
+  }
+  return payload;
 }
 
 function ticketFromFormData(data, owner = "") {
+  const recurrence = readRecurrenceFromFormData(data);
   return {
     Task: String(data.get("Task") || "").trim(),
     Priority: normalizePriority(data.get("Priority")),
@@ -5558,9 +5676,136 @@ function ticketFromFormData(data, owner = "") {
     "End date": data.get("End date"),
     Milestone: data.get("Milestone"),
     parentSheetRow: Number(data.get("parentSheetRow")) || 0,
+    Recurrence: recurrence.value,
+    RecurrenceNext: recurrence.next,
+    RecurrenceParentId: cleanText(data.get("RecurrenceParentId") || ""),
     Notes: String(data.get("Notes") || "").trim(),
     "Bhanu List": data.has("originalOwnerBhanu") ? "Bhanu" : ""
   };
+}
+
+function normalizeRecurrenceValue(value) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  const lower = text.toLowerCase();
+  if (lower === "daily" || lower === "day") return "Daily";
+  if (lower === "weekly" || lower === "week") return "Weekly";
+  if (lower === "monthly" || lower === "month") return "Monthly";
+  const everyMatch = lower.match(/^every\s*:?\s*(\d+)\s*(d|day|days)?$/i)
+    || lower.match(/^every:(\d+)$/i);
+  if (everyMatch) {
+    const days = Math.max(1, Math.min(365, Number(everyMatch[1]) || 0));
+    return days ? `Every:${days}` : "";
+  }
+  if (/^\d+$/.test(text)) {
+    return `Every:${Math.max(1, Math.min(365, Number(text)))}`;
+  }
+  return "";
+}
+
+function formatRecurrenceLabel(value) {
+  const normalized = normalizeRecurrenceValue(value);
+  if (!normalized) return "";
+  if (normalized === "Daily") return "Daily";
+  if (normalized === "Weekly") return "Weekly";
+  if (normalized === "Monthly") return "Monthly";
+  if (/^Every:\d+$/i.test(normalized)) {
+    const days = normalized.split(":")[1];
+    return `Every ${days} day${days === "1" ? "" : "s"}`;
+  }
+  return normalized;
+}
+
+function isRecurringTemplateTicket(ticket) {
+  return Boolean(normalizeRecurrenceValue(ticket?.Recurrence));
+}
+
+function advanceRecurrenceDateValue(dateValue, recurrence) {
+  const normalized = normalizeRecurrenceValue(recurrence);
+  const parsed = parseTicketDate(dateValue) || new Date();
+  const next = new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate());
+  if (normalized === "Daily") next.setDate(next.getDate() + 1);
+  else if (normalized === "Weekly") next.setDate(next.getDate() + 7);
+  else if (normalized === "Monthly") next.setMonth(next.getMonth() + 1);
+  else if (/^Every:\d+$/i.test(normalized)) {
+    next.setDate(next.getDate() + Math.max(1, Number(normalized.split(":")[1]) || 1));
+  } else {
+    next.setDate(next.getDate() + 1);
+  }
+  const year = next.getFullYear();
+  const month = String(next.getMonth() + 1).padStart(2, "0");
+  const day = String(next.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function readRecurrenceFromFormData(data) {
+  const enabled = data.has("recurringEnabled")
+    || String(data.get("recurringEnabled") || "") === "1"
+    || String(data.get("recurringEnabled") || "").toLowerCase() === "on";
+  if (!enabled) {
+    return { value: "", next: "" };
+  }
+  const interval = String(data.get("RecurrenceInterval") || "Weekly").trim();
+  let value = "";
+  if (interval === "Custom") {
+    const days = Math.max(1, Math.min(365, Number(data.get("RecurrenceCustomDays")) || 14));
+    value = `Every:${days}`;
+  } else {
+    value = normalizeRecurrenceValue(interval);
+  }
+  if (!value) return { value: "", next: "" };
+  const start = canonicalizeTicketDate(data.get("Start date") || "") || canonicalizeTicketDate(new Date().toISOString().slice(0, 10));
+  const existingNext = canonicalizeTicketDate(data.get("RecurrenceNext") || "");
+  return {
+    value,
+    next: existingNext || advanceRecurrenceDateValue(start, value)
+  };
+}
+
+function setRecurrenceFormState(prefix, ticket = null) {
+  const toggle = document.querySelector(`#${prefix}RecurringToggle`);
+  const controls = document.querySelector(`#${prefix}RecurrenceControls`);
+  const interval = document.querySelector(`#${prefix}RecurrenceInterval`);
+  const customWrap = document.querySelector(`#${prefix}RecurrenceCustomWrap`);
+  const customDays = document.querySelector(`#${prefix}RecurrenceCustomDays`);
+  if (!toggle || !controls || !interval) return;
+
+  const recurrence = normalizeRecurrenceValue(ticket?.Recurrence || "");
+  const enabled = Boolean(recurrence);
+  toggle.checked = enabled;
+  controls.hidden = !enabled;
+
+  if (/^Every:\d+$/i.test(recurrence)) {
+    interval.value = "Custom";
+    if (customDays) customDays.value = String(Number(recurrence.split(":")[1]) || 14);
+  } else if (recurrence === "Daily" || recurrence === "Weekly" || recurrence === "Monthly") {
+    interval.value = recurrence;
+  } else if (!enabled) {
+    interval.value = "Weekly";
+  }
+
+  if (customWrap) {
+    customWrap.hidden = interval.value !== "Custom";
+  }
+}
+
+function syncRecurrenceFormVisibility(prefix) {
+  const toggle = document.querySelector(`#${prefix}RecurringToggle`);
+  const controls = document.querySelector(`#${prefix}RecurrenceControls`);
+  const interval = document.querySelector(`#${prefix}RecurrenceInterval`);
+  const customWrap = document.querySelector(`#${prefix}RecurrenceCustomWrap`);
+  if (!toggle || !controls) return;
+  controls.hidden = !toggle.checked;
+  if (customWrap && interval) {
+    customWrap.hidden = !toggle.checked || interval.value !== "Custom";
+  }
+}
+
+function bindRecurrenceFormControls(prefix) {
+  const toggle = document.querySelector(`#${prefix}RecurringToggle`);
+  const interval = document.querySelector(`#${prefix}RecurrenceInterval`);
+  toggle?.addEventListener("change", () => syncRecurrenceFormVisibility(prefix));
+  interval?.addEventListener("change", () => syncRecurrenceFormVisibility(prefix));
 }
 
 function coalesceSyncValue(...values) {
@@ -5622,6 +5867,9 @@ function applyTicketSyncResult(sheetRow, result = {}, expected = {}) {
     Type: expected.Type ?? ticket.Type,
     "Bhanu List": expected["Bhanu List"] ?? ticket["Bhanu List"],
     parentSheetRow: expected.parentSheetRow ?? ticket.parentSheetRow,
+    Recurrence: expected.Recurrence ?? ticket.Recurrence,
+    RecurrenceNext: expected.RecurrenceNext ?? coalesceSyncValue(result.recurrenceNext, ticket.RecurrenceNext),
+    RecurrenceParentId: expected.RecurrenceParentId ?? coalesceSyncValue(result.recurrenceParentId, ticket.RecurrenceParentId),
     Status: syncedStatus,
     Milestone: milestone,
     "Start date": startDate,
@@ -7159,6 +7407,35 @@ function sortPresentationColumnTickets(tickets) {
   return [...tickets].sort(comparePresentationTickets);
 }
 
+let lastPresentationBoardSignature = "";
+let presentationFilterDebounceTimer = 0;
+
+function computePresentationBoardSignature(shown) {
+  let body = [
+    selectedPresentationType,
+    selectedPresentationOwner,
+    selectedPresentationPeriod,
+    presentationDateFrom?.value || "",
+    presentationDateTo?.value || "",
+    shown.length
+  ].join("|");
+  for (let i = 0; i < shown.length; i += 1) {
+    const ticket = shown[i];
+    body += `|${ticket.sheetRow || ""}:${ticket.Status || ""}:${ticket.Priority || ""}:${ticket.Owner || ""}:${ticket.Task || ""}:${ticket.Milestone || ""}:${ticket.Type || ""}:${String(ticket.Notes || ticket.Remarks || "").length}`;
+  }
+  return body;
+}
+
+function schedulePresentationViewRender() {
+  if (presentationFilterDebounceTimer) {
+    window.clearTimeout(presentationFilterDebounceTimer);
+  }
+  presentationFilterDebounceTimer = window.setTimeout(() => {
+    presentationFilterDebounceTimer = 0;
+    renderPresentationView();
+  }, 70);
+}
+
 function renderPresentationView(tickets = getValidTickets()) {
   if (!presentationDeck) return;
 
@@ -7176,12 +7453,20 @@ function renderPresentationView(tickets = getValidTickets()) {
     : (PERFORMANCE_PERIOD_OPTIONS.find((entry) => entry.id === selectedPresentationPeriod)?.label
       || selectedPresentationPeriod);
   const filterBits = [typeLabel, ownerLabel, periodLabel].filter(Boolean);
+  const boardSignature = computePresentationBoardSignature(shown);
 
   if (presentationSummary) {
     presentationSummary.textContent = shown.length
       ? `${shown.length} project${shown.length === 1 ? "" : "s"} · ${filterBits.join(" · ")}`
       : `No projects match the current filters (${filterBits.join(" · ")})`;
   }
+
+  // Filter-only churn: keep existing cards when the painted board would be identical.
+  if (boardSignature === lastPresentationBoardSignature) {
+    if (!shown.length && presentationDeck.querySelector(".presentation-empty")) return;
+    if (shown.length && presentationDeck.classList.contains("presentation-kanban")) return;
+  }
+  lastPresentationBoardSignature = boardSignature;
 
   if (!shown.length) {
     presentationDeck.classList.remove("presentation-kanban");
@@ -7379,7 +7664,7 @@ function renderTicketTable(tickets, options = {}) {
 
       let taskCell = "";
       if (subtask) {
-        taskCell = `<div class="ticket-task-head ticket-task-head-sub"><span class="subtask-indicator" title="Sub-task${parent ? ` of ${escapeHtml(parent.Task || "")}` : ""}">↳</span><span class="ticket-parent-task">${escapeHtml(ticket.Task)}</span></div>`;
+        taskCell = `<div class="ticket-task-head ticket-task-head-sub"><span class="subtask-indicator" title="Sub-task${parent ? ` of ${escapeHtml(parent.Task || "")}` : ""}">↳</span><span class="ticket-parent-task">${escapeHtml(ticket.Task)}</span>${isRecurringTemplateTicket(ticket) ? `<span class="recurring-badge" title="${escapeHtml(formatRecurrenceLabel(ticket.Recurrence))}">Recurring</span>` : ""}</div>`;
       } else if (hasChildren) {
         taskCell = `
           <div class="ticket-task-head">
@@ -7396,10 +7681,13 @@ function renderTicketTable(tickets, options = {}) {
             >${collapsed ? "▸" : "▾"}</button>
             <span class="ticket-parent-task">${escapeHtml(ticket.Task)}</span>
             <span class="ticket-subtask-count">${childCount}</span>
+            ${isRecurringTemplateTicket(ticket) ? `<span class="recurring-badge" title="${escapeHtml(formatRecurrenceLabel(ticket.Recurrence))}">Recurring</span>` : ""}
           </div>
         `;
       } else {
-        taskCell = escapeHtml(ticket.Task);
+        taskCell = isRecurringTemplateTicket(ticket)
+          ? `<div class="ticket-task-head"><span class="ticket-parent-task">${escapeHtml(ticket.Task)}</span><span class="recurring-badge" title="${escapeHtml(formatRecurrenceLabel(ticket.Recurrence))}">Recurring</span></div>`
+          : escapeHtml(ticket.Task);
       }
 
       const rowClasses = [
@@ -7869,10 +8157,12 @@ function applyRemoteTicketsPayload(payload) {
     writeHierarchyRows(normalizeHierarchyRows(payload.hierarchy));
   }
 
+  const notesOmitted = Boolean(payload.notesOmitted || payload.lite);
   // Raw sheet rows — merge happens once in mergeRemoteTicketsWithLocal (Map lookup).
   return (payload.tickets || []).map((ticket, index) => ({
     ...ticket,
-    sheetRow: ticket.sheetRow ?? index + 2
+    sheetRow: ticket.sheetRow ?? index + 2,
+    notesOmitted: notesOmitted || Boolean(ticket.notesOmitted)
   }));
 }
 
@@ -8098,9 +8388,31 @@ async function refreshFromSheet(options = {}) {
   }
 }
 
-const AUTO_REFRESH_INTERVAL_MS = 120000;
-const AUTO_REFRESH_MIN_GAP_MS = 45000;
+const AUTO_REFRESH_INTERVAL_MS = 180000;
+const AUTO_REFRESH_IDLE_INTERVAL_MS = 360000;
+const AUTO_REFRESH_HIDDEN_POLL_MS = 900000;
+const AUTO_REFRESH_MIN_GAP_MS = 60000;
+const AUTO_REFRESH_IDLE_AFTER_MS = 120000;
+const AUTO_REFRESH_FULL_EVERY_N = 6;
 let autoRefreshInProgress = false;
+let autoRefreshTickCount = 0;
+let autoRefreshTimerId = 0;
+let lastUserActivityAt = Date.now();
+
+function markPortalUserActivity() {
+  lastUserActivityAt = Date.now();
+}
+
+function isTicketSaveInFlight() {
+  return Boolean(
+    ticketEditSubmitInFlight
+    || ticketEditDeleteInFlight
+    || screenshotSyncInProgress
+    || presentationDragMoveInFlight
+    || form?.classList.contains("ticket-form-submitting")
+    || ticketEditForm?.classList.contains("ticket-form-submitting")
+  );
+}
 
 function isAnyModalOpen() {
   return Boolean(
@@ -8120,31 +8432,61 @@ function hasRecentPendingTicketSync() {
   });
 }
 
+function getAutoRefreshDelayMs() {
+  if (document.hidden) return AUTO_REFRESH_HIDDEN_POLL_MS;
+  if ((Date.now() - lastUserActivityAt) >= AUTO_REFRESH_IDLE_AFTER_MS) {
+    return AUTO_REFRESH_IDLE_INTERVAL_MS;
+  }
+  return AUTO_REFRESH_INTERVAL_MS;
+}
+
+function scheduleNextAutoRefresh(delayMs) {
+  if (autoRefreshTimerId) {
+    window.clearTimeout(autoRefreshTimerId);
+    autoRefreshTimerId = 0;
+  }
+  const wait = Math.max(5000, Number(delayMs) || getAutoRefreshDelayMs());
+  autoRefreshTimerId = window.setTimeout(() => {
+    autoRefreshTimerId = 0;
+    autoRefreshTickets().then((result) => {
+      const nextDelay = result === "deferred"
+        ? 20000
+        : (result === "gap" ? AUTO_REFRESH_MIN_GAP_MS : getAutoRefreshDelayMs());
+      scheduleNextAutoRefresh(nextDelay);
+    });
+  }, wait);
+}
+
 async function autoRefreshTickets() {
-  if (!SHEET_WEB_APP_URL) return;
-  if (document.hidden) return;
-  if (autoRefreshInProgress || bootRefreshInProgress) return;
-  if (isAnyModalOpen()) return;
+  if (!SHEET_WEB_APP_URL) return "skip";
+  if (document.hidden) return "hidden";
+  if (autoRefreshInProgress || bootRefreshInProgress) return "busy";
+  if (isAnyModalOpen() || isTicketSaveInFlight()) return "deferred";
   // Do not skip auto-refresh when other tickets are pending — mergeTicketFromSheet
   // already preserves only the fields this client is still syncing per ticket.
-  if (lastSheetRefreshAt && (Date.now() - lastSheetRefreshAt) < AUTO_REFRESH_MIN_GAP_MS) return;
+  if (lastSheetRefreshAt && (Date.now() - lastSheetRefreshAt) < AUTO_REFRESH_MIN_GAP_MS) return "gap";
 
   autoRefreshInProgress = true;
+  autoRefreshTickCount += 1;
+  // Prefer lite polls (skip Notes + audit). Occasional full compact keeps remarks
+  // / Performance dates fresh without constant sheet weight.
+  const useLite = (autoRefreshTickCount % AUTO_REFRESH_FULL_EVERY_N) !== 0;
   try {
     const ok = await refreshFromSheet({
       skipScreenshotSync: true,
       deferSecondary: true,
       silent: true,
-      lite: true,
+      lite: useLite,
       retries: 1,
-      timeoutMs: 25000
+      timeoutMs: useLite ? 25000 : 35000
     });
     if (ok) {
       setStatus("online", `Auto-refreshed at ${new Date().toLocaleTimeString()}`);
-    } else {
-      // Keep local board usable; avoid flipping a transient blip into a hard error.
-      setTicketRefreshFailureStatus({ forceStatus: true });
+      return "ok";
     }
+    // Keep local board usable; avoid flipping a transient blip into a hard error.
+    setTicketRefreshFailureStatus({ forceStatus: true });
+    return "fail";
   } finally {
     autoRefreshInProgress = false;
   }
@@ -8152,14 +8494,22 @@ async function autoRefreshTickets() {
 
 function initAutoRefresh() {
   if (!SHEET_WEB_APP_URL) return;
-  // Skip an immediate interval tick right after boot refresh.
-  window.setTimeout(() => {
-    setInterval(autoRefreshTickets, AUTO_REFRESH_INTERVAL_MS);
-  }, AUTO_REFRESH_INTERVAL_MS);
+  const activityEvents = ["pointerdown", "keydown", "touchstart", "scroll"];
+  activityEvents.forEach((eventName) => {
+    document.addEventListener(eventName, markPortalUserActivity, { passive: true, capture: true });
+  });
+  // Skip an immediate tick right after boot refresh; then adapt interval to idle/hidden.
+  scheduleNextAutoRefresh(AUTO_REFRESH_INTERVAL_MS);
   document.addEventListener("visibilitychange", () => {
-    if (!document.hidden) {
-      autoRefreshTickets();
+    if (document.hidden) {
+      scheduleNextAutoRefresh(AUTO_REFRESH_HIDDEN_POLL_MS);
+      return;
     }
+    markPortalUserActivity();
+    autoRefreshTickets().then((result) => {
+      const delay = result === "deferred" ? 20000 : getAutoRefreshDelayMs();
+      scheduleNextAutoRefresh(delay);
+    });
   });
 }
 
@@ -8644,13 +8994,13 @@ document.addEventListener("MSFullscreenChange", onPresentModeFullscreenChange);
 function onPresentationTypeFilterChange() {
   selectedPresentationType = normalizePresentationTypeFilter(presentationTypeFilter?.value);
   if (presentationTypeFilter) presentationTypeFilter.value = selectedPresentationType;
-  renderPresentationView();
+  schedulePresentationViewRender();
 }
 presentationTypeFilter?.addEventListener("change", onPresentationTypeFilterChange);
 presentationTypeFilter?.addEventListener("input", onPresentationTypeFilterChange);
 presentationOwnerFilter?.addEventListener("change", () => {
   selectedPresentationOwner = cleanText(presentationOwnerFilter.value) || "all";
-  renderPresentationView();
+  schedulePresentationViewRender();
 });
 presentationPeriodFilters?.querySelectorAll("[data-period]").forEach((button) => {
   button.addEventListener("click", () => {
@@ -8659,14 +9009,14 @@ presentationPeriodFilters?.querySelectorAll("[data-period]").forEach((button) =>
       chip.classList.toggle("is-active", chip === button);
     });
     syncPresentationCustomRangeVisibility();
-    renderPresentationView();
+    schedulePresentationViewRender();
   });
 });
 presentationDateFrom?.addEventListener("change", () => {
-  if (selectedPresentationPeriod === "custom") renderPresentationView();
+  if (selectedPresentationPeriod === "custom") schedulePresentationViewRender();
 });
 presentationDateTo?.addEventListener("change", () => {
-  if (selectedPresentationPeriod === "custom") renderPresentationView();
+  if (selectedPresentationPeriod === "custom") schedulePresentationViewRender();
 });
 syncPresentationCustomRangeVisibility();
 document.addEventListener("keydown", (event) => {
@@ -8751,6 +9101,8 @@ projectSearchFilter?.addEventListener("input", () => scheduleRenderTickets());
 projectSortFilter?.addEventListener("change", () => scheduleRenderTickets({ immediate: true }));
 
 initMultiFilterControls();
+bindRecurrenceFormControls("ticketForm");
+bindRecurrenceFormControls("ticketEdit");
 setTicketSortFilter(DEFAULT_TICKET_SORT);
 setProjectSortFilter(DEFAULT_TICKET_SORT);
 bindClearTicketFiltersButtons();

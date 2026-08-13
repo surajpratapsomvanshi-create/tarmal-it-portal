@@ -6,14 +6,14 @@
     <title>Tarmal IT Portal</title>
     <link rel="icon" href="./assets/tarmal-mark.png?v=1" type="image/png">
     <link rel="apple-touch-icon" href="./assets/apple-touch-icon.png?v=1">
-    <link rel="stylesheet" href="./styles.css?v=176">
+    <link rel="stylesheet" href="./styles.css?v=177">
     <!-- auth stays blocking so requireLogin runs before app chrome paints -->
     <script src="./auth.js?v=22"></script>
     <!-- Defer main bundles so HTML can parse while ~210KB+ app.js downloads -->
-    <script src="./app.js?v=181" defer></script>
+    <script src="./app.js?v=184" defer></script>
     <script src="./assets.js?v=13" defer></script>
     <script src="./documents.js?v=11" defer></script>
-    <script src="./procurement.js?v=5" defer></script>
+    <script src="./procurement.js?v=6" defer></script>
   </head>
   <body class="view-focus">
     <script>Auth.requireLogin();</script>
@@ -1170,6 +1170,30 @@
                 <span>End Date</span>
                 <input name="End date" type="date">
               </label>
+
+              <div class="field field-span-all recurrence-form-field">
+                <span>Recurrence</span>
+                <label class="multi-select-option recurrence-enable-option">
+                  <input type="checkbox" id="ticketFormRecurringToggle" name="recurringEnabled" value="1">
+                  <span>Recurring task — create a new ticket on a schedule</span>
+                </label>
+                <div class="recurrence-form-controls" id="ticketFormRecurrenceControls" hidden>
+                  <label class="field">
+                    <span>Interval</span>
+                    <select name="RecurrenceInterval" id="ticketFormRecurrenceInterval">
+                      <option value="Daily">Daily</option>
+                      <option value="Weekly" selected>Weekly</option>
+                      <option value="Monthly">Monthly</option>
+                      <option value="Custom">Every N days</option>
+                    </select>
+                  </label>
+                  <label class="field" id="ticketFormRecurrenceCustomWrap" hidden>
+                    <span>Every N days</span>
+                    <input type="number" name="RecurrenceCustomDays" id="ticketFormRecurrenceCustomDays" min="1" max="365" value="14">
+                  </label>
+                  <p class="ticket-form-grid-note">This ticket is the template. The system creates future copies (Not started) and links them to it. Clear recurrence or complete/delete the template to stop.</p>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -1304,6 +1328,30 @@
                 <span>Milestone</span>
                 <input name="Milestone" type="date">
               </label>
+
+              <div class="field field-span-all recurrence-form-field">
+                <span>Recurrence</span>
+                <label class="multi-select-option recurrence-enable-option">
+                  <input type="checkbox" id="ticketEditRecurringToggle" name="recurringEnabled" value="1">
+                  <span>Recurring task — create a new ticket on a schedule</span>
+                </label>
+                <div class="recurrence-form-controls" id="ticketEditRecurrenceControls" hidden>
+                  <label class="field">
+                    <span>Interval</span>
+                    <select name="RecurrenceInterval" id="ticketEditRecurrenceInterval">
+                      <option value="Daily">Daily</option>
+                      <option value="Weekly" selected>Weekly</option>
+                      <option value="Monthly">Monthly</option>
+                      <option value="Custom">Every N days</option>
+                    </select>
+                  </label>
+                  <label class="field" id="ticketEditRecurrenceCustomWrap" hidden>
+                    <span>Every N days</span>
+                    <input type="number" name="RecurrenceCustomDays" id="ticketEditRecurrenceCustomDays" min="1" max="365" value="14">
+                  </label>
+                  <p class="ticket-form-grid-note" id="ticketEditRecurrenceHint">Generated tickets appear as normal work items. Soft-deleted or Completed templates stop generating.</p>
+                </div>
+              </div>
             </div>
           </div>
 

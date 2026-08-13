@@ -7,6 +7,12 @@
    2. Paste appsscript.json from this project (includes Drive scope)
    3. Run function "setupDriveAccess" from the editor -> Authorize -> Allow
    4. Deploy -> New deployment -> Web app
+
+   RECURRING TASKS:
+   - Saving a recurring ticket auto-creates an hourly trigger when possible.
+   - Or run setupRecurringTicketsTrigger / setupDriveAccess once, or use
+     Spreadsheet menu: Tarmal IT -> Setup recurring tasks trigger.
+   - Handler: processRecurringTickets (also runnable manually from the menu).
 ===================================================== */
 
 const TASKS_SHEET = "Tasks";
@@ -80,11 +86,19 @@ const COLUMN_ALIASES = {
   notes: ["notes", "remarks", "remark", "comment", "comments"],
   bhanuList: ["bhanu list", "bhanulist"],
   parentSheetRow: ["parent sheet row", "parent row", "parent task row", "parent task"],
-  ticketId: ["ticket id", "ticketid", "ticket uuid"]
+  ticketId: ["ticket id", "ticketid", "ticket uuid"],
+  recurrence: ["recurrence", "recurring", "repeat"],
+  recurrenceNext: ["recurrence next", "recurrencenext", "next recurrence", "recurrence due"],
+  recurrenceParentId: ["recurrence parent id", "recurrenceparentid", "recurrence template id", "recurring parent id"]
 };
 
 const SOFT_DELETED_STATUS_ = "Deleted";
 const TICKET_ID_HEADER_ = "Ticket ID";
+const RECURRENCE_HEADER_ = "Recurrence";
+const RECURRENCE_NEXT_HEADER_ = "Recurrence Next";
+const RECURRENCE_PARENT_ID_HEADER_ = "Recurrence Parent Id";
+const RECURRING_TICKETS_HANDLER_ = "processRecurringTickets";
+const RECURRING_CATCH_UP_PER_TEMPLATE_ = 5;
 
 const ATTACHMENTS_FOLDER_NAME = "Tarmal Ticket Screenshots";
 const ATTACHMENTS_FOLDER_ID_KEY = "ATTACHMENTS_FOLDER_ID";
@@ -516,19 +530,28 @@ function doGet(e) {
 
     // compact=1: list payload for portal boot/refresh — tickets + users + hierarchy only,
     // with heavy note/base64 content trimmed. Frontend requests this on every refresh.
-    // lite=1: skip TaskAudit join (faster auto-refresh; Performance dates catch up on full refresh).
+    // lite=1: skip TaskAudit join + skip Notes column read (fastest auto-refresh / boot).
+    // Notes catch up on full (non-lite) compact refresh; client keeps local notes meanwhile.
     if (compact) {
       const lite = e && e.parameter && (String(e.parameter.lite || "") === "1"
         || String(e.parameter.lite || "").toLowerCase() === "true");
-      const tickets = readTickets_({ includeAudit: !lite }).map(compactTicketForList_);
-      return buildResponse_({
+      const tickets = readTickets_({
+        includeAudit: !lite,
+        omitNotes: lite
+      }).map(compactTicketForList_);
+      const payload = {
         ok: true,
         compact: true,
         lite: Boolean(lite),
-        tickets: tickets,
-        users: readUsersCached_(),
-        hierarchy: readUserMasterCached_()
-      }, e);
+        notesOmitted: Boolean(lite),
+        tickets: tickets
+      };
+      // Users/hierarchy already cached client-side; skip sheet reads on lite polls.
+      if (!lite) {
+        payload.users = readUsersCached_();
+        payload.hierarchy = readUserMasterCached_();
+      }
+      return buildResponse_(payload, e);
     }
 
     const tickets = readTickets_();
@@ -976,9 +999,49 @@ function doPost(e) {
   }
 }
 
+/**
+ * Read task rows. When omitNotes is true, skip the Notes column entirely so huge
+ * base64 cells are never transferred from Sheets (biggest GET latency win).
+ */
+function readTicketGridValues_(sheet, lastRow, lastCol, notesIndex, omitNotes) {
+  if (!omitNotes || notesIndex < 0 || notesIndex >= lastCol) {
+    return sheet.getRange(2, 1, lastRow, lastCol).getValues();
+  }
+
+  const rowCount = lastRow - 1;
+  const values = [];
+  for (let r = 0; r < rowCount; r++) {
+    values.push(new Array(lastCol).fill(""));
+  }
+
+  // Columns left of Notes (1-indexed end = notesIndex).
+  if (notesIndex > 0) {
+    const left = sheet.getRange(2, 1, lastRow, notesIndex).getValues();
+    for (let r = 0; r < rowCount; r++) {
+      for (let c = 0; c < notesIndex; c++) {
+        values[r][c] = left[r][c];
+      }
+    }
+  }
+
+  // Columns right of Notes.
+  if (notesIndex + 1 < lastCol) {
+    const rightStart = notesIndex + 2;
+    const right = sheet.getRange(2, rightStart, lastRow, lastCol).getValues();
+    for (let r = 0; r < rowCount; r++) {
+      for (let c = 0; c < right[r].length; c++) {
+        values[r][notesIndex + 1 + c] = right[r][c];
+      }
+    }
+  }
+
+  return values;
+}
+
 function readTickets_(options) {
   const opts = options || {};
   const includeAudit = opts.includeAudit !== false;
+  const omitNotes = opts.omitNotes === true;
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(TASKS_SHEET);
   if (!sheet) {
     throw new Error(`Sheet "${TASKS_SHEET}" was not found.`);
@@ -991,7 +1054,8 @@ function readTickets_(options) {
   const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
   const columnMap = buildColumnMap_(headers);
   const auditMap = includeAudit ? readTaskAuditMap_() : {};
-  const values = sheet.getRange(2, 1, lastRow, lastCol).getValues();
+  const notesIndex = resolveColumnIndex_(columnMap, "notes");
+  const values = readTicketGridValues_(sheet, lastRow, lastCol, notesIndex, omitNotes);
   const tickets = [];
 
   for (let i = 0; i < values.length; i++) {
@@ -999,6 +1063,7 @@ function readTickets_(options) {
     const ticket = rowToTicket_(values[i], columnMap, sheetRow);
     if (!String(ticket.Task || "").trim()) continue;
     if (isSoftDeletedStatus_(ticket.Status)) continue;
+    if (omitNotes) ticket.notesOmitted = true;
     tickets.push(includeAudit ? attachTicketAudit_(ticket, auditMap) : ticket);
   }
 
@@ -1021,7 +1086,15 @@ function getTicketFieldValues_(data) {
     notes: data.Notes || data.Remarks || "",
     bhanuList: data["Bhanu List"] || "",
     parentSheetRow: Number(data.parentSheetRow || data["Parent Sheet Row"]) || "",
-    ticketId: String(data.ticketId || data.TicketId || data["Ticket ID"] || "").trim()
+    ticketId: String(data.ticketId || data.TicketId || data["Ticket ID"] || "").trim(),
+    recurrence: normalizeRecurrenceValue_(data.Recurrence || data.recurrence || ""),
+    recurrenceNext: toSheetDate_(data.RecurrenceNext || data["Recurrence Next"] || data.recurrenceNext || ""),
+    recurrenceParentId: String(
+      data.RecurrenceParentId
+      || data["Recurrence Parent Id"]
+      || data.recurrenceParentId
+      || ""
+    ).trim()
   };
 }
 
@@ -1063,7 +1136,10 @@ function applyTicketFieldsToRow_(row, columnMap, fields) {
     notes: fields.notes,
     bhanuList: fields.bhanuList,
     parentSheetRow: fields.parentSheetRow || "",
-    ticketId: fields.ticketId || ""
+    ticketId: fields.ticketId || "",
+    recurrence: fields.recurrence || "",
+    recurrenceNext: fields.recurrenceNext || "",
+    recurrenceParentId: fields.recurrenceParentId || ""
   };
 
   let requiredLength = row.length;
@@ -1191,6 +1267,22 @@ function ensureTasksColumns_(sheet) {
   const mapAfterParent = buildColumnMap_(headers);
   if (mapAfterParent.ticketId < 0) {
     headers.push(TICKET_ID_HEADER_);
+    changed = true;
+  }
+
+  const mapAfterTicketId = buildColumnMap_(headers);
+  if (mapAfterTicketId.recurrence < 0) {
+    headers.push(RECURRENCE_HEADER_);
+    changed = true;
+  }
+  const mapAfterRecurrence = buildColumnMap_(headers);
+  if (mapAfterRecurrence.recurrenceNext < 0) {
+    headers.push(RECURRENCE_NEXT_HEADER_);
+    changed = true;
+  }
+  const mapAfterRecurrenceNext = buildColumnMap_(headers);
+  if (mapAfterRecurrenceNext.recurrenceParentId < 0) {
+    headers.push(RECURRENCE_PARENT_ID_HEADER_);
     changed = true;
   }
 
@@ -1390,6 +1482,28 @@ function prepareTicketSave_(data, oldTicket) {
     resolveActorEmail_(data)
   );
   fields.status = workflow.status;
+
+  // Recurring template: keep RecurrenceNext filled so the time-driven job can fire.
+  if (fields.recurrence) {
+    if (!fields.recurrenceNext) {
+      const anchor = fields.startDate
+        || (oldTicket && oldTicket["Start date"])
+        || todaySheetDateKey_();
+      fields.recurrenceNext = toSheetDate_(advanceRecurrenceDateKey_(
+        formatTicketFieldDate_(anchor) || todaySheetDateKey_(),
+        fields.recurrence
+      ));
+    }
+    fields.recurrenceParentId = "";
+  } else {
+    fields.recurrence = "";
+    fields.recurrenceNext = "";
+    // Preserve parent link on generated children unless client clears it.
+    if (!fields.recurrenceParentId && oldTicket && oldTicket.RecurrenceParentId) {
+      fields.recurrenceParentId = String(oldTicket.RecurrenceParentId || "").trim();
+    }
+  }
+
   return {
     enriched: enriched,
     fields: fields,
@@ -1591,8 +1705,15 @@ function writeTicketToSheetRow_(sheet, sheetRow, data) {
     approvalSentTo: approvalEmailResult.to || "",
     approvalEmailError: approvalEmailResult.error || "",
     approvalMessage: workflow.message || "",
-    approved: workflow.approved === true
+    approved: workflow.approved === true,
+    recurrence: fields.recurrence || "",
+    recurrenceNext: formatTicketFieldDate_(fields.recurrenceNext) || formatTicketFieldDate_(savedTicket.RecurrenceNext) || "",
+    recurrenceParentId: fields.recurrenceParentId || ""
   };
+
+  if (fields.recurrence) {
+    ensureRecurringTicketsTrigger_();
+  }
 
   if (data.deferApprovalEmail === true && workflow && workflow.approvalSent) {
     result._pendingApprovalEmail = true;
@@ -1730,6 +1851,12 @@ function appendTicket_(data) {
   const result = buildTicketSyncResult_(data, enriched, fields, sheetRow, workflow);
   result.ticketId = savedTicket.ticketId || fields.ticketId || "";
   result.lastUpdated = nowIsoStamp_();
+  result.recurrence = fields.recurrence || "";
+  result.recurrenceNext = formatTicketFieldDate_(fields.recurrenceNext) || "";
+  result.recurrenceParentId = fields.recurrenceParentId || "";
+  if (fields.recurrence) {
+    ensureRecurringTicketsTrigger_();
+  }
   if (data.deferApprovalEmail === true && workflow && workflow.approvalSent) {
     result.approvalSentTo = "";
     result.approvalEmailError = "";
@@ -2295,6 +2422,9 @@ function rowToTicket_(row, columnMap, sheetRow) {
   const bhanuList = String(readCell_(row, columnMap.bhanuList, 10) || "").trim();
   const remarks = notes || (/^bhanu$/i.test(bhanuList) ? "" : bhanuList);
   const ticketId = String(readCell_(row, columnMap.ticketId, 12) || "").trim();
+  const recurrence = normalizeRecurrenceValue_(readCell_(row, columnMap.recurrence, -1) || "");
+  const recurrenceNext = formatTicketDate_(readCell_(row, columnMap.recurrenceNext, -1) || "");
+  const recurrenceParentId = String(readCell_(row, columnMap.recurrenceParentId, -1) || "").trim();
 
   return {
     Task: readCell_(row, columnMap.task, 0) || "",
@@ -2311,6 +2441,9 @@ function rowToTicket_(row, columnMap, sheetRow) {
     "Bhanu List": bhanuList,
     parentSheetRow: Number(readCell_(row, columnMap.parentSheetRow, 11)) || 0,
     ticketId: ticketId,
+    Recurrence: recurrence,
+    RecurrenceNext: recurrenceNext,
+    RecurrenceParentId: recurrenceParentId,
     sheetRow: sheetRow
   };
 }
@@ -2728,6 +2861,8 @@ function onOpen() {
     .addItem("Clear Projects filter", "clearProjectsFilter")
     .addItem("Send pending approval emails", "sendPendingCompletionApprovalEmailsManual")
     .addItem("Test approval email", "testCompletionApprovalEmail")
+    .addItem("Setup recurring tasks trigger", "setupRecurringTicketsTrigger")
+    .addItem("Run recurring tasks now", "processRecurringTickets")
     .addToUi();
 }
 
@@ -4062,6 +4197,7 @@ function escapeHtml(text) {
 /**
  * Run this once from the Apps Script editor to grant Google Drive access.
  * Select setupDriveAccess in the Run menu, click Run, then Authorize.
+ * Also ensures the recurring-tasks time-driven trigger exists.
  */
 function setupDriveAccess() {
   const folder = getOrCreateAttachmentsFolder_();
@@ -4069,7 +4205,278 @@ function setupDriveAccess() {
   Logger.log("Drive folder ready: " + info.url);
   Logger.log("Parent folder: " + info.parentName);
   Logger.log("Files in folder: " + info.fileCount);
+  const trigger = ensureRecurringTicketsTrigger_();
+  Logger.log("Recurring tasks trigger: " + (trigger.created ? "created" : "already present"));
   return info;
+}
+
+/* =====================================================
+   RECURRING TASKS
+   Tickets with Recurrence set act as templates. A time-driven
+   trigger creates Not-started child tickets when Recurrence Next
+   is due. Soft-deleted / Completed templates stop generating.
+===================================================== */
+
+function normalizeRecurrenceValue_(value) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  const lower = text.toLowerCase();
+  if (lower === "daily" || lower === "day") return "Daily";
+  if (lower === "weekly" || lower === "week") return "Weekly";
+  if (lower === "monthly" || lower === "month") return "Monthly";
+  const everyMatch = lower.match(/^every\s*:?\s*(\d+)\s*(d|day|days)?$/i)
+    || lower.match(/^every:(\d+)$/i);
+  if (everyMatch) {
+    const days = Math.max(1, Math.min(365, Number(everyMatch[1]) || 0));
+    return days ? ("Every:" + days) : "";
+  }
+  if (/^\d+$/.test(text)) {
+    const days = Math.max(1, Math.min(365, Number(text)));
+    return "Every:" + days;
+  }
+  return "";
+}
+
+function todaySheetDateKey_() {
+  return Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd");
+}
+
+function parseSheetDateKey_(value) {
+  const key = sheetDateKey_(value);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(key)) return null;
+  const parts = key.split("-").map(Number);
+  return new Date(parts[0], parts[1] - 1, parts[2]);
+}
+
+function formatDateKeyFromDate_(date) {
+  if (!date || Object.prototype.toString.call(date) !== "[object Date]" || isNaN(date.getTime())) {
+    return "";
+  }
+  return Utilities.formatDate(date, Session.getScriptTimeZone(), "yyyy-MM-dd");
+}
+
+function advanceRecurrenceDateKey_(dateKey, recurrence) {
+  const normalized = normalizeRecurrenceValue_(recurrence);
+  const base = parseSheetDateKey_(dateKey) || parseSheetDateKey_(todaySheetDateKey_());
+  if (!base || !normalized) return todaySheetDateKey_();
+
+  const next = new Date(base.getFullYear(), base.getMonth(), base.getDate());
+  if (normalized === "Daily") {
+    next.setDate(next.getDate() + 1);
+  } else if (normalized === "Weekly") {
+    next.setDate(next.getDate() + 7);
+  } else if (normalized === "Monthly") {
+    next.setMonth(next.getMonth() + 1);
+  } else if (/^Every:\d+$/i.test(normalized)) {
+    const days = Math.max(1, Number(String(normalized).split(":")[1]) || 1);
+    next.setDate(next.getDate() + days);
+  } else {
+    next.setDate(next.getDate() + 1);
+  }
+  return formatDateKeyFromDate_(next);
+}
+
+function addDaysToDateKey_(dateKey, days) {
+  const base = parseSheetDateKey_(dateKey);
+  if (!base) return "";
+  const next = new Date(base.getFullYear(), base.getMonth(), base.getDate());
+  next.setDate(next.getDate() + Number(days || 0));
+  return formatDateKeyFromDate_(next);
+}
+
+function daySpanBetweenKeys_(startKey, endKey) {
+  const start = parseSheetDateKey_(startKey);
+  const end = parseSheetDateKey_(endKey);
+  if (!start || !end) return 0;
+  return Math.max(0, Math.round((end.getTime() - start.getTime()) / 86400000));
+}
+
+function isRecurringTemplateActive_(ticket) {
+  if (!ticket) return false;
+  if (!normalizeRecurrenceValue_(ticket.Recurrence || ticket.recurrence || "")) return false;
+  if (isSoftDeletedStatus_(ticket.Status)) return false;
+  if (isCompletedStatus(ticket.Status)) return false;
+  return true;
+}
+
+function ensureRecurringTicketsTrigger_() {
+  const existing = ScriptApp.getProjectTriggers().some(function(trigger) {
+    return trigger.getHandlerFunction() === RECURRING_TICKETS_HANDLER_;
+  });
+  if (existing) {
+    return { ok: true, created: false };
+  }
+  ScriptApp.newTrigger(RECURRING_TICKETS_HANDLER_)
+    .timeBased()
+    .everyHours(1)
+    .create();
+  return { ok: true, created: true };
+}
+
+/**
+ * Manual / menu entry: create the hourly recurring-tasks trigger if missing.
+ */
+function setupRecurringTicketsTrigger() {
+  const result = ensureRecurringTicketsTrigger_();
+  SpreadsheetApp.getActiveSpreadsheet().toast(
+    result.created ? "Recurring tasks trigger created (hourly)." : "Recurring tasks trigger already exists.",
+    "Tarmal IT",
+    6
+  );
+  return result;
+}
+
+function hasRecurringChildForPeriod_(tickets, templateTicketId, periodKey) {
+  const parentId = String(templateTicketId || "").trim();
+  const period = sheetDateKey_(periodKey);
+  if (!parentId || !period) return false;
+  for (let i = 0; i < tickets.length; i++) {
+    const ticket = tickets[i];
+    if (String(ticket.RecurrenceParentId || "").trim() !== parentId) continue;
+    if (isSoftDeletedStatus_(ticket.Status)) continue;
+    if (sheetDateKey_(ticket["Start date"]) === period) return true;
+  }
+  return false;
+}
+
+function appendRecurringInstanceRow_(sheet, columnMap, template, periodKey) {
+  const sheetInfo = getTasksSheetHeaders_(sheet);
+  const templateStart = sheetDateKey_(template["Start date"]);
+  const templateEnd = sheetDateKey_(template["End date"]);
+  const spanDays = daySpanBetweenKeys_(templateStart, templateEnd);
+  const childStart = sheetDateKey_(periodKey);
+  const childEnd = spanDays > 0 ? addDaysToDateKey_(childStart, spanDays) : "";
+  const childMilestone = template.Milestone ? childStart : "";
+  const notes = stripScreenshotMetadata_(template.Notes || template.Remarks || "");
+  const fields = {
+    task: template.Task || "",
+    priority: template.Priority || "",
+    owner: String(template.Owner || "").trim(),
+    raisedBy: template["Raised By"] || "",
+    status: "Not started",
+    type: template.Type || "",
+    startDate: toSheetDate_(childStart),
+    endDate: childEnd ? toSheetDate_(childEnd) : "",
+    milestone: childMilestone ? toSheetDate_(childMilestone) : "",
+    notes: notes,
+    bhanuList: template["Bhanu List"] || "",
+    parentSheetRow: "",
+    ticketId: createTicketId_(),
+    recurrence: "",
+    recurrenceNext: "",
+    recurrenceParentId: String(template.ticketId || "").trim()
+  };
+
+  const lastCol = Math.max(
+    sheetInfo.lastColumn,
+    resolveColumnIndex_(columnMap, "recurrenceParentId") + 1,
+    COLUMN_FALLBACK_INDICES_.ticketId + 1
+  );
+  const row = new Array(lastCol).fill("");
+  applyTicketFieldsToRow_(row, columnMap, fields);
+  sheet.appendRow(row);
+  const sheetRow = sheet.getLastRow();
+  writeOwnerCell_(sheet, sheetRow, columnMap, fields.owner);
+  return {
+    sheetRow: sheetRow,
+    ticketId: fields.ticketId,
+    startDate: childStart
+  };
+}
+
+/**
+ * Time-driven handler: create due recurring instances and advance Recurrence Next.
+ * LockService-safe; skips soft-deleted / Completed templates; dedupes by parent + start date.
+ */
+function processRecurringTickets() {
+  const lock = LockService.getScriptLock();
+  var lockAcquired = false;
+  try {
+    lockAcquired = lock.tryLock(WRITE_LOCK_WAIT_MS_);
+    if (!lockAcquired) {
+      Logger.log("processRecurringTickets: could not acquire lock");
+      return { ok: false, error: "locked" };
+    }
+
+    invalidateTasksHeaderCache_();
+    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(TASKS_SHEET);
+    if (!sheet) {
+      return { ok: false, error: "Tasks sheet missing" };
+    }
+
+    const columnMap = ensureTasksColumns_(sheet);
+    const recurrenceIndex = resolveColumnIndex_(columnMap, "recurrence");
+    const recurrenceNextIndex = resolveColumnIndex_(columnMap, "recurrenceNext");
+    if (recurrenceIndex < 0 || recurrenceNextIndex < 0) {
+      return { ok: false, error: "Recurrence columns missing" };
+    }
+
+    const lastRow = sheet.getLastRow();
+    if (lastRow < 2) {
+      return { ok: true, created: 0 };
+    }
+
+    const sheetInfo = getTasksSheetHeaders_(sheet);
+    const values = sheet.getRange(2, 1, lastRow, sheetInfo.lastColumn).getValues();
+    const tickets = [];
+    for (let i = 0; i < values.length; i++) {
+      tickets.push(rowToTicket_(values[i], columnMap, i + 2));
+    }
+
+    const todayKey = todaySheetDateKey_();
+    let created = 0;
+    let advanced = 0;
+
+    for (let i = 0; i < tickets.length; i++) {
+      const template = tickets[i];
+      if (!isRecurringTemplateActive_(template)) continue;
+      if (!String(template.ticketId || "").trim()) {
+        // Ensure templates have a stable id for child linking.
+        const newId = createTicketId_();
+        const ticketIdIndex = resolveColumnIndex_(columnMap, "ticketId");
+        if (ticketIdIndex >= 0) {
+          sheet.getRange(template.sheetRow, ticketIdIndex + 1).setValue(newId);
+          template.ticketId = newId;
+          values[i][ticketIdIndex] = newId;
+        }
+      }
+
+      let nextKey = sheetDateKey_(template.RecurrenceNext)
+        || advanceRecurrenceDateKey_(
+          sheetDateKey_(template["Start date"]) || todayKey,
+          template.Recurrence
+        );
+      let catchUps = 0;
+
+      while (nextKey && nextKey <= todayKey && catchUps < RECURRING_CATCH_UP_PER_TEMPLATE_) {
+        if (!hasRecurringChildForPeriod_(tickets, template.ticketId, nextKey)) {
+          const child = appendRecurringInstanceRow_(sheet, columnMap, template, nextKey);
+          tickets.push({
+            Task: template.Task,
+            Status: "Not started",
+            "Start date": child.startDate,
+            RecurrenceParentId: template.ticketId,
+            sheetRow: child.sheetRow,
+            ticketId: child.ticketId
+          });
+          created += 1;
+        }
+        nextKey = advanceRecurrenceDateKey_(nextKey, template.Recurrence);
+        catchUps += 1;
+        advanced += 1;
+      }
+
+      if (sheetDateKey_(template.RecurrenceNext) !== nextKey) {
+        sheet.getRange(template.sheetRow, recurrenceNextIndex + 1).setValue(toSheetDate_(nextKey));
+        template.RecurrenceNext = nextKey;
+      }
+    }
+
+    Logger.log("processRecurringTickets created=" + created + " advanced=" + advanced);
+    return { ok: true, created: created, advanced: advanced };
+  } finally {
+    releaseWriteLock_(lock, lockAcquired);
+  }
 }
 
 // END google-apps-script-full-merged.gs — if this line is missing in Apps Script Code.gs, the paste was truncated.

@@ -242,7 +242,14 @@ function canUseProcurement() {
   return Auth.hasPermission("dashboard") || Auth.isAdminLevelUser();
 }
 
-function readProcurementFileAsDataUrl(file) {
+async function readProcurementFileAsDataUrl(file) {
+  if (file && String(file.type || "").startsWith("image/") && typeof compressImageFile === "function") {
+    try {
+      return await compressImageFile(file);
+    } catch (_error) {
+      // Fall through to raw read if compression fails.
+    }
+  }
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(String(reader.result || ""));
