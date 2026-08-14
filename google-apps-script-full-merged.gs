@@ -833,7 +833,7 @@ function doPost(e) {
       // never blocks the save response (client already treats approval as pending).
       data.deferApprovalEmail = true;
       const result = updateTicket_(data);
-      const hadRecurrence = Boolean(result && result.recurrence);
+      const hadRecurrence = Boolean(result && (result.recurrence || result.recurrenceParentId));
       lockAcquired = releaseWriteLock_(lock, lockAcquired);
 
       const needsApprovalEmail = result
@@ -4249,7 +4249,8 @@ function setupDriveAccess() {
    RECURRING TASKS
    Tickets with Recurrence set act as templates. A time-driven
    trigger creates Not-started child tickets when Recurrence Next
-   is due. Soft-deleted / Completed templates stop generating.
+   is due. Completing a recurring ticket still generates the next
+   copy on schedule. Soft-deleted templates (or cleared recurrence) stop.
 ===================================================== */
 
 function normalizeRecurrenceValue_(value) {
@@ -4330,7 +4331,7 @@ function isRecurringTemplateActive_(ticket) {
   if (!ticket) return false;
   if (!normalizeRecurrenceValue_(ticket.Recurrence || ticket.recurrence || "")) return false;
   if (isSoftDeletedStatus_(ticket.Status)) return false;
-  if (isCompletedStatus(ticket.Status)) return false;
+  // Completing a recurring ticket must not stop the series.
   return true;
 }
 

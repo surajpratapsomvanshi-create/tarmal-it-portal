@@ -10,7 +10,7 @@
     <!-- auth stays blocking so requireLogin runs before app chrome paints -->
     <script src="./auth.js?v=22"></script>
     <!-- Defer main bundles so HTML can parse while ~210KB+ app.js downloads -->
-    <script src="./app.js?v=186" defer></script>
+    <script src="./app.js?v=187" defer></script>
     <script src="./assets.js?v=13" defer></script>
     <script src="./documents.js?v=11" defer></script>
     <script src="./procurement.js?v=6" defer></script>
@@ -1191,7 +1191,7 @@
                     <span>Every N days</span>
                     <input type="number" name="RecurrenceCustomDays" id="ticketFormRecurrenceCustomDays" min="1" max="365" value="14">
                   </label>
-      <p class="ticket-form-grid-note">This ticket is the template. On Save, the system creates the next copy (Not started, Milestone = today) and then keeps creating on the schedule. Clear recurrence or complete/delete the template to stop.</p>
+                  <p class="ticket-form-grid-note">This ticket is the template. Completing it still creates the next copy on the same interval (Not started, Milestone = that day). Clear recurrence or delete the template to stop.</p>
                 </div>
               </div>
             </div>
@@ -1349,7 +1349,7 @@
                     <span>Every N days</span>
                     <input type="number" name="RecurrenceCustomDays" id="ticketEditRecurrenceCustomDays" min="1" max="365" value="14">
                   </label>
-                  <p class="ticket-form-grid-note" id="ticketEditRecurrenceHint">Generated tickets appear as normal work items. Soft-deleted or Completed templates stop generating.</p>
+                  <p class="ticket-form-grid-note" id="ticketEditRecurrenceHint">Generated tickets appear as normal work items. Completing a recurring ticket still creates the next one on the interval. Delete it or clear recurrence to stop.</p>
                 </div>
               </div>
             </div>
