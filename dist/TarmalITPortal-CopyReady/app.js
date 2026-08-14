@@ -5665,6 +5665,10 @@ function ticketFromEditForm() {
 
 function ticketFromFormData(data, owner = "") {
   const recurrence = readRecurrenceFromFormData(data);
+  // Recurring tasks always use today's date as Milestone.
+  const milestone = recurrence.value
+    ? getTodayDateValue()
+    : data.get("Milestone");
   return {
     Task: String(data.get("Task") || "").trim(),
     Priority: normalizePriority(data.get("Priority")),
@@ -5674,7 +5678,7 @@ function ticketFromFormData(data, owner = "") {
     Type: data.get("Type"),
     "Start date": data.get("Start date"),
     "End date": data.get("End date"),
-    Milestone: data.get("Milestone"),
+    Milestone: milestone,
     parentSheetRow: Number(data.get("parentSheetRow")) || 0,
     Recurrence: recurrence.value,
     RecurrenceNext: recurrence.next,
@@ -5754,11 +5758,13 @@ function readRecurrenceFromFormData(data) {
     value = normalizeRecurrenceValue(interval);
   }
   if (!value) return { value: "", next: "" };
-  const start = canonicalizeTicketDate(data.get("Start date") || "") || canonicalizeTicketDate(new Date().toISOString().slice(0, 10));
-  const existingNext = canonicalizeTicketDate(data.get("RecurrenceNext") || "");
+  // Prefer explicit form value, then existing template next date (edit), else due today
+  // so the first generated copy is created as soon as Apps Script processes recurrence.
+  const existingNext = canonicalizeTicketDate(data.get("RecurrenceNext") || "")
+    || canonicalizeTicketDate(activeEditTicket?.RecurrenceNext || "");
   return {
     value,
-    next: existingNext || advanceRecurrenceDateValue(start, value)
+    next: existingNext || getTodayDateValue()
   };
 }
 

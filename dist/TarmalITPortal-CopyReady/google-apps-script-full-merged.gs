@@ -9,10 +9,11 @@
    4. Deploy -> New deployment -> Web app
 
    RECURRING TASKS:
-   - Saving a recurring ticket auto-creates an hourly trigger when possible.
+   - Saving a recurring ticket installs the hourly trigger and immediately creates any due copies.
    - Or run setupRecurringTicketsTrigger / setupDriveAccess once, or use
      Spreadsheet menu: Tarmal IT -> Setup recurring tasks trigger.
    - Handler: processRecurringTickets (also runnable manually from the menu).
+   - MUST redeploy the web app after pasting this file or recurrence will not run.
 ===================================================== */
 
 const TASKS_SHEET = "Tasks";
@@ -832,6 +833,7 @@ function doPost(e) {
       // never blocks the save response (client already treats approval as pending).
       data.deferApprovalEmail = true;
       const result = updateTicket_(data);
+      const hadRecurrence = Boolean(result && result.recurrence);
       lockAcquired = releaseWriteLock_(lock, lockAcquired);
 
       const needsApprovalEmail = result
@@ -846,6 +848,15 @@ function doPost(e) {
         });
       } catch (postUpdateError) {
         Logger.log(postUpdateError);
+      }
+
+      var recurringKick = null;
+      if (hadRecurrence) {
+        try {
+          recurringKick = kickRecurringTicketsAfterSave_();
+        } catch (recurringError) {
+          Logger.log(recurringError);
+        }
       }
 
       if (result) {
@@ -877,7 +888,8 @@ function doPost(e) {
         approved: result.approved === true,
         error: result.error || "",
         deferredPostSave: true,
-        deferredApprovalEmail: needsApprovalEmail
+        deferredApprovalEmail: needsApprovalEmail,
+        recurringCreated: recurringKick && recurringKick.created ? recurringKick.created : 0
       }, e);
     }
 
@@ -921,6 +933,9 @@ function doPost(e) {
         }
       });
 
+      const hadRecurrence = results.some(function(item) {
+        return item && item.ok !== false && item.recurrence;
+      });
       lockAcquired = releaseWriteLock_(lock, lockAcquired);
 
       const successCount = results.filter(function(item) { return item.ok !== false; }).length;
@@ -937,12 +952,35 @@ function doPost(e) {
         Logger.log(postAppendError);
       }
 
+      var recurringKick = null;
+      if (hadRecurrence) {
+        try {
+          recurringKick = kickRecurringTicketsAfterSave_();
+        } catch (recurringError) {
+          Logger.log(recurringError);
+        }
+      }
+
       return buildResponse_({
         ok: successCount > 0,
         count: successCount,
         results: results,
         deferredPostSave: true,
+        recurringCreated: recurringKick && recurringKick.created ? recurringKick.created : 0,
         error: successCount === 0 ? "All ticket creates failed." : ""
+      }, e);
+    }
+
+    if (data.action === "processRecurringTickets") {
+      lockAcquired = releaseWriteLock_(lock, lockAcquired);
+      const kick = kickRecurringTicketsAfterSave_();
+      return buildResponse_({
+        ok: kick.processOk !== false,
+        created: kick.created || 0,
+        advanced: kick.advanced || 0,
+        triggerCreated: kick.triggerCreated === true,
+        triggerError: kick.triggerError || "",
+        error: kick.processError || ""
       }, e);
     }
 
@@ -1484,15 +1522,12 @@ function prepareTicketSave_(data, oldTicket) {
   fields.status = workflow.status;
 
   // Recurring template: keep RecurrenceNext filled so the time-driven job can fire.
+  // Every recurring task uses the current date as Milestone.
   if (fields.recurrence) {
+    fields.milestone = toSheetDate_(todaySheetDateKey_());
     if (!fields.recurrenceNext) {
-      const anchor = fields.startDate
-        || (oldTicket && oldTicket["Start date"])
-        || todaySheetDateKey_();
-      fields.recurrenceNext = toSheetDate_(advanceRecurrenceDateKey_(
-        formatTicketFieldDate_(anchor) || todaySheetDateKey_(),
-        fields.recurrence
-      ));
+      // Due today so processRecurringTickets can create the first copy immediately.
+      fields.recurrenceNext = toSheetDate_(todaySheetDateKey_());
     }
     fields.recurrenceParentId = "";
   } else {
@@ -4300,17 +4335,46 @@ function isRecurringTemplateActive_(ticket) {
 }
 
 function ensureRecurringTicketsTrigger_() {
-  const existing = ScriptApp.getProjectTriggers().some(function(trigger) {
-    return trigger.getHandlerFunction() === RECURRING_TICKETS_HANDLER_;
-  });
-  if (existing) {
-    return { ok: true, created: false };
+  try {
+    const existing = ScriptApp.getProjectTriggers().some(function(trigger) {
+      return trigger.getHandlerFunction() === RECURRING_TICKETS_HANDLER_;
+    });
+    if (existing) {
+      return { ok: true, created: false };
+    }
+    ScriptApp.newTrigger(RECURRING_TICKETS_HANDLER_)
+      .timeBased()
+      .everyHours(1)
+      .create();
+    return { ok: true, created: true };
+  } catch (error) {
+    Logger.log("ensureRecurringTicketsTrigger_ failed: " + error);
+    return { ok: false, created: false, error: String(error && error.message || error) };
   }
-  ScriptApp.newTrigger(RECURRING_TICKETS_HANDLER_)
-    .timeBased()
-    .everyHours(1)
-    .create();
-  return { ok: true, created: true };
+}
+
+/**
+ * Call AFTER releasing the doPost write lock.
+ * Installs the hourly trigger and creates any due recurring instances immediately.
+ */
+function kickRecurringTicketsAfterSave_() {
+  const trigger = ensureRecurringTicketsTrigger_();
+  var processed = null;
+  try {
+    processed = processRecurringTickets();
+  } catch (error) {
+    Logger.log("kickRecurringTicketsAfterSave_ process failed: " + error);
+    processed = { ok: false, error: String(error && error.message || error) };
+  }
+  return {
+    triggerOk: trigger.ok !== false,
+    triggerCreated: trigger.created === true,
+    triggerError: trigger.error || "",
+    processOk: processed && processed.ok !== false,
+    created: processed && processed.created ? processed.created : 0,
+    advanced: processed && processed.advanced ? processed.advanced : 0,
+    processError: processed && processed.error ? processed.error : ""
+  };
 }
 
 /**
@@ -4346,7 +4410,8 @@ function appendRecurringInstanceRow_(sheet, columnMap, template, periodKey) {
   const spanDays = daySpanBetweenKeys_(templateStart, templateEnd);
   const childStart = sheetDateKey_(periodKey);
   const childEnd = spanDays > 0 ? addDaysToDateKey_(childStart, spanDays) : "";
-  const childMilestone = template.Milestone ? childStart : "";
+  // Every generated recurring instance gets today's date as Milestone.
+  const childMilestone = todaySheetDateKey_();
   const notes = stripScreenshotMetadata_(template.Notes || template.Remarks || "");
   const fields = {
     task: template.Task || "",
@@ -4357,7 +4422,7 @@ function appendRecurringInstanceRow_(sheet, columnMap, template, periodKey) {
     type: template.Type || "",
     startDate: toSheetDate_(childStart),
     endDate: childEnd ? toSheetDate_(childEnd) : "",
-    milestone: childMilestone ? toSheetDate_(childMilestone) : "",
+    milestone: toSheetDate_(childMilestone),
     notes: notes,
     bhanuList: template["Bhanu List"] || "",
     parentSheetRow: "",
