@@ -2743,6 +2743,7 @@ body.sidebar-collapsed .sidebar-expand-bar {
 .remarks-text {
   display: block;
   line-height: 1.45;
+  white-space: pre-wrap;
 }
 
 .remarks-screenshots {

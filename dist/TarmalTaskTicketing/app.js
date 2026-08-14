@@ -757,6 +757,37 @@ function cleanText(value) {
   return String(value || "").replace(/\s+/g, " ").trim();
 }
 
+function cleanNotesText(value) {
+  return String(value || "")
+    .replace(/\r\n/g, "\n")
+    .replace(/\u00a0/g, " ")
+    .split("\n")
+    .map((line) => line.replace(/[ \t]+/g, " ").trim())
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function htmlFragmentToNotesText(root) {
+  if (!root) return "";
+  const walk = (node) => {
+    if (!node) return "";
+    if (node.nodeType === Node.TEXT_NODE) {
+      return String(node.nodeValue || "").replace(/\u00a0/g, " ");
+    }
+    if (node.nodeType !== Node.ELEMENT_NODE) return "";
+    const tag = String(node.tagName || "").toLowerCase();
+    if (tag === "br") return "\n";
+    if (tag === "img" || tag === "script" || tag === "style") return "";
+    const inner = [...node.childNodes].map(walk).join("");
+    if (tag === "p" || tag === "div" || tag === "li" || tag === "tr" || /^h[1-6]$/.test(tag)) {
+      return inner.replace(/\n+$/, "") + "\n";
+    }
+    return inner;
+  };
+  return cleanNotesText(walk(root));
+}
+
 function normalizePriority(value) {
   const text = cleanText(value).toLowerCase();
   if (text === "high" || text === "80") return "80";
@@ -796,7 +827,7 @@ function parseNotesHtmlParts(html) {
     }
   });
 
-  const text = doc.body.textContent.replace(/\u00a0/g, " ").trim();
+  const text = htmlFragmentToNotesText(doc.body);
   return { text, attachments };
 }
 
@@ -1161,7 +1192,7 @@ function stripPresentationTag(text) {
 }
 
 function buildNotesTextForSheet(ticket) {
-  let text = stripPresentationTag(stripScreenshotMetadata(cleanText(ticket.Remarks || ticket.Notes || "")));
+  let text = stripPresentationTag(stripScreenshotMetadata(cleanNotesText(ticket.Remarks || ticket.Notes || "")));
   const links = dedupeScreenshotUrls([
     ...extractDriveLinksFromNotes(ticket),
     ...collectScreenshotUrlsFromHtml(ticket.NotesHtml)
@@ -1874,7 +1905,7 @@ function getTicketScreenshots(ticket) {
 }
 
 function getTicketRemarksText(ticket) {
-  return stripPresentationTag(stripScreenshotMetadata(cleanText(ticket.Remarks || ticket.Notes || "")));
+  return stripPresentationTag(stripScreenshotMetadata(cleanNotesText(ticket.Remarks || ticket.Notes || "")));
 }
 
 function hasImportantRemarks(ticket) {
@@ -1894,7 +1925,7 @@ function renderTicketRemarksCell(ticket) {
 
   const parts = [];
   if (text) {
-    parts.push(`<span class="remarks-text">${escapeHtml(text)}</span>`);
+    parts.push(`<span class="remarks-text">${escapeHtml(text).replace(/\n/g, "<br>")}</span>`);
   }
 
   if (localOnly) {
@@ -2417,7 +2448,7 @@ function extractRemarks(ticket) {
     ticket.Remarks,
     ticket.note,
     ticket.comments
-  ].map((value) => cleanText(value)).filter(Boolean);
+  ].map((value) => cleanNotesText(value)).filter(Boolean);
 
   const withScreenshotLinks = candidates.find((value) =>
     /Screenshot\s+\d+\s*:/i.test(value) || /drive\.google\.com/i.test(value)
@@ -2439,7 +2470,7 @@ function extractRemarks(ticket) {
 
   const imageCount = collectScreenshotUrlsFromHtml(ticket.NotesHtml).length;
   if (imageCount) {
-    const text = stripScreenshotMetadata(cleanText(ticket.Notes));
+    const text = stripScreenshotMetadata(cleanNotesText(ticket.Notes));
     if (text) return text;
     return `[${imageCount} screenshot${imageCount === 1 ? "" : "s"} attached]`;
   }
@@ -5683,7 +5714,7 @@ function ticketFromFormData(data, owner = "") {
     Recurrence: recurrence.value,
     RecurrenceNext: recurrence.next,
     RecurrenceParentId: cleanText(data.get("RecurrenceParentId") || ""),
-    Notes: String(data.get("Notes") || "").trim(),
+    Notes: cleanNotesText(data.get("Notes") || ""),
     "Bhanu List": data.has("originalOwnerBhanu") ? "Bhanu" : ""
   };
 }

@@ -584,7 +584,10 @@ function compactTicketForList_(ticket) {
   const notes = String(source.Notes || source.Remarks || "");
   const cleaned = notes.replace(/data:image\/[a-zA-Z0-9.+-]+;base64,[A-Za-z0-9+/=]+/g, "[image]");
   const links = extractScreenshotLinksFromNotes_(cleaned);
-  const text = stripScreenshotMetadata_(cleaned).replace(/\s+/g, " ").trim();
+  const text = stripScreenshotMetadata_(cleaned)
+    .replace(/[ \t]+/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
   let compactNotes = text;
   if (links.length) {
     compactNotes = (compactNotes ? compactNotes + "\n" : "")
