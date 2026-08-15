@@ -2,6 +2,12 @@ const Auth = {
   SESSION_KEY: "tarmal-session",
   USERS_KEY: "tarmal-users",
   DELETED_USERS_KEY: "tarmal-deleted-users",
+  // After a local delete, refuse remote-only membership adds briefly so stale
+  // ticket/user GETs cannot resurrect rows before the sheet write settles.
+  USERS_MEMBERSHIP_GUARD_KEY: "tarmal-users-membership-guard",
+  USERS_MEMBERSHIP_GUARD_MS: 1000 * 60 * 10,
+  // Keep delete tombstones long enough to outlive stale compact payloads / other tabs.
+  TOMBSTONE_MIN_KEEP_MS: 1000 * 60 * 60 * 24 * 7,
   // Auth session persisted when "Remember me on this device" is enabled.
   // This intentionally stores only the app-side authorization payload (no password).
   REMEMBER_IDENTIFIER_KEY: "tarmal-login-remember",
@@ -116,6 +122,7 @@ const Auth = {
       ? this.allRights()
       : rights;
 
+    const pendingSheetSync = Number(user.pendingSheetSync) || 0;
     return {
       id: String(user.id || ""),
       name: String(user.name || "").trim(),
@@ -123,7 +130,8 @@ const Auth = {
       email: String(user.email || "").trim(),
       password: String(user.password || "").trim(),
       active: user.active !== false,
-      rights: finalRights
+      rights: finalRights,
+      ...(pendingSheetSync > 0 ? { pendingSheetSync } : {})
     };
   },
 
@@ -298,6 +306,7 @@ const Auth = {
   markDeletedUsers(users) {
     const list = Array.isArray(users) ? users : [users];
     const entries = this.readDeletedUserTombstones_();
+    const now = Date.now();
     list.forEach((user) => {
       if (!user || this.isBuiltInAdmin(user)) return;
       const keys = this.userIdentityKeys_(user);
@@ -305,10 +314,43 @@ const Auth = {
         id: String(user.id || "").trim(),
         key: keys[0] || "",
         keys,
-        at: Date.now()
+        at: now
       });
     });
     this.writeDeletedUserTombstones_(entries);
+    this.armLocalMembershipGuard_();
+  },
+
+  armLocalMembershipGuard_() {
+    try {
+      localStorage.setItem(
+        this.USERS_MEMBERSHIP_GUARD_KEY,
+        String(Date.now() + this.USERS_MEMBERSHIP_GUARD_MS)
+      );
+    } catch {
+      // ignore quota / private mode
+    }
+  },
+
+  localMembershipGuardActive_() {
+    try {
+      const until = Number(localStorage.getItem(this.USERS_MEMBERSHIP_GUARD_KEY) || 0);
+      if (!(until > Date.now())) {
+        localStorage.removeItem(this.USERS_MEMBERSHIP_GUARD_KEY);
+        return false;
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  },
+
+  clearLocalMembershipGuard_() {
+    try {
+      localStorage.removeItem(this.USERS_MEMBERSHIP_GUARD_KEY);
+    } catch {
+      // ignore
+    }
   },
 
   isDeletedUserTombstone_(user) {
@@ -325,14 +367,19 @@ const Auth = {
   },
 
   pruneDeletedUserTombstones_(remoteUsers) {
-    // Keep a tombstone only while the sheet still returns that user (stale GET).
-    // Once the remote list no longer includes them, the tombstone can go.
+    // Keep recent tombstones even after the sheet looks clean — stale compact
+    // GETs (and other devices rewriting AppUsers) must not win the race.
+    // After the min-keep window, keep only while remote still returns the user.
+    const now = Date.now();
     const remoteKeys = new Set();
     (remoteUsers || []).forEach((user) => {
       this.userIdentityKeys_(user).forEach((key) => remoteKeys.add(key));
     });
 
     const kept = this.readDeletedUserTombstones_().filter((entry) => {
+      const age = now - Number(entry.at || 0);
+      if (age < this.TOMBSTONE_MIN_KEEP_MS) return true;
+
       const id = String(entry.id || "").trim().toLowerCase();
       if (id && remoteKeys.has(`id:${id}`)) return true;
       const entryKeys = Array.isArray(entry.keys) && entry.keys.length
@@ -347,12 +394,24 @@ const Auth = {
     return (users || []).filter((user) => !this.isDeletedUserTombstone_(user));
   },
 
+  stripPendingSheetSync_(users) {
+    return (users || []).map((user) => {
+      const normalized = this.normalizeUser(user);
+      if (!normalized.pendingSheetSync) return normalized;
+      const clone = { ...normalized };
+      delete clone.pendingSheetSync;
+      return clone;
+    });
+  },
+
   needsUserSheetPush_(mergedUsers, remoteUsers) {
     const remote = remoteUsers || [];
     if (!remote.length) return false;
     const remoteSafe = this.filterOutDeletedUsers_(remote);
+    // Deleting device: sheet still has tombstoned users — push cleaned list.
     if (remoteSafe.length < remote.length) return true;
-    if ((mergedUsers || []).length > remoteSafe.length) return true;
+    // Local creates not yet confirmed on the sheet.
+    if ((mergedUsers || []).some((user) => Number(user.pendingSheetSync) > 0)) return true;
     return this.usersChanged_(mergedUsers || [], remoteSafe);
   },
 
@@ -361,8 +420,25 @@ const Auth = {
     const identityIndex = new Map();
     const remoteSafe = this.filterOutDeletedUsers_(remoteUsers);
     const localSafe = this.filterOutDeletedUsers_(localUsers);
+    // When the sheet returns any users, its membership is source of truth.
+    // Local-only rows are kept only for pending creates (not yet synced).
+    // This stops other devices/tabs from resurrecting deletes via merge+push.
+    const remoteMembershipAuthoritative = remoteSafe.length > 0;
+    const guardActive = this.localMembershipGuardActive_();
 
     remoteSafe.forEach((user) => {
+      // During the post-delete guard, ignore remote-only users that are not
+      // already in the local remaining list (stale GET after a successful delete).
+      if (guardActive) {
+        const probe = this.normalizeUser(user);
+        const localMatch = localSafe.some((local) => {
+          const localNorm = this.normalizeUser(local);
+          const localKeys = new Set(this.userIdentityKeys_(localNorm));
+          return this.userIdentityKeys_(probe).some((key) => localKeys.has(key));
+        });
+        if (!localMatch) return;
+      }
+
       const normalized = this.normalizeUser(user);
       const id = normalized.id || `user-${merged.size + 1}`;
       const next = this.normalizeUser({ ...normalized, id });
@@ -375,7 +451,19 @@ const Auth = {
       const existingId = this.findMergedUserId_(identityIndex, normalized);
 
       if (existingId && merged.has(existingId)) {
-        if (preferRemote) return;
+        if (preferRemote) {
+          // Preserve pending create flag if local still needs a sheet push.
+          const remote = merged.get(existingId);
+          if (Number(normalized.pendingSheetSync) > 0) {
+            const next = this.normalizeUser({
+              ...remote,
+              pendingSheetSync: normalized.pendingSheetSync
+            });
+            merged.set(existingId, next);
+            this.indexMergedUser_(identityIndex, next);
+          }
+          return;
+        }
 
         const remote = merged.get(existingId);
         const next = this.normalizeUser({
@@ -392,13 +480,18 @@ const Auth = {
         return;
       }
 
+      // Local-only: do not re-add users the sheet already dropped (other client
+      // deleted them). Pending local creates are the sole exception.
+      if (remoteMembershipAuthoritative && !(Number(normalized.pendingSheetSync) > 0)) {
+        return;
+      }
+
       const id = normalized.id || `user-local-${merged.size + 1}`;
       const next = this.normalizeUser({ ...normalized, id });
       merged.set(id, next);
       this.indexMergedUser_(identityIndex, next);
     });
 
-    // Drop tombstones once the sheet no longer returns those users.
     this.pruneDeletedUserTombstones_(remoteUsers);
 
     return this.ensureAdminUser([...merged.values()]).map((user) => this.normalizeUser(user));
@@ -642,8 +735,10 @@ const Auth = {
   async syncUsersToSheet(users) {
     if (!this.SHEET_WEB_APP_URL) return { synced: false };
 
-    const payload = this.filterOutDeletedUsers_(
-      this.ensureAdminUser(users).map((user) => this.normalizeUser(user))
+    const payload = this.stripPendingSheetSync_(
+      this.filterOutDeletedUsers_(
+        this.ensureAdminUser(users).map((user) => this.normalizeUser(user))
+      )
     );
     const response = await fetch(this.SHEET_WEB_APP_URL, {
       method: "POST",
@@ -672,6 +767,14 @@ const Auth = {
         }
       }
     }
+
+    // Confirmed sheet write: clear pending-create flags on the saved list.
+    const cleared = this.stripPendingSheetSync_(
+      this.filterOutDeletedUsers_(
+        this.ensureAdminUser(users).map((user) => this.normalizeUser(user))
+      )
+    );
+    this.saveUsers(cleared);
 
     return { synced: true };
   },

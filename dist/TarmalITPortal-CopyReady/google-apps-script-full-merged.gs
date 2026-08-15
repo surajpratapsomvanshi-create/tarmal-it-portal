@@ -122,7 +122,7 @@ const WRITE_LOCK_WAIT_MS_ = 8000;
 // Short-lived caches cut repeated sheet reads within / across nearby GET/POST runs.
 const TASK_AUDIT_CACHE_KEY_ = "taskAuditMapV1";
 const TASK_AUDIT_CACHE_TTL_SEC_ = 90;
-const USERS_CACHE_KEY_ = "usersJsonV1";
+const USERS_CACHE_KEY_ = "usersJsonV2";
 const HIERARCHY_CACHE_KEY_ = "hierarchyJsonV1";
 const META_CACHE_TTL_SEC_ = 120;
 // Per-execution Tasks header cache (Apps Script keeps globals for one invocation).
@@ -2151,7 +2151,19 @@ function writeUsers_(users) {
   if (output.length) {
     sheet.getRange(1, 1, output.length, USER_HEADERS.length).setValues(output);
   }
+  // Flush before cache rewrite so concurrent GETs cannot re-cache pre-write rows.
+  SpreadsheetApp.flush();
   invalidateScriptCacheKey_(USERS_CACHE_KEY_);
+  try {
+    const fresh = readUsers_();
+    CacheService.getScriptCache().put(
+      USERS_CACHE_KEY_,
+      JSON.stringify(fresh),
+      META_CACHE_TTL_SEC_
+    );
+  } catch (putError) {
+    Logger.log(putError);
+  }
 }
 
 function ensureAssetsSheet_() {

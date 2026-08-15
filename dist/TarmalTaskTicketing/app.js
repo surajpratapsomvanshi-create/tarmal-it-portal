@@ -8215,7 +8215,9 @@ function applyRemoteTicketsPayload(payload) {
   if (payload.users?.length) {
     const localUsers = Auth.readUsers();
     const remoteUsers = payload.users.map((user) => Auth.normalizeUser(user));
-    const merged = Auth.mergeUsers(localUsers, remoteUsers);
+    // preferRemote=true: sheet wins field values; membership rules in mergeUsers
+    // drop stale local-only users so ticket refresh cannot resurrect deletes.
+    const merged = Auth.mergeUsers(localUsers, remoteUsers, true);
     Auth.saveUsers(merged);
     if (Auth.needsUserSheetPush_(merged, remoteUsers)) {
       Auth.syncUsersToSheet(merged).catch(() => {});
@@ -9261,7 +9263,8 @@ userForm?.addEventListener("submit", async (event) => {
     email,
     password,
     active: true,
-    rights
+    rights,
+    pendingSheetSync: Date.now()
   });
   await writeUsers(users);
   renderUsers();
