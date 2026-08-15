@@ -1,6 +1,7 @@
 const Auth = {
   SESSION_KEY: "tarmal-session",
   USERS_KEY: "tarmal-users",
+  DELETED_USERS_KEY: "tarmal-deleted-users",
   // Auth session persisted when "Remember me on this device" is enabled.
   // This intentionally stores only the app-side authorization payload (no password).
   REMEMBER_IDENTIFIER_KEY: "tarmal-login-remember",
@@ -214,11 +215,15 @@ const Auth = {
       }
     }
 
-    return this.ensureAdminUser(users).map((user) => this.normalizeUser(user));
+    return this.ensureAdminUser(users)
+      .map((user) => this.normalizeUser(user))
+      .filter((user) => !this.isDeletedUserTombstone_(user));
   },
 
   saveUsers(users) {
-    const normalized = this.ensureAdminUser(users).map((user) => this.normalizeUser(user));
+    const normalized = this.ensureAdminUser(users)
+      .map((user) => this.normalizeUser(user))
+      .filter((user) => !this.isDeletedUserTombstone_(user));
     localStorage.setItem(this.USERS_KEY, JSON.stringify(normalized));
     return normalized;
   },
@@ -270,11 +275,94 @@ const Auth = {
     this.userIdentityKeys_(user).forEach((key) => index.set(key, user.id));
   },
 
+  readDeletedUserTombstones_() {
+    try {
+      const parsed = JSON.parse(localStorage.getItem(this.DELETED_USERS_KEY) || "[]");
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  },
+
+  writeDeletedUserTombstones_(entries) {
+    localStorage.setItem(
+      this.DELETED_USERS_KEY,
+      JSON.stringify(
+        (entries || [])
+          .filter((entry) => entry && (entry.id || entry.key))
+          .slice(-200)
+      )
+    );
+  },
+
+  markDeletedUsers(users) {
+    const list = Array.isArray(users) ? users : [users];
+    const entries = this.readDeletedUserTombstones_();
+    list.forEach((user) => {
+      if (!user || this.isBuiltInAdmin(user)) return;
+      const keys = this.userIdentityKeys_(user);
+      entries.push({
+        id: String(user.id || "").trim(),
+        key: keys[0] || "",
+        keys,
+        at: Date.now()
+      });
+    });
+    this.writeDeletedUserTombstones_(entries);
+  },
+
+  isDeletedUserTombstone_(user) {
+    if (!user || this.isBuiltInAdmin(user)) return false;
+    const keys = new Set(this.userIdentityKeys_(user));
+    const id = String(user.id || "").trim().toLowerCase();
+    return this.readDeletedUserTombstones_().some((entry) => {
+      if (id && String(entry.id || "").trim().toLowerCase() === id) return true;
+      const entryKeys = Array.isArray(entry.keys) && entry.keys.length
+        ? entry.keys
+        : (entry.key ? [entry.key] : []);
+      return entryKeys.some((key) => keys.has(key));
+    });
+  },
+
+  pruneDeletedUserTombstones_(remoteUsers) {
+    // Keep a tombstone only while the sheet still returns that user (stale GET).
+    // Once the remote list no longer includes them, the tombstone can go.
+    const remoteKeys = new Set();
+    (remoteUsers || []).forEach((user) => {
+      this.userIdentityKeys_(user).forEach((key) => remoteKeys.add(key));
+    });
+
+    const kept = this.readDeletedUserTombstones_().filter((entry) => {
+      const id = String(entry.id || "").trim().toLowerCase();
+      if (id && remoteKeys.has(`id:${id}`)) return true;
+      const entryKeys = Array.isArray(entry.keys) && entry.keys.length
+        ? entry.keys
+        : (entry.key ? [entry.key] : []);
+      return entryKeys.some((key) => remoteKeys.has(key));
+    });
+    this.writeDeletedUserTombstones_(kept);
+  },
+
+  filterOutDeletedUsers_(users) {
+    return (users || []).filter((user) => !this.isDeletedUserTombstone_(user));
+  },
+
+  needsUserSheetPush_(mergedUsers, remoteUsers) {
+    const remote = remoteUsers || [];
+    if (!remote.length) return false;
+    const remoteSafe = this.filterOutDeletedUsers_(remote);
+    if (remoteSafe.length < remote.length) return true;
+    if ((mergedUsers || []).length > remoteSafe.length) return true;
+    return this.usersChanged_(mergedUsers || [], remoteSafe);
+  },
+
   mergeUsers(localUsers, remoteUsers, preferRemote = false) {
     const merged = new Map();
     const identityIndex = new Map();
+    const remoteSafe = this.filterOutDeletedUsers_(remoteUsers);
+    const localSafe = this.filterOutDeletedUsers_(localUsers);
 
-    remoteUsers.forEach((user) => {
+    remoteSafe.forEach((user) => {
       const normalized = this.normalizeUser(user);
       const id = normalized.id || `user-${merged.size + 1}`;
       const next = this.normalizeUser({ ...normalized, id });
@@ -282,7 +370,7 @@ const Auth = {
       this.indexMergedUser_(identityIndex, next);
     });
 
-    localUsers.forEach((user) => {
+    localSafe.forEach((user) => {
       const normalized = this.normalizeUser(user);
       const existingId = this.findMergedUserId_(identityIndex, normalized);
 
@@ -309,6 +397,9 @@ const Auth = {
       merged.set(id, next);
       this.indexMergedUser_(identityIndex, next);
     });
+
+    // Drop tombstones once the sheet no longer returns those users.
+    this.pruneDeletedUserTombstones_(remoteUsers);
 
     return this.ensureAdminUser([...merged.values()]).map((user) => this.normalizeUser(user));
   },
@@ -392,10 +483,7 @@ const Auth = {
     const merged = this.mergeUsers(localUsers, remoteUsers, true);
     this.saveUsers(merged);
 
-    // Never push when the sheet returned an empty user list — that wipe risk
-    // has deleted real AppUsers rows after a failed/partial read.
-    const shouldPushToSheet = remoteUsers.length > 0
-      && (merged.length > remoteUsers.length || this.usersChanged_(merged, remoteUsers));
+    const shouldPushToSheet = this.needsUserSheetPush_(merged, remoteUsers);
 
     if (!shouldPushToSheet) {
       return Promise.resolve(merged);
@@ -554,10 +642,12 @@ const Auth = {
   async syncUsersToSheet(users) {
     if (!this.SHEET_WEB_APP_URL) return { synced: false };
 
-    const payload = this.ensureAdminUser(users).map((user) => this.normalizeUser(user));
-    await fetch(this.SHEET_WEB_APP_URL, {
+    const payload = this.filterOutDeletedUsers_(
+      this.ensureAdminUser(users).map((user) => this.normalizeUser(user))
+    );
+    const response = await fetch(this.SHEET_WEB_APP_URL, {
       method: "POST",
-      mode: "no-cors",
+      redirect: "follow",
       headers: {
         "Content-Type": "text/plain;charset=utf-8"
       },
@@ -566,6 +656,22 @@ const Auth = {
         users: payload
       })
     });
+
+    const text = await response.text();
+    const raw = String(text ?? "").replace(/^\uFEFF/, "").trim();
+    if (raw) {
+      try {
+        const parsed = this.parseUsersResponse_(raw);
+        if (parsed && parsed.ok === false) {
+          throw new Error(parsed.error || "User sync failed.");
+        }
+      } catch (error) {
+        // Opaque/empty success bodies are fine; only fail on explicit error JSON.
+        if (/User sync failed|Could not read users|HTML error page/i.test(String(error.message || error))) {
+          throw error;
+        }
+      }
+    }
 
     return { synced: true };
   },

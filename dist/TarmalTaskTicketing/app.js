@@ -147,6 +147,7 @@ const presentationBoard = document.querySelector(".presentation-board");
 const togglePresentationHeroButton = document.querySelector("#togglePresentationHeroButton");
 const presentationTypeFilter = document.querySelector("#presentationTypeFilter");
 const presentationOwnerFilter = document.querySelector("#presentationOwnerFilter");
+const presentationSearchFilter = document.querySelector("#presentationSearchFilter");
 const presentationPeriodFilters = document.querySelector("#presentationPeriodFilters");
 const presentationCustomRange = document.querySelector("#presentationCustomRange");
 const presentationDateFrom = document.querySelector("#presentationDateFrom");
@@ -603,7 +604,12 @@ function renderUsers() {
       const allUsers = readUsers();
       const user = allUsers.find((entry) => entry.id === userId);
       if (!user) return;
+      if (Auth.isBuiltInAdmin(user)) {
+        alert("The built-in admin user cannot be deleted.");
+        return;
+      }
       if (!confirm(`Delete user "${user.name}"?`)) return;
+      Auth.markDeletedUsers(user);
       await writeUsers(allUsers.filter((entry) => entry.id !== userId));
       renderUsers();
     });
@@ -7073,6 +7079,26 @@ function ticketMatchesPresentationOwner(ticket) {
   return true;
 }
 
+function getPresentationSearchQuery() {
+  return cleanText(presentationSearchFilter?.value).toLowerCase();
+}
+
+function presentationSearchHaystack(ticket) {
+  return [
+    ticket?.Task,
+    ticket?.Owner,
+    ticket?.Type,
+    getTicketRemarksText(ticket) || ticket?.Remarks || ticket?.Notes || ""
+  ].join(" ").toLowerCase();
+}
+
+function ticketMatchesPresentationSearch(ticket, query = getPresentationSearchQuery()) {
+  if (!query) return true;
+  const task = cleanText(ticket?.Task).toLowerCase();
+  if (task.includes(query)) return true;
+  return presentationSearchHaystack(ticket).includes(query);
+}
+
 function presentationOwnerLabel() {
   if (selectedPresentationOwner === "Bhanu") return "Bhanu";
   if (selectedPresentationOwner === "Suraj") return "Suraj";
@@ -7113,11 +7139,13 @@ function getPresentationTickets(tickets = getValidTickets()) {
   // Type filter is applied here once; every Kanban column renders from this list.
   syncPresentationFiltersFromDom();
   const typeFilter = selectedPresentationType;
+  const searchQuery = getPresentationSearchQuery();
   return tickets
     .filter((ticket) => isProjectTypeTicket(ticket) && !isSubtaskTicket(ticket))
     .filter((ticket) => ticketMatchesPresentationType(ticket, typeFilter))
     .filter((ticket) => ticketMatchesPresentationOwner(ticket))
     .filter((ticket) => ticketMatchesPresentationPeriod(ticket))
+    .filter((ticket) => ticketMatchesPresentationSearch(ticket, searchQuery))
     .sort(comparePresentationTickets);
 }
 
@@ -7453,6 +7481,7 @@ function computePresentationBoardSignature(shown) {
     selectedPresentationType,
     selectedPresentationOwner,
     selectedPresentationPeriod,
+    getPresentationSearchQuery(),
     presentationDateFrom?.value || "",
     presentationDateTo?.value || "",
     shown.length
@@ -7464,14 +7493,14 @@ function computePresentationBoardSignature(shown) {
   return body;
 }
 
-function schedulePresentationViewRender() {
+function schedulePresentationViewRender(delayMs = 100) {
   if (presentationFilterDebounceTimer) {
     window.clearTimeout(presentationFilterDebounceTimer);
   }
   presentationFilterDebounceTimer = window.setTimeout(() => {
     presentationFilterDebounceTimer = 0;
     renderPresentationView();
-  }, 70);
+  }, delayMs);
 }
 
 function renderPresentationView(tickets = getValidTickets()) {
@@ -7486,11 +7515,13 @@ function renderPresentationView(tickets = getValidTickets()) {
   const shown = getPresentationTickets(tickets);
   const typeLabel = selectedPresentationType === "all" ? "SAP & Infra" : selectedPresentationType;
   const ownerLabel = presentationOwnerLabel();
+  const searchQuery = getPresentationSearchQuery();
+  const searchLabel = searchQuery ? `“${searchQuery}”` : "";
   const periodLabel = selectedPresentationPeriod === "custom"
     ? "custom range"
     : (PERFORMANCE_PERIOD_OPTIONS.find((entry) => entry.id === selectedPresentationPeriod)?.label
       || selectedPresentationPeriod);
-  const filterBits = [typeLabel, ownerLabel, periodLabel].filter(Boolean);
+  const filterBits = [typeLabel, ownerLabel, searchLabel, periodLabel].filter(Boolean);
   const boardSignature = computePresentationBoardSignature(shown);
 
   if (presentationSummary) {
@@ -8183,10 +8214,11 @@ function applyRemoteTicketsPayload(payload) {
 
   if (payload.users?.length) {
     const localUsers = Auth.readUsers();
-    const merged = Auth.mergeUsers(localUsers, payload.users.map((user) => Auth.normalizeUser(user)));
+    const remoteUsers = payload.users.map((user) => Auth.normalizeUser(user));
+    const merged = Auth.mergeUsers(localUsers, remoteUsers);
     Auth.saveUsers(merged);
-    if (merged.length > payload.users.length) {
-      Auth.syncUsersToSheet(merged);
+    if (Auth.needsUserSheetPush_(merged, remoteUsers)) {
+      Auth.syncUsersToSheet(merged).catch(() => {});
     }
     renderUsers();
   }
@@ -9040,6 +9072,13 @@ presentationOwnerFilter?.addEventListener("change", () => {
   selectedPresentationOwner = cleanText(presentationOwnerFilter.value) || "all";
   schedulePresentationViewRender();
 });
+presentationSearchFilter?.addEventListener("input", () => {
+  schedulePresentationViewRender(120);
+});
+presentationSearchFilter?.addEventListener("search", () => {
+  // Native clear (X) on type=search fires "search"; re-render immediately.
+  schedulePresentationViewRender(0);
+});
 presentationPeriodFilters?.querySelectorAll("[data-period]").forEach((button) => {
   button.addEventListener("click", () => {
     selectedPresentationPeriod = button.dataset.period || "all";
@@ -9268,7 +9307,14 @@ deleteSelectedUsersButton?.addEventListener("click", async () => {
   if (!selectedIds.length) return;
   if (!confirm(`Delete ${selectedIds.length} selected user(s)?`)) return;
 
-  const remaining = readUsers().filter((user) => !selectedIds.includes(user.id));
+  const allUsers = readUsers();
+  const deleting = allUsers.filter((user) => selectedIds.includes(user.id) && !Auth.isBuiltInAdmin(user));
+  if (!deleting.length) {
+    alert("The built-in admin user cannot be deleted.");
+    return;
+  }
+  Auth.markDeletedUsers(deleting);
+  const remaining = allUsers.filter((user) => !deleting.some((entry) => entry.id === user.id));
   await writeUsers(remaining);
   renderUsers();
 });
