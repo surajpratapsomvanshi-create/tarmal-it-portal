@@ -25,7 +25,8 @@ const Auth = {
       viewAssets: true,
       manageAssets: true,
       viewDocuments: true,
-      manageDocuments: true
+      manageDocuments: true,
+      deleteDocuments: true
     }
   },
 
@@ -77,12 +78,17 @@ const Auth = {
 
   migrateDocumentRights(rights) {
     const next = { ...rights };
+    const hasExplicitDelete = Object.prototype.hasOwnProperty.call(rights || {}, "deleteDocuments");
 
     if (!next.viewDocuments) {
       next.viewDocuments = Boolean(next.viewAssets || next.manageAssets || next.manageUsers);
     }
     if (!next.manageDocuments) {
       next.manageDocuments = Boolean(next.manageAssets || next.manageUsers);
+    }
+    // Preserve prior Mgr Docs behavior: managers could delete until Del Docs is set explicitly.
+    if (!hasExplicitDelete) {
+      next.deleteDocuments = Boolean(next.manageDocuments || next.manageUsers);
     }
 
     return next;
@@ -99,7 +105,10 @@ const Auth = {
       viewAssets: Boolean(user.rights?.viewAssets),
       manageAssets: Boolean(user.rights?.manageAssets),
       viewDocuments: Boolean(user.rights?.viewDocuments),
-      manageDocuments: Boolean(user.rights?.manageDocuments)
+      manageDocuments: Boolean(user.rights?.manageDocuments),
+      ...(Object.prototype.hasOwnProperty.call(user.rights || {}, "deleteDocuments")
+        ? { deleteDocuments: Boolean(user.rights.deleteDocuments) }
+        : {})
     });
 
     const finalRights = this.isBuiltInAdmin(user) || rights.manageUsers
@@ -144,6 +153,7 @@ const Auth = {
     if (rightId === "manageAssets") return this.canManageAssets();
     if (rightId === "viewDocuments") return this.canViewDocuments();
     if (rightId === "manageDocuments") return this.canManageDocuments();
+    if (rightId === "deleteDocuments") return this.canDeleteDocuments();
     return this.hasRight(rightId);
   },
 
@@ -182,6 +192,10 @@ const Auth = {
 
   canManageDocuments() {
     return this.isAdminLevelUser() || this.hasRight("manageDocuments");
+  },
+
+  canDeleteDocuments() {
+    return this.isAdminLevelUser() || this.hasRight("deleteDocuments");
   },
 
   canEditTickets() {

@@ -183,6 +183,10 @@ function canManageDocuments() {
   return Auth.canManageDocuments();
 }
 
+function canDeleteDocuments() {
+  return Auth.canDeleteDocuments();
+}
+
 function parseSharedWith(value) {
   return String(value || "")
     .split(",")
@@ -215,6 +219,11 @@ function canEditDocument(doc) {
   if (canManageDocuments()) return true;
   const me = Auth.currentUser();
   return Boolean(me && doc?.ownerUserId === me.id);
+}
+
+function canDeleteDocument(doc) {
+  if (!doc || !canDeleteDocuments()) return false;
+  return canEditDocument(doc);
 }
 
 function readFileAsDataUrl(file) {
@@ -615,7 +624,7 @@ function openDocumentPreview(docId) {
 
 async function deleteDocument(docId) {
   const doc = Documents.read().find((entry) => entry.id === docId);
-  if (!doc || !canEditDocument(doc)) {
+  if (!doc || !canDeleteDocument(doc)) {
     alert("You do not have permission to delete this document.");
     return;
   }
@@ -670,6 +679,7 @@ function groupDocumentsByCategory(docs) {
 
 function renderDocumentRow(doc) {
   const canEdit = canEditDocument(doc);
+  const canDelete = canDeleteDocument(doc);
   const typeLabel = fileTypeLabel(doc);
   const iconClass = fileTypeIconClass(doc);
   const accessClass = visibilityBadgeClass(doc);
@@ -694,7 +704,7 @@ function renderDocumentRow(doc) {
           <button class="doc-action-btn doc-action-download document-download-button" type="button" data-document-id="${escapeHtml(doc.id)}">Download</button>
           ${canEdit ? `<button class="doc-action-btn doc-action-share document-share-all-button" type="button" data-document-id="${escapeHtml(doc.id)}">Share all</button>` : ""}
           ${canEdit ? `<button class="doc-action-btn doc-action-access document-access-button" type="button" data-document-id="${escapeHtml(doc.id)}">Access</button>` : ""}
-          ${canEdit ? `<button class="doc-action-btn doc-action-delete document-delete-button" type="button" data-document-id="${escapeHtml(doc.id)}">Delete</button>` : ""}
+          ${canDelete ? `<button class="doc-action-btn doc-action-delete document-delete-button" type="button" data-document-id="${escapeHtml(doc.id)}">Delete</button>` : ""}
         </div>
       </td>
     </tr>

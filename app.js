@@ -316,11 +316,12 @@ const USER_RIGHTS = [
   { id: "viewAssets", label: "View IT Assets", shortLabel: "View Assets", description: "View the IT assets list and register" },
   { id: "manageAssets", label: "Manage IT Assets", shortLabel: "Mgr Assets", description: "Register, edit, delete, and export IT assets" },
   { id: "viewDocuments", label: "View Documents", shortLabel: "View Docs", description: "Browse and preview IT documents shared with you" },
-  { id: "manageDocuments", label: "Manage Documents", shortLabel: "Mgr Docs", description: "Upload documents and control user access" }
+  { id: "manageDocuments", label: "Manage Documents", shortLabel: "Mgr Docs", description: "Upload documents and control user access" },
+  { id: "deleteDocuments", label: "Delete Documents", shortLabel: "Del Docs", description: "Allow deleting documents in DMS" }
 ];
 
 const ROLE_PRESETS = {
-  admin: ["dashboard", "createTicket", "editTicket", "exportData", "syncSheet", "manageUsers", "viewAssets", "manageAssets", "viewDocuments", "manageDocuments"],
+  admin: ["dashboard", "createTicket", "editTicket", "exportData", "syncSheet", "manageUsers", "viewAssets", "manageAssets", "viewDocuments", "manageDocuments", "deleteDocuments"],
   agent: ["dashboard", "createTicket", "exportData", "syncSheet", "viewAssets", "viewDocuments"],
   viewer: ["dashboard"]
 };
@@ -333,7 +334,7 @@ const sampleUsers = [
     email: "admin@tarmal.com",
     password: "1234",
     active: true,
-    rights: { dashboard: true, createTicket: true, editTicket: true, exportData: true, syncSheet: true, manageUsers: true, viewAssets: true, manageAssets: true, viewDocuments: true, manageDocuments: true }
+    rights: { dashboard: true, createTicket: true, editTicket: true, exportData: true, syncSheet: true, manageUsers: true, viewAssets: true, manageAssets: true, viewDocuments: true, manageDocuments: true, deleteDocuments: true }
   },
   {
     id: "user-bhanu",
@@ -342,7 +343,7 @@ const sampleUsers = [
     email: "bhanu@tarmal.com",
     password: "Tarmal@Bhanu123",
     active: true,
-    rights: { dashboard: true, createTicket: true, editTicket: true, exportData: true, syncSheet: true, manageUsers: true, viewAssets: true, manageAssets: true, viewDocuments: true, manageDocuments: true }
+    rights: { dashboard: true, createTicket: true, editTicket: true, exportData: true, syncSheet: true, manageUsers: true, viewAssets: true, manageAssets: true, viewDocuments: true, manageDocuments: true, deleteDocuments: true }
   },
   {
     id: "user-suraj",
@@ -351,7 +352,7 @@ const sampleUsers = [
     email: "suraj@tarmal.com",
     password: "Tarmal@Suraj123",
     active: true,
-    rights: { dashboard: true, createTicket: true, editTicket: true, exportData: true, syncSheet: false, manageUsers: false, viewAssets: true, manageAssets: true, viewDocuments: true, manageDocuments: true }
+    rights: { dashboard: true, createTicket: true, editTicket: true, exportData: true, syncSheet: false, manageUsers: false, viewAssets: true, manageAssets: true, viewDocuments: true, manageDocuments: true, deleteDocuments: true }
   },
   {
     id: "user-sushil",
@@ -360,7 +361,7 @@ const sampleUsers = [
     email: "sushil@tarmal.com",
     password: "Tarmal@Sushil123",
     active: true,
-    rights: { dashboard: true, createTicket: true, editTicket: false, exportData: false, syncSheet: true, manageUsers: false, viewAssets: true, manageAssets: false, viewDocuments: true, manageDocuments: false }
+    rights: { dashboard: true, createTicket: true, editTicket: false, exportData: false, syncSheet: true, manageUsers: false, viewAssets: true, manageAssets: false, viewDocuments: true, manageDocuments: false, deleteDocuments: false }
   },
   {
     id: "user-dishon",
@@ -369,7 +370,7 @@ const sampleUsers = [
     email: "",
     password: "Tarmal@Dishon123",
     active: true,
-    rights: { dashboard: true, createTicket: false, editTicket: false, exportData: false, syncSheet: false, manageUsers: false, viewAssets: false, manageAssets: false, viewDocuments: false, manageDocuments: false }
+    rights: { dashboard: true, createTicket: false, editTicket: false, exportData: false, syncSheet: false, manageUsers: false, viewAssets: false, manageAssets: false, viewDocuments: false, manageDocuments: false, deleteDocuments: false }
   }
 ];
 
