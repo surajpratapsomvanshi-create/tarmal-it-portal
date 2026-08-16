@@ -289,7 +289,7 @@ const projectMultiFilters = [
   { panel: projectStatusFilterPanel, trigger: projectStatusFilterTrigger, defaultLabel: "All statuses", getValues: (ticket) => ticket.Status },
   { panel: projectOwnerFilterPanel, trigger: projectOwnerFilterTrigger, defaultLabel: "All owners", getValues: (ticket) => ticket.Owner },
   { panel: projectRaisedByFilterPanel, trigger: projectRaisedByFilterTrigger, defaultLabel: "All requesters", getValues: (ticket) => ticket["Raised By"] },
-  { panel: projectTypeFilterPanel, trigger: projectTypeFilterTrigger, defaultLabel: "All project types", getValues: (ticket) => ticket.Type, staticOptions: ["SAP", "Infra"] },
+  { panel: projectTypeFilterPanel, trigger: projectTypeFilterTrigger, defaultLabel: "All project types", getValues: (ticket) => ticket.Type, staticOptions: ["SAP", "Infra", "MOM"] },
   { panel: projectPriorityFilterPanel, trigger: projectPriorityFilterTrigger, defaultLabel: "All priorities", getValues: (ticket) => ticket.Priority, labelFormatter: formatPriorityLabel }
 ];
 
@@ -2955,6 +2955,10 @@ function isExactInfraType(type) {
   return String(type || "").trim().toLowerCase() === "infra";
 }
 
+function isExactMomType(type) {
+  return String(type || "").trim().toLowerCase() === "mom";
+}
+
 function isSapTypeTicket(ticket) {
   return isExactSapType(ticket?.Type);
 }
@@ -2963,15 +2967,22 @@ function isInfraTypeTicket(ticket) {
   return isExactInfraType(ticket?.Type);
 }
 
-function isProjectTypeTicket(ticket) {
-  return isExactSapType(ticket?.Type) || isExactInfraType(ticket?.Type);
+function isMomTypeTicket(ticket) {
+  return isExactMomType(ticket?.Type);
 }
 
-/** Normalize Presentation type dropdown → "all" | "SAP" | "Infra". */
+function isProjectTypeTicket(ticket) {
+  // Presentation / Projects board types (exact only — not Daily variants).
+  // Approval still uses isExactProjectType (SAP / Infra only); MOM is not auto-gated.
+  return isExactSapType(ticket?.Type) || isExactInfraType(ticket?.Type) || isExactMomType(ticket?.Type);
+}
+
+/** Normalize Presentation type dropdown → "all" | "SAP" | "Infra" | "MOM". */
 function normalizePresentationTypeFilter(value) {
   const raw = cleanText(value).toLowerCase();
   if (raw === "sap") return "SAP";
   if (raw === "infra") return "Infra";
+  if (raw === "mom") return "MOM";
   return "all";
 }
 
@@ -2986,6 +2997,7 @@ function ticketMatchesPresentationType(ticket, typeFilter = getActivePresentatio
   const selected = normalizePresentationTypeFilter(typeFilter);
   if (selected === "SAP") return isExactSapType(ticket?.Type);
   if (selected === "Infra") return isExactInfraType(ticket?.Type);
+  if (selected === "MOM") return isExactMomType(ticket?.Type);
   return true;
 }
 
@@ -2997,7 +3009,7 @@ function syncPresentationFiltersFromDom() {
 }
 
 function isPresentationEligible(ticket) {
-  // Exact Type SAP or Infra only (not Daily - SAP / Daily - Infra).
+  // Exact Type SAP / Infra / MOM only (not Daily - SAP / Daily - Infra).
   return isProjectTypeTicket(ticket);
 }
 
@@ -3183,11 +3195,12 @@ function shouldRequireCompletionApproval(ticket, user = Auth.currentUser()) {
 }
 
 function isExactProjectType(type) {
+  // Approval-gated project types only (SAP / Infra). MOM is presentational, not approval-gated.
   return isExactSapType(type) || isExactInfraType(type);
 }
 
 function typeEnteredProjectType(nextType, previousType) {
-  // Exact SAP / Infra only — not Daily - SAP / Daily - Infra.
+  // Exact SAP / Infra only — not Daily - SAP / Daily - Infra / MOM.
   return isExactProjectType(nextType) && !isExactProjectType(previousType);
 }
 
@@ -4834,7 +4847,7 @@ function populatePerformanceOwnerFilter(tickets) {
   }
 }
 
-const PERFORMANCE_TYPE_FALLBACKS = ["Daily - Infra", "Daily - SAP", "SAP", "Infra"];
+const PERFORMANCE_TYPE_FALLBACKS = ["Daily - Infra", "Daily - SAP", "SAP", "Infra", "MOM"];
 
 function getPerformanceTypes(tickets) {
   const types = new Set(PERFORMANCE_TYPE_FALLBACKS);
@@ -7135,7 +7148,7 @@ function comparePresentationTickets(a, b) {
 }
 
 function getPresentationTickets(tickets = getValidTickets()) {
-  // Exact Type SAP / Infra only (never Daily variants); top-level projects.
+  // Exact Type SAP / Infra / MOM only (never Daily variants); top-level projects.
   // Type filter is applied here once; every Kanban column renders from this list.
   syncPresentationFiltersFromDom();
   const typeFilter = selectedPresentationType;
@@ -7508,12 +7521,12 @@ function renderPresentationView(tickets = getValidTickets()) {
 
   syncPresentationFiltersFromDom();
   if (presentationTypeFilter && presentationTypeFilter.value !== selectedPresentationType) {
-    // Keep the visible select aligned with the normalized filter ("SAP" / "Infra" / "all").
+    // Keep the visible select aligned with the normalized filter ("SAP" / "Infra" / "MOM" / "all").
     presentationTypeFilter.value = selectedPresentationType;
   }
 
   const shown = getPresentationTickets(tickets);
-  const typeLabel = selectedPresentationType === "all" ? "SAP & Infra" : selectedPresentationType;
+  const typeLabel = selectedPresentationType === "all" ? "SAP, Infra & MOM" : selectedPresentationType;
   const ownerLabel = presentationOwnerLabel();
   const searchQuery = getPresentationSearchQuery();
   const searchLabel = searchQuery ? `“${searchQuery}”` : "";
@@ -7542,8 +7555,8 @@ function renderPresentationView(tickets = getValidTickets()) {
     presentationDeck.innerHTML = `
       <div class="presentation-empty">
         <p class="eyebrow">Presentation</p>
-        <h3>No matching SAP or Infra projects</h3>
-        <p>Set a ticket’s <strong>Type</strong> to SAP or Infra (use ★ on Tickets/Projects to open Edit), or widen the filters above.</p>
+        <h3>No matching SAP, Infra, or MOM projects</h3>
+        <p>Set a ticket’s <strong>Type</strong> to SAP, Infra, or MOM (use ★ on Tickets/Projects to open Edit), or widen the filters above.</p>
         <div class="presentation-empty-actions">
           <button class="primary-button" type="button" data-goto-tab="tickets">Go to Tickets</button>
           <button class="secondary-button" type="button" data-goto-tab="projects">Go to Projects</button>
@@ -8023,14 +8036,14 @@ function renderTickets(options = {}) {
       };
       projectFilterSummary.textContent = projectSortLabels[projectSortKey]
         || (filteredProjects.length === projectTickets.length
-          ? `Showing ${projectTickets.length} SAP & Infra project${projectTickets.length === 1 ? "" : "s"}`
+          ? `Showing ${projectTickets.length} SAP, Infra & MOM project${projectTickets.length === 1 ? "" : "s"}`
           : `Showing ${filteredProjects.length} of ${projectTickets.length} projects`);
     }
     renderTicketTable(filteredProjects, {
       bodyEl: projectRows,
       tableEl: projectTable,
       actionsHeaderEl: projectActionsHeader,
-      emptyMessage: "No SAP or Infra project works match the current filters.",
+      emptyMessage: "No SAP, Infra, or MOM project works match the current filters.",
       highlightImportantRemarks: true,
       pageLimit: projectTableLimit,
       loadMoreKind: "projects",

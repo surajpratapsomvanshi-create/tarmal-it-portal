@@ -6,11 +6,11 @@
     <title>Tarmal IT Portal</title>
     <link rel="icon" href="./assets/tarmal-mark.png?v=1" type="image/png">
     <link rel="apple-touch-icon" href="./assets/apple-touch-icon.png?v=1">
-    <link rel="stylesheet" href="./styles.css?v=179">
+    <link rel="stylesheet" href="./styles.css?v=180">
     <!-- auth stays blocking so requireLogin runs before app chrome paints -->
     <script src="./auth.js?v=25"></script>
     <!-- Defer main bundles so HTML can parse while ~210KB+ app.js downloads -->
-    <script src="./app.js?v=191" defer></script>
+    <script src="./app.js?v=192" defer></script>
     <script src="./assets.js?v=13" defer></script>
     <script src="./documents.js?v=12" defer></script>
     <script src="./procurement.js?v=6" defer></script>
@@ -479,7 +479,7 @@
             <div class="board-toolbar-body">
               <div class="board-header">
                 <div>
-                  <p class="eyebrow">SAP &amp; Infra</p>
+                  <p class="eyebrow">SAP, Infra &amp; MOM</p>
                   <h2>Project Works</h2>
                 </div>
                 <div class="board-actions">
@@ -574,7 +574,7 @@
       </section>
 
       <section class="tab-panel" data-panel="presentation" aria-label="Management presentation">
-        <section class="presentation-board presentation-hero-collapsed" aria-label="SAP and Infra project presentation">
+        <section class="presentation-board presentation-hero-collapsed" aria-label="SAP, Infra, and MOM project presentation">
           <div class="presentation-hero is-collapsed" id="presentationHero">
             <div class="presentation-hero-glow" aria-hidden="true"></div>
             <div class="presentation-hero-toolbar">
@@ -593,6 +593,7 @@
                     <option value="all">All types</option>
                     <option value="SAP">SAP</option>
                     <option value="Infra">Infra</option>
+                    <option value="MOM">MOM</option>
                   </select>
                 </label>
                 <label class="presentation-filter-field presentation-filter-field--owner">
@@ -1165,6 +1166,7 @@
                   <option>Daily - SAP</option>
                   <option>SAP</option>
                   <option>Infra</option>
+                  <option>MOM</option>
                 </select>
               </label>
               <label class="field">
@@ -1315,6 +1317,7 @@
                   <option>Daily - SAP</option>
                   <option>SAP</option>
                   <option>Infra</option>
+                  <option>MOM</option>
                 </select>
               </label>
               <div class="field">

@@ -2746,7 +2746,8 @@ function isProjectType_(typeValue) {
   const lower = value.toLowerCase();
   if (lower.indexOf("daily") !== -1) return false;
 
-  return lower === "sap" || lower === "infra";
+  // Projects sheet / long-term project types (presentation). Approval still uses isExactProjectType_ (SAP/Infra only).
+  return lower === "sap" || lower === "infra" || lower === "mom";
 }
 
 function isPlaceholderTaskRow_(taskName) {
@@ -2801,7 +2802,7 @@ function buildTaskSignature(row, cols) {
 
 /* =====================================================
    TASKS TO PROJECTS SYNC
-   Only SAP and Infra appear in Projects
+   Only SAP, Infra, and MOM appear in Projects
 ===================================================== */
 
 function syncProjectsWithTasks() {
@@ -2888,12 +2889,12 @@ function refreshProjectsSheet() {
   let message = "";
 
   if (count > 0) {
-    message = `Synced ${count} long-term project${count === 1 ? "" : "s"} (Type = SAP or Infra). Daily tasks excluded.`;
+    message = `Synced ${count} long-term project${count === 1 ? "" : "s"} (Type = SAP, Infra, or MOM). Daily tasks excluded.`;
   } else if (taskSheet) {
     const summary = formatTaskTypeSummary_(summarizeTaskTypes_(taskSheet));
     message = summary
-      ? `No SAP/Infra projects found. Tasks types: ${summary}. Change long-term work to Type SAP or Infra.`
-      : "No SAP or Infra tasks found in Tasks. Set Type to SAP or Infra on long-term work.";
+      ? `No SAP/Infra/MOM projects found. Tasks types: ${summary}. Change long-term work to Type SAP, Infra, or MOM.`
+      : "No SAP, Infra, or MOM tasks found in Tasks. Set Type to SAP, Infra, or MOM on long-term work.";
   } else {
     message = "Tasks sheet not found.";
   }
@@ -2912,7 +2913,7 @@ function clearProjectsFilter() {
 function onOpen() {
   SpreadsheetApp.getUi()
     .createMenu("Tarmal IT")
-    .addItem("Refresh Projects (SAP & Infra only)", "refreshProjectsSheet")
+    .addItem("Refresh Projects (SAP, Infra & MOM)", "refreshProjectsSheet")
     .addItem("Clear Projects filter", "clearProjectsFilter")
     .addItem("Send pending approval emails", "sendPendingCompletionApprovalEmailsManual")
     .addItem("Test approval email", "testCompletionApprovalEmail")
