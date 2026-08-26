@@ -2449,6 +2449,117 @@ function updateRaisedBySuggestions(tickets) {
     .join("");
 }
 
+function escapeRegExp(value) {
+  return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/** Unique Raised By names from tickets + current suggestion datalist (preserves first-seen casing). */
+function getKnownRaisedByNames(tickets = null) {
+  const sourceTickets = Array.isArray(tickets) ? tickets : (typeof readTickets === "function" ? readTickets() : []);
+  const names = new Map();
+  const addName = (raw) => {
+    const name = cleanText(raw);
+    if (!name) return;
+    const key = name.toLowerCase();
+    if (!names.has(key)) names.set(key, name);
+  };
+  sourceTickets.forEach((ticket) => addName(ticket?.["Raised By"]));
+  if (raisedBySuggestions) {
+    raisedBySuggestions.querySelectorAll("option").forEach((option) => addName(option.value));
+  }
+  return [...names.values()];
+}
+
+/**
+ * Longest whole-word (case-insensitive) match of a known Raised By name inside Task text.
+ * Multi-word names (e.g. "Suraj Pratap") win over shorter prefixes ("Suraj").
+ */
+function findRaisedByNameInTask(taskText, knownNames = getKnownRaisedByNames()) {
+  const text = String(taskText || "");
+  if (!text.trim() || !knownNames.length) return "";
+  const sorted = [...knownNames].sort((a, b) => b.length - a.length || a.localeCompare(b));
+  for (const name of sorted) {
+    if (!name) continue;
+    const pattern = new RegExp(`(^|[^A-Za-z0-9_])${escapeRegExp(name)}(?=$|[^A-Za-z0-9_])`, "i");
+    if (pattern.test(text)) return name;
+  }
+  return "";
+}
+
+let ticketCreateRaisedByTouched = false;
+let ticketCreateRaisedByAutoFilled = false;
+let ticketEditRaisedByTouched = false;
+let ticketEditRaisedByAutoFilled = false;
+let raisedByAutoFillQuiet = false;
+
+function resetTicketCreateRaisedByTracking() {
+  ticketCreateRaisedByTouched = false;
+  ticketCreateRaisedByAutoFilled = false;
+}
+
+function resetTicketEditRaisedByTracking() {
+  ticketEditRaisedByTouched = false;
+  ticketEditRaisedByAutoFilled = false;
+}
+
+function onRaisedByFieldManualInput(formKind) {
+  if (raisedByAutoFillQuiet) return;
+  const targetForm = formKind === "edit" ? ticketEditForm : form;
+  const field = targetForm?.elements?.["Raised By"];
+  const value = cleanText(field?.value);
+  if (formKind === "edit") {
+    if (!value) {
+      ticketEditRaisedByTouched = false;
+      ticketEditRaisedByAutoFilled = false;
+    } else {
+      ticketEditRaisedByTouched = true;
+      ticketEditRaisedByAutoFilled = false;
+    }
+    return;
+  }
+  if (!value) {
+    ticketCreateRaisedByTouched = false;
+    ticketCreateRaisedByAutoFilled = false;
+  } else {
+    ticketCreateRaisedByTouched = true;
+    ticketCreateRaisedByAutoFilled = false;
+  }
+}
+
+function maybeAutofillRaisedByFromTask(formKind) {
+  const targetForm = formKind === "edit" ? ticketEditForm : form;
+  if (!targetForm) return;
+  const raisedByField = targetForm.elements?.["Raised By"];
+  const taskField = targetForm.elements?.Task;
+  if (!raisedByField || !taskField) return;
+
+  const touched = formKind === "edit" ? ticketEditRaisedByTouched : ticketCreateRaisedByTouched;
+  const autoFilled = formKind === "edit" ? ticketEditRaisedByAutoFilled : ticketCreateRaisedByAutoFilled;
+  if (touched) return;
+
+  const current = cleanText(raisedByField.value);
+  if (current && !autoFilled) return;
+
+  const match = findRaisedByNameInTask(taskField.value);
+  if (!match) return;
+  if (current.toLowerCase() === match.toLowerCase()) {
+    if (formKind === "edit") ticketEditRaisedByAutoFilled = true;
+    else ticketCreateRaisedByAutoFilled = true;
+    return;
+  }
+
+  raisedByAutoFillQuiet = true;
+  raisedByField.value = match;
+  raisedByAutoFillQuiet = false;
+  if (formKind === "edit") {
+    ticketEditRaisedByAutoFilled = true;
+    ticketEditRaisedByTouched = false;
+  } else {
+    ticketCreateRaisedByAutoFilled = true;
+    ticketCreateRaisedByTouched = false;
+  }
+}
+
 function extractRemarks(ticket) {
   const candidates = [
     ticket.Notes,
@@ -3575,6 +3686,7 @@ function resetSurajTicketCreateTracking() {
   surajCreateDefaultsActive = false;
   ticketCreateTypeTouched = false;
   ticketCreateMilestoneTouched = false;
+  resetTicketCreateRaisedByTracking();
 }
 
 function applySurajTicketCreateDefaults({ force = false } = {}) {
@@ -5561,6 +5673,9 @@ function openSubtaskCreateModal(parentSheetRow) {
     form.elements["Raised By"].value = parent["Raised By"];
   }
   resetSurajTicketCreateTracking();
+  if (cleanText(form?.elements?.["Raised By"]?.value)) {
+    ticketCreateRaisedByTouched = true;
+  }
   applyDefaultTicketFormOwner();
   applySurajTicketCreateDefaults({ force: true });
   form?.elements.Task?.focus();
@@ -5643,6 +5758,7 @@ function openTicketEditor(sheetRow, options = {}) {
 
   activeEditTicket = { ...ticket };
   resetTicketDeleteUi();
+  resetTicketEditRaisedByTracking();
   if (ticketEditSheetRow) {
     ticketEditSheetRow.value = String(ticket.sheetRow || "");
   }
@@ -5650,6 +5766,11 @@ function openTicketEditor(sheetRow, options = {}) {
   ticketEditForm.elements.Priority.value = normalizePriority(ticket.Priority);
   populateTicketEditOwnerSelect(ticket.Owner || "");
   ticketEditForm.elements["Raised By"].value = ticket["Raised By"] || "";
+  // Existing ticket Raised By is treated as set (not auto) so Task edits won't overwrite it
+  // until the user clears Raised By.
+  if (cleanText(ticket["Raised By"])) {
+    ticketEditRaisedByTouched = true;
+  }
   populateTicketEditStatusSelect(ticket);
   let typeValue = ticket.Type || "Daily - Infra";
   if (options.preferSapType && !isProjectTypeTicket(ticket)) {
@@ -5675,6 +5796,7 @@ function openTicketEditor(sheetRow, options = {}) {
   } else {
     ticketEditForm.elements.Task.focus();
   }
+  maybeAutofillRaisedByFromTask("edit");
 }
 
 function closeTicketEditor() {
@@ -7006,6 +7128,10 @@ function populateTicketCreateFormFromSource(source) {
   // Keep Suraj auto-defaults from overwriting the copied Type/Milestone.
   ticketCreateTypeTouched = true;
   ticketCreateMilestoneTouched = true;
+  if (cleanText(form?.elements?.["Raised By"]?.value)) {
+    ticketCreateRaisedByTouched = true;
+    ticketCreateRaisedByAutoFilled = false;
+  }
   if (ownersIncludeSuraj()) {
     surajCreateDefaultsActive = true;
   }
@@ -9350,6 +9476,14 @@ form?.elements.Milestone?.addEventListener("change", () => {
 form?.elements.Milestone?.addEventListener("input", () => {
   ticketCreateMilestoneTouched = true;
 });
+form?.elements?.Task?.addEventListener("input", () => maybeAutofillRaisedByFromTask("create"));
+form?.elements?.Task?.addEventListener("change", () => maybeAutofillRaisedByFromTask("create"));
+form?.elements?.["Raised By"]?.addEventListener("input", () => onRaisedByFieldManualInput("create"));
+form?.elements?.["Raised By"]?.addEventListener("change", () => onRaisedByFieldManualInput("create"));
+ticketEditForm?.elements?.Task?.addEventListener("input", () => maybeAutofillRaisedByFromTask("edit"));
+ticketEditForm?.elements?.Task?.addEventListener("change", () => maybeAutofillRaisedByFromTask("edit"));
+ticketEditForm?.elements?.["Raised By"]?.addEventListener("input", () => onRaisedByFieldManualInput("edit"));
+ticketEditForm?.elements?.["Raised By"]?.addEventListener("change", () => onRaisedByFieldManualInput("edit"));
 form?.elements?.Status?.addEventListener("change", onTicketStatusChangeForEndDate);
 ticketEditForm?.elements?.Status?.addEventListener("change", onTicketStatusChangeForEndDate);
 
