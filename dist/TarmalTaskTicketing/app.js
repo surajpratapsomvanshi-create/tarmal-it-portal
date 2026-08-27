@@ -2221,6 +2221,7 @@ function buildTicketSheetPayload(ticket, options = {}) {
   // Skip Drive uploads in the critical-path POST; screenshots upload after the row write.
   const includeAttachments = options.deferAttachments !== true;
   const identity = rowIdentityFields(ticket);
+  const sheetRow = Number(ticket.sheetRow) || 0;
 
   const payload = {
     Task: ticket.Task,
@@ -2247,9 +2248,14 @@ function buildTicketSheetPayload(ticket, options = {}) {
     expectedStatus: cleanText(ticket.expectedStatus || ticket.lastKnownStatus) || undefined
   };
 
-  if (ticket.sheetRow) {
-    payload.sheetRow = ticket.sheetRow;
+  // Edits must always send updateTicket + sheetRow. Never omit action — Apps Script
+  // used to append when action was missing, which duplicated rows on Task renames.
+  if (sheetRow >= 2) {
+    payload.sheetRow = sheetRow;
     payload.action = "updateTicket";
+  } else if (options.forceUpdate === true) {
+    // Caller required an update but has no row — leave action unset; sendTicketUpdateToSheet rejects.
+    payload.sheetRow = sheetRow;
   }
 
   if (includeAttachments && attachments.length) {
@@ -5478,13 +5484,26 @@ function resolveEditingSheetRow(data, ticket = {}) {
 async function ensureTicketSheetRow(ticket) {
   if (Number(ticket.sheetRow)) return Number(ticket.sheetRow);
 
-  const match = findTicketByIdentity(ticket.Task, ticket.Owner);
+  const ticketId = ticketStableId(ticket);
+  if (ticketId) {
+    const byId = getValidTickets().find((entry) => ticketStableId(entry) === ticketId);
+    if (Number(byId?.sheetRow)) return Number(byId.sheetRow);
+  }
+
+  // Prefer pre-edit identity so a Task rename still resolves the same row.
+  const identityTask = cleanText(ticket.identityTask || ticket.Task);
+  const identityOwner = cleanText(ticket.identityOwner || ticket.Owner);
+  const match = findTicketByIdentity(identityTask, identityOwner);
   if (match?.sheetRow) return Number(match.sheetRow);
 
   if (!SHEET_WEB_APP_URL) return 0;
 
   await refreshFromSheet({ skipScreenshotSync: true });
-  const refreshed = findTicketByIdentity(ticket.Task, ticket.Owner);
+  if (ticketId) {
+    const refreshedById = getValidTickets().find((entry) => ticketStableId(entry) === ticketId);
+    if (Number(refreshedById?.sheetRow)) return Number(refreshedById.sheetRow);
+  }
+  const refreshed = findTicketByIdentity(identityTask, identityOwner);
   return Number(refreshed?.sheetRow) || 0;
 }
 
@@ -5859,7 +5878,9 @@ function ticketFromEditForm() {
   const payload = normalizeTicket(applyTicketNotesToPayload({
     ...ticketFromFormData(data),
     sheetRow,
-    ticketId: ticketStableId(activeEditTicket) || createTicketId(),
+    // Never invent a Ticket ID on edit — a fresh UUID made Apps Script reject the
+    // row (or older builds append a duplicate). Server assigns if the row has none.
+    ticketId: ticketStableId(activeEditTicket) || "",
     lastUpdated: cleanText(activeEditTicket?.lastUpdated) || ""
   }, ticketEditNotesEditor));
   if (!payload.Recurrence && activeEditTicket?.RecurrenceParentId) {
@@ -6565,25 +6586,32 @@ function updateLocalTicket(updatedTicket, options = {}) {
     return normalizeTicket({
       ...ticket,
       ...updatedTicket,
-      ticketId: targetId || ticketStableId(ticket) || createTicketId(),
+      // Keep an existing local/server id; only invent when this row truly has none.
+      ticketId: targetId || ticketStableId(ticket) || ticketStableId(updatedTicket) || "",
       pendingSheetSync,
       pendingFields: pendingSheetSync ? pendingFields : []
     });
   });
 
-  if (!matched && cleanText(updatedTicket.Task)) {
-    tickets.push(normalizeTicket({
-      ...updatedTicket,
-      ticketId: targetId || createTicketId(),
-      pendingSheetSync: options.clearPendingSync ? 0 : Date.now(),
-      pendingFields: options.clearPendingSync
-        ? []
-        : normalizePendingFieldsList(
-          options.pendingFields?.length
-            ? options.pendingFields
-            : (updatedTicket.pendingFields?.length ? updatedTicket.pendingFields : PENDING_SYNC_FIELD_KEYS)
-        )
-    }));
+  if (!matched) {
+    // Edit/save paths must never silently create a local clone (that later syncs as a new sheet row).
+    if (options.allowCreate === false) {
+      throw new Error("Could not find the ticket to update locally. Click Refresh, then try again.");
+    }
+    if (cleanText(updatedTicket.Task)) {
+      tickets.push(normalizeTicket({
+        ...updatedTicket,
+        ticketId: targetId || createTicketId(),
+        pendingSheetSync: options.clearPendingSync ? 0 : Date.now(),
+        pendingFields: options.clearPendingSync
+          ? []
+          : normalizePendingFieldsList(
+            options.pendingFields?.length
+              ? options.pendingFields
+              : (updatedTicket.pendingFields?.length ? updatedTicket.pendingFields : PENDING_SYNC_FIELD_KEYS)
+          )
+      }));
+    }
   }
 
   writeTickets(tickets);
@@ -6811,15 +6839,22 @@ async function sendTicketUpdateToSheet(ticket) {
     return { synced: false };
   }
 
-  const result = await postToSheetWithResponse(
-    buildTicketSheetPayload(ticket, { deferAttachments: true }),
-    {
-      expectedTicket: ticket,
-      onBusy(attempt, maxAttempts) {
-        setStatus("", `Sheet sync busy — retrying (${attempt}/${maxAttempts - 1})…`);
-      }
+  const sheetRow = Number(ticket.sheetRow) || 0;
+  if (sheetRow < 2) {
+    throw new Error("Cannot update ticket without a sheet row. Click Refresh, then try again.");
+  }
+
+  const payload = buildTicketSheetPayload(ticket, { deferAttachments: true, forceUpdate: true });
+  if (payload.action !== "updateTicket" || Number(payload.sheetRow) < 2) {
+    throw new Error("Refusing to sync an edit as a create. Click Refresh, then try again.");
+  }
+
+  const result = await postToSheetWithResponse(payload, {
+    expectedTicket: ticket,
+    onBusy(attempt, maxAttempts) {
+      setStatus("", `Sheet sync busy — retrying (${attempt}/${maxAttempts - 1})…`);
     }
-  );
+  });
   if (!result?.ok) {
     if (result?.conflict || result?.stale) {
       throw new Error(result?.error || "Ticket was updated elsewhere. Refresh and try again.");
@@ -9082,7 +9117,11 @@ ticketEditForm?.addEventListener("submit", async (event) => {
   }
 
   if (!updatedTicket.sheetRow) {
-    updatedTicket.sheetRow = await ensureTicketSheetRow(updatedTicket);
+    updatedTicket.sheetRow = await ensureTicketSheetRow({
+      ...updatedTicket,
+      ...rowIdentityFields(updatedTicket, activeEditTicket),
+      ticketId: ticketStableId(activeEditTicket) || ticketStableId(updatedTicket)
+    });
   }
   if (!updatedTicket.sheetRow) {
     alert("Could not determine which ticket to update. Click Refresh on the Tickets tab, then try again.");
@@ -9096,7 +9135,7 @@ ticketEditForm?.addEventListener("submit", async (event) => {
   const sheetTicket = {
     ...updatedTicket,
     ...rowIdentityFields(updatedTicket, activeEditTicket),
-    ticketId: ticketStableId(updatedTicket) || ticketStableId(activeEditTicket) || createTicketId(),
+    ticketId: ticketStableId(updatedTicket) || ticketStableId(activeEditTicket) || "",
     expectedStatus: priorStatus || nextStatus,
     lastKnownStatus: priorStatus || nextStatus,
     lastUpdated: cleanText(activeEditTicket?.lastUpdated) || cleanText(updatedTicket.lastUpdated) || new Date().toISOString()
@@ -9113,7 +9152,18 @@ ticketEditForm?.addEventListener("submit", async (event) => {
   setTicketEditBusyState({ saving: true });
   setStatus("", "Saving ticket...");
 
-  updateLocalTicket(localTicket);
+  try {
+    updateLocalTicket(localTicket, { allowCreate: false });
+  } catch (localError) {
+    ticketEditSubmitInFlight = false;
+    ticketEditForm.classList.remove("ticket-form-submitting");
+    setTicketEditBusyState();
+    resetTicketEditSaveUi();
+    const message = friendlySheetSyncError(localError);
+    setStatus("error", message);
+    alert(`${message}\n\nThe editor will stay open so you can retry.`);
+    return;
+  }
   renderTickets();
 
   try {

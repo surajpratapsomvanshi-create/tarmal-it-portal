@@ -831,10 +831,13 @@ function doPost(e) {
       return buildResponse_({ ok: true, sheetRow: result.sheetRow, softDeleted: true }, e);
     }
 
-    if (data.action === "updateTicket") {
+    // sheetRow present ⇒ update, never append (even if action was omitted/stripped).
+    const incomingSheetRow = Number(data.sheetRow) || 0;
+    if (data.action === "updateTicket" || (!data.action && incomingSheetRow >= 2)) {
       // Sheet write under lock; approval email is fully deferred so Gmail latency
       // never blocks the save response (client already treats approval as pending).
       data.deferApprovalEmail = true;
+      data.action = "updateTicket";
       const result = updateTicket_(data);
       const hadRecurrence = Boolean(result && (result.recurrence || result.recurrenceParentId));
       lockAcquired = releaseWriteLock_(lock, lockAcquired);
@@ -989,6 +992,11 @@ function doPost(e) {
 
     if (data.action) {
       throw new Error(`Unsupported action "${data.action}". Redeploy the Apps Script web app with the latest code.`);
+    }
+
+    // Create path only — never append when a sheet row was supplied (edit must update).
+    if ((Number(data.sheetRow) || 0) >= 2) {
+      throw new Error("A sheet row was provided without updateTicket. Refresh and try again — refusing to create a duplicate.");
     }
 
     data.deferApprovalEmail = true;
@@ -1380,15 +1388,6 @@ function assertRowIdentityMatch_(ticket, data, sheetRow) {
   const expectedTicketId = String(data.ticketId || data.TicketId || data["Ticket ID"] || "").trim();
   const actualTicketId = String(ticket.ticketId || "").trim();
 
-  // Stable Ticket ID is authoritative: allow Task/Owner renames on the same row.
-  if (expectedTicketId && actualTicketId) {
-    if (expectedTicketId !== actualTicketId) {
-      throw new Error("Ticket row " + sheetRow + " does not match ticketId. Refresh and try again.");
-    }
-    return;
-  }
-
-  // Fall back when Ticket ID is missing on either side.
   // Prefer pre-edit identity fields so renaming Task/Owner is not treated as a wrong-row write.
   // Also accept the incoming Task/Owner so a retry after a successful-but-unacked write still matches.
   const taskCandidates = identityFieldCandidates_(data, [
@@ -1404,24 +1403,33 @@ function assertRowIdentityMatch_(ticket, data, sheetRow) {
     "Owner"
   ]);
 
-  if (taskCandidates.length) {
-    const actualTask = normalizeTicketIdentity_(ticket.Task);
-    const taskMatched = taskCandidates.some(function(candidate) {
-      return normalizeTicketIdentity_(candidate) === actualTask;
-    });
-    if (!taskMatched) {
-      throw new Error("Ticket row " + sheetRow + " does not match the selected task. Refresh and try again.");
+  const actualTask = normalizeTicketIdentity_(ticket.Task);
+  const actualOwner = normalizeTicketIdentity_(ticket.Owner);
+  const taskMatched = !taskCandidates.length || taskCandidates.some(function(candidate) {
+    return normalizeTicketIdentity_(candidate) === actualTask;
+  });
+  const ownerMatched = !ownerCandidates.length || ownerCandidates.some(function(candidate) {
+    return normalizeTicketIdentity_(candidate) === actualOwner;
+  });
+  const rowIdentityMatched = taskMatched && ownerMatched;
+
+  // Stable Ticket ID is authoritative when it matches. A mismatched client id (often
+  // invented on edit when local storage lacked Ticket ID) must not reject a rename
+  // when identityTask/Owner still point at this row — server keeps its own ticketId.
+  if (expectedTicketId && actualTicketId) {
+    if (expectedTicketId === actualTicketId) return;
+    if (!rowIdentityMatched) {
+      throw new Error("Ticket row " + sheetRow + " does not match ticketId. Refresh and try again.");
     }
+    return;
   }
 
-  if (ownerCandidates.length) {
-    const actualOwner = normalizeTicketIdentity_(ticket.Owner);
-    const ownerMatched = ownerCandidates.some(function(candidate) {
-      return normalizeTicketIdentity_(candidate) === actualOwner;
-    });
-    if (!ownerMatched) {
-      throw new Error("Ticket row " + sheetRow + " does not match the selected owner. Refresh and try again.");
-    }
+  if (taskCandidates.length && !taskMatched) {
+    throw new Error("Ticket row " + sheetRow + " does not match the selected task. Refresh and try again.");
+  }
+
+  if (ownerCandidates.length && !ownerMatched) {
+    throw new Error("Ticket row " + sheetRow + " does not match the selected owner. Refresh and try again.");
   }
 }
 
@@ -1611,10 +1619,11 @@ function writeTicketToSheetRow_(sheet, sheetRow, data) {
     });
   }
 
-  if (!data.ticketId && oldTicket.ticketId) {
+  // On update, the sheet's Ticket ID always wins so a client-invented UUID cannot
+  // fork identity or fail a normal edit. Assign only when the row has none yet.
+  if (oldTicket.ticketId) {
     data = Object.assign({}, data, { ticketId: oldTicket.ticketId });
-  }
-  if (!data.ticketId) {
+  } else if (!data.ticketId) {
     data = Object.assign({}, data, { ticketId: createTicketId_() });
   }
 
