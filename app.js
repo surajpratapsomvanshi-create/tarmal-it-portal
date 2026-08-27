@@ -1353,6 +1353,13 @@ function writeDeletedTicketTombstones(entries) {
   );
 }
 
+// After a local delete, briefly hide the row if a slow sheet soft-delete still
+// returns it. Do NOT keep hiding live (non-Deleted) sheet rows for a full day —
+// that made restored / failed-delete tickets vanish from the app while visible
+// on the sheet (e.g. Completed SAP projects missing from Presentation).
+const DELETED_TOMBSTONE_MAX_MS = 86400000;
+const DELETED_TOMBSTONE_LIVE_RACE_MS = 120000;
+
 function markDeletedTicketTombstone({ sheetRow, task, owner, ticketId = "" }) {
   const entries = readDeletedTicketTombstones();
   entries.push({
@@ -1366,26 +1373,51 @@ function markDeletedTicketTombstone({ sheetRow, task, owner, ticketId = "" }) {
   writeDeletedTicketTombstones(entries);
 }
 
+function findRemoteTicketForTombstone(entry, remoteById, remoteByKey) {
+  if (entry?.ticketId && remoteById.has(entry.ticketId)) return remoteById.get(entry.ticketId);
+  if (entry?.key && remoteByKey.has(entry.key)) return remoteByKey.get(entry.key);
+  return null;
+}
+
 function isDeletedTicketTombstone(ticket) {
   const key = ticketIdentityKey(ticket);
   const ticketId = ticketStableId(ticket);
-  const cutoff = Date.now() - 86400000;
+  const now = Date.now();
+  const status = cleanText(ticket?.Status);
+  const isLiveRemote = Boolean(status) && status !== SOFT_DELETED_STATUS;
   return readDeletedTicketTombstones().some((entry) => {
-    if ((entry.at || 0) < cutoff) return false;
-    if (ticketId && entry.ticketId && entry.ticketId === ticketId) return true;
-    if (key && entry.key === key) return true;
-    return false;
+    const age = now - (entry.at || 0);
+    if (age > DELETED_TOMBSTONE_MAX_MS) return false;
+    const idMatch = Boolean(ticketId && entry.ticketId && entry.ticketId === ticketId);
+    const keyMatch = Boolean(key && entry.key === key);
+    if (!idMatch && !keyMatch) return false;
+    // Sheet still has a live row: only honor a fresh tombstone (delete race).
+    if (isLiveRemote && age > DELETED_TOMBSTONE_LIVE_RACE_MS) return false;
+    return true;
   });
 }
 
 function reconcileDeletedTicketTombstones(remoteTickets) {
-  const remoteKeys = new Set(remoteTickets.map(ticketIdentityKey));
-  const remoteIds = new Set(remoteTickets.map(ticketStableId).filter(Boolean));
+  const remoteById = new Map();
+  const remoteByKey = new Map();
+  remoteTickets.forEach((ticket) => {
+    const id = ticketStableId(ticket);
+    if (id) remoteById.set(id, ticket);
+    const key = ticketIdentityKey(ticket);
+    if (key) remoteByKey.set(key, ticket);
+  });
+  const now = Date.now();
   const stillNeeded = readDeletedTicketTombstones().filter((entry) => {
-    if (Date.now() - (entry.at || 0) > 86400000) return false;
-    if (entry.ticketId && remoteIds.has(entry.ticketId)) return true;
-    if (entry.key && remoteKeys.has(entry.key)) return true;
-    return false;
+    const age = now - (entry.at || 0);
+    if (age > DELETED_TOMBSTONE_MAX_MS) return false;
+    const remote = findRemoteTicketForTombstone(entry, remoteById, remoteByKey);
+    if (!remote) {
+      // Soft-delete already omitted from GET (or row gone) — tombstone not needed.
+      return false;
+    }
+    if (cleanText(remote.Status) === SOFT_DELETED_STATUS) return true;
+    // Live on sheet: keep only during the short post-delete race window.
+    return age <= DELETED_TOMBSTONE_LIVE_RACE_MS;
   });
   writeDeletedTicketTombstones(stillNeeded);
 }
@@ -7226,16 +7258,27 @@ function presentationSearchHaystack(ticket) {
   return [
     ticket?.Task,
     ticket?.Owner,
+    ticket?.["Raised By"],
     ticket?.Type,
     getTicketRemarksText(ticket) || ticket?.Remarks || ticket?.Notes || ""
   ].join(" ").toLowerCase();
 }
 
+/** Substring match; underscores treated as spaces so "khuz" hits Task/Raised By like Khuzeima_v4. */
+function presentationSearchTextMatches(text, query) {
+  const raw = cleanText(text).toLowerCase();
+  if (!raw || !query) return false;
+  if (raw.includes(query)) return true;
+  const looseText = raw.replace(/_/g, " ");
+  const looseQuery = query.replace(/_/g, " ");
+  return looseText.includes(looseQuery);
+}
+
 function ticketMatchesPresentationSearch(ticket, query = getPresentationSearchQuery()) {
   if (!query) return true;
-  const task = cleanText(ticket?.Task).toLowerCase();
-  if (task.includes(query)) return true;
-  return presentationSearchHaystack(ticket).includes(query);
+  if (presentationSearchTextMatches(ticket?.Task, query)) return true;
+  if (presentationSearchTextMatches(ticket?.["Raised By"], query)) return true;
+  return presentationSearchTextMatches(presentationSearchHaystack(ticket), query);
 }
 
 function presentationOwnerLabel() {
