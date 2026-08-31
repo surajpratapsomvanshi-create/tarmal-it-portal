@@ -804,6 +804,20 @@ function htmlFragmentToNotesText(root) {
   return cleanNotesText(walk(root));
 }
 
+function nodeHasStrikeDecoration(node) {
+  if (!node || node.nodeType !== Node.ELEMENT_NODE) return false;
+  const tag = String(node.tagName || "").toLowerCase();
+  if (NOTES_STRIKE_TAGS.has(tag)) return true;
+  if (tag !== "span") return false;
+  const inlineStyle = String(node.getAttribute("style") || "").toLowerCase();
+  if (/text-decoration(?:-line)?\s*:\s*[^;]*line-through/.test(inlineStyle)) return true;
+  try {
+    return window.getComputedStyle(node).textDecorationLine.includes("line-through");
+  } catch {
+    return false;
+  }
+}
+
 function serializeNotesInlineNode(node) {
   if (!node) return "";
   if (node.nodeType === Node.TEXT_NODE) {
@@ -812,7 +826,7 @@ function serializeNotesInlineNode(node) {
   if (node.nodeType !== Node.ELEMENT_NODE) return "";
   const tag = String(node.tagName || "").toLowerCase();
   if (tag === "br") return "<br>";
-  if (NOTES_STRIKE_TAGS.has(tag)) {
+  if (nodeHasStrikeDecoration(node)) {
     return `<s>${[...node.childNodes].map(serializeNotesInlineNode).join("")}</s>`;
   }
   if (tag === "img" || tag === "script" || tag === "style") return "";
@@ -867,7 +881,14 @@ function readNotesEditorRichHtml(editor) {
 }
 
 function normalizeEditorStrikeTags(editor) {
-  editor?.querySelectorAll("strike, del").forEach((element) => {
+  if (!editor) return;
+  editor.querySelectorAll("strike, del").forEach((element) => {
+    const replacement = document.createElement("s");
+    replacement.innerHTML = element.innerHTML;
+    element.replaceWith(replacement);
+  });
+  editor.querySelectorAll("span[style]").forEach((element) => {
+    if (!nodeHasStrikeDecoration(element)) return;
     const replacement = document.createElement("s");
     replacement.innerHTML = element.innerHTML;
     element.replaceWith(replacement);
@@ -1611,7 +1632,7 @@ function computeTicketsDataSignature(tickets) {
   let out = String(list.length);
   for (let i = 0; i < list.length; i += 1) {
     const ticket = list[i];
-    out += `|${ticket.sheetRow || ""}:${ticket.Status || ""}:${ticket.Priority || ""}:${ticket.Owner || ""}:${ticket.Task || ""}:${ticket.Milestone || ""}:${ticket["End date"] || ""}:${ticket.parentSheetRow || ""}:${String(ticket.Notes || ticket.Remarks || "").length}`;
+    out += `|${ticket.sheetRow || ""}:${ticket.Status || ""}:${ticket.Priority || ""}:${ticket.Owner || ""}:${ticket.Task || ""}:${ticket.Milestone || ""}:${ticket["End date"] || ""}:${ticket.parentSheetRow || ""}:${String(ticket.Notes || ticket.Remarks || "").length}:${String(ticket.NotesHtml || "").length}`;
   }
   return out;
 }
@@ -2098,13 +2119,17 @@ function getTicketRemarksText(ticket) {
   return stripPresentationTag(stripScreenshotMetadata(cleanNotesText(ticket.Remarks || ticket.Notes || "")));
 }
 
-function getTicketRemarksRichHtml(ticket) {
+function renderNotesHtml(ticket) {
   if (ticket?.NotesHtml) {
     const { textHtml } = parseNotesHtmlParts(ticket.NotesHtml);
     if (textHtml) return textHtml;
   }
   const plain = getTicketRemarksText(ticket);
   return plain ? escapeHtml(plain).replace(/\n/g, "<br>") : "";
+}
+
+function getTicketRemarksRichHtml(ticket) {
+  return renderNotesHtml(ticket);
 }
 
 function hasImportantRemarks(ticket) {
@@ -2125,7 +2150,7 @@ function renderTicketRemarksCell(ticket) {
 
   const parts = [];
   if (richHtml) {
-    parts.push(`<span class="remarks-text">${richHtml}</span>`);
+    parts.push(`<div class="remarks-text ticket-remarks-html">${richHtml}</div>`);
   }
 
   if (localOnly) {
@@ -6260,13 +6285,19 @@ function applyTicketSyncResult(sheetRow, result = {}, expected = {}) {
   let notesHtml = ticket.NotesHtml;
 
   if (sheetLinks.length) {
-    notesHtml = buildNotesHtmlFromDriveLinks({ Notes: notes, Remarks: notes });
-    if (localDataUrls.length && sheetLinks.length < localScreenshots.length) {
-      const extraImages = localDataUrls
-        .map((url) => `<img src="${url}" class="ticket-notes-image" alt="Screenshot"><br>`)
-        .join("");
-      notesHtml = `${notesHtml}${extraImages}`;
-    }
+    const existingParts = ticket.NotesHtml ? parseNotesHtmlParts(ticket.NotesHtml) : { text: "", textHtml: "", attachments: [] };
+    const localRemarks = stripScreenshotMetadata(ticket.Notes || ticket.Remarks || notes || "");
+    const textHtml = existingParts.textHtml
+      || (localRemarks ? escapeHtml(localRemarks).replace(/\n/g, "<br>") : "");
+    const attachments = dedupeNoteAttachments([
+      ...existingParts.attachments,
+      ...sheetLinks.map((url) => ({ src: url, driveUrl: url })),
+      ...localDataUrls.map((url) => ({ src: url, driveUrl: "" }))
+    ]);
+    notesHtml = buildNotesHtmlFromParts(
+      { text: localRemarks || notes, textHtml },
+      attachments
+    );
   }
 
   const hasExpectedUpdate = Boolean(expected.sheetRow) || Boolean(ticketStableId(expected));
@@ -6351,12 +6382,16 @@ function mergeDriveLinksIntoLocalNotes(ticket, notesText) {
   const links = extractDriveLinksFromNotes({ Notes: notesText, Remarks: notesText });
   if (!links.length) return null;
   const localRemarks = stripScreenshotMetadata(ticket.Notes || ticket.Remarks || "");
+  const existingParts = ticket.NotesHtml ? parseNotesHtmlParts(ticket.NotesHtml) : { text: "", textHtml: "" };
   const linkBlock = links
     .map((url, index) => `Screenshot ${index + 1}: ${url}`)
     .join("\n");
   const mergedText = localRemarks ? `${localRemarks}\n${linkBlock}` : linkBlock;
   const notesHtml = buildNotesHtmlFromParts(
-    localRemarks,
+    {
+      text: mergedText,
+      textHtml: existingParts.textHtml || (localRemarks ? escapeHtml(localRemarks).replace(/\n/g, "<br>") : "")
+    },
     links.map((url) => ({ src: url, driveUrl: url }))
   );
   return { notes: mergedText, notesHtml };
@@ -7900,7 +7935,7 @@ function computePresentationBoardSignature(shown) {
   ].join("|");
   for (let i = 0; i < shown.length; i += 1) {
     const ticket = shown[i];
-    body += `|${ticket.sheetRow || ""}:${ticket.Status || ""}:${ticket.Priority || ""}:${ticket.Owner || ""}:${ticket.Task || ""}:${ticket.Milestone || ""}:${ticket.Type || ""}:${String(ticket.Notes || ticket.Remarks || "").length}`;
+    body += `|${ticket.sheetRow || ""}:${ticket.Status || ""}:${ticket.Priority || ""}:${ticket.Owner || ""}:${ticket.Task || ""}:${ticket.Milestone || ""}:${ticket.Type || ""}:${String(ticket.Notes || ticket.Remarks || "").length}:${String(ticket.NotesHtml || "").length}`;
   }
   return body;
 }
@@ -9359,7 +9394,7 @@ ticketEditForm?.addEventListener("submit", async (event) => {
     alert(`${message}\n\nThe editor will stay open so you can retry.`);
     return;
   }
-  renderTickets();
+  renderTickets({ force: true, activeOnly: true });
 
   try {
     await sendTicketUpdateToSheet(sheetTicket);
@@ -9375,7 +9410,9 @@ ticketEditForm?.addEventListener("submit", async (event) => {
     } else {
       alert("Ticket fields saved, but screenshot upload to Google Drive failed.\n\nKeep the editor open and click Save again, or run setupDriveAccess in Apps Script.");
     }
-    renderTickets();
+    renderTickets({ force: true, activeOnly: true });
+    lastPresentationBoardSignature = "";
+    renderPresentationView();
   } catch (error) {
     const message = friendlySheetSyncError(error);
     setStatus("error", message);

@@ -2587,6 +2587,11 @@ body.sidebar-collapsed .sidebar-expand-bar {
 
 .ticket-notes-editor s,
 .remarks-text s,
+.ticket-remarks-html s,
+.remarks-content s,
+.remarks-col s,
+#ticketTable .remarks-col s,
+#projectTable .remarks-col s,
 .kanban-card-remarks s,
 .presentation-card-remarks s,
 .dashboard-recent-remarks s,
@@ -3932,6 +3937,8 @@ tbody tr.milestone-today .task-col,
 tbody tr.milestone-today .ticket-col-compact,
 tbody tr.milestone-today .remarks-content,
 tbody tr.milestone-today .remarks-text,
+tbody tr.milestone-today .ticket-remarks-html,
+tbody tr.milestone-today .remarks-col s,
 tbody tr.milestone-today .subtask-indicator {
   color: #ffffff;
 }
@@ -7331,12 +7338,14 @@ body.view-focus .dashboard-layout {
   #ticketTable tbody tr.milestone-today .ticket-parent-task,
   #ticketTable tbody tr.milestone-today .remarks-content,
   #ticketTable tbody tr.milestone-today .remarks-text,
+  #ticketTable tbody tr.milestone-today .ticket-remarks-html,
   #ticketTable tbody tr.milestone-today .subtask-indicator,
   #projectTable tbody tr.milestone-today td,
   #projectTable tbody tr.milestone-today .task-col,
   #projectTable tbody tr.milestone-today .ticket-parent-task,
   #projectTable tbody tr.milestone-today .remarks-content,
   #projectTable tbody tr.milestone-today .remarks-text,
+  #projectTable tbody tr.milestone-today .ticket-remarks-html,
   #projectTable tbody tr.milestone-today .subtask-indicator {
     color: var(--ink);
   }
