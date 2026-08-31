@@ -861,7 +861,6 @@ function htmlFragmentToNotesRichHtml(root) {
 
 function readNotesEditorRichHtml(editor) {
   if (!editor) return "";
-  normalizeNotesEditorDom(editor);
   const clone = editor.cloneNode(true);
   clone.querySelectorAll("img").forEach((image) => image.remove());
   return htmlFragmentToNotesRichHtml(clone);
@@ -875,12 +874,55 @@ function normalizeEditorStrikeTags(editor) {
   });
 }
 
+function getNotesEditorCaretOffset(editor) {
+  const selection = window.getSelection();
+  if (!selection || selection.rangeCount === 0 || !editor.contains(selection.anchorNode)) {
+    return null;
+  }
+  const range = selection.getRangeAt(0);
+  const preRange = range.cloneRange();
+  preRange.selectNodeContents(editor);
+  preRange.setEnd(range.startContainer, range.startOffset);
+  return preRange.toString().length;
+}
+
+function setNotesEditorCaretOffset(editor, offset) {
+  if (offset == null || !editor) return;
+  const selection = window.getSelection();
+  if (!selection) return;
+  const walker = document.createTreeWalker(editor, NodeFilter.SHOW_TEXT, null);
+  let remaining = offset;
+  let node = walker.nextNode();
+  while (node) {
+    const len = node.nodeValue?.length || 0;
+    if (remaining <= len) {
+      const range = document.createRange();
+      range.setStart(node, remaining);
+      range.collapse(true);
+      selection.removeAllRanges();
+      selection.addRange(range);
+      return;
+    }
+    remaining -= len;
+    node = walker.nextNode();
+  }
+  const range = document.createRange();
+  range.selectNodeContents(editor);
+  range.collapse(false);
+  selection.removeAllRanges();
+  selection.addRange(range);
+}
+
 function normalizeNotesEditorDom(editor) {
   if (!editor) return;
+  const caretOffset = getNotesEditorCaretOffset(editor);
   normalizeEditorStrikeTags(editor);
   const normalized = htmlFragmentToNotesRichHtml(editor);
   if (editor.innerHTML !== normalized) {
     editor.innerHTML = normalized;
+    if (caretOffset != null) {
+      setNotesEditorCaretOffset(editor, caretOffset);
+    }
   }
 }
 
@@ -2411,7 +2453,7 @@ function readTicketNotesEditor(editor) {
 
 function syncTicketNotesHiddenInput(editor, hiddenInput) {
   if (!hiddenInput || !editor) return;
-  hiddenInput.value = readTicketNotesEditor(editor).text;
+  hiddenInput.value = editor.innerText.replace(/\u00a0/g, " ").trim();
 }
 
 function setTicketNotesEditorContent(editor, hiddenInput, ticket = {}) {
@@ -2618,6 +2660,7 @@ function initTicketNotesEditor(editor, hiddenInput) {
 }
 
 function applyTicketNotesToPayload(payload, editor) {
+  normalizeNotesEditorDom(editor);
   const notes = readTicketNotesEditor(editor);
   const attachmentLabel = notes.imageCount
     ? `[${notes.imageCount} screenshot${notes.imageCount === 1 ? "" : "s"} attached]`
