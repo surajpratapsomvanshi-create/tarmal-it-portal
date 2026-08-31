@@ -775,6 +775,8 @@ function cleanNotesText(value) {
     .trim();
 }
 
+const NOTES_STRIKE_TAGS = new Set(["s", "del", "strike"]);
+
 function htmlFragmentToNotesText(root) {
   if (!root) return "";
   const walk = (node) => {
@@ -793,6 +795,63 @@ function htmlFragmentToNotesText(root) {
     return inner;
   };
   return cleanNotesText(walk(root));
+}
+
+function serializeNotesInlineNode(node) {
+  if (!node) return "";
+  if (node.nodeType === Node.TEXT_NODE) {
+    return escapeHtml(String(node.nodeValue || "").replace(/\u00a0/g, " "));
+  }
+  if (node.nodeType !== Node.ELEMENT_NODE) return "";
+  const tag = String(node.tagName || "").toLowerCase();
+  if (tag === "br") return "<br>";
+  if (NOTES_STRIKE_TAGS.has(tag)) {
+    return `<s>${[...node.childNodes].map(serializeNotesInlineNode).join("")}</s>`;
+  }
+  if (tag === "img" || tag === "script" || tag === "style") return "";
+  return [...node.childNodes].map(serializeNotesInlineNode).join("");
+}
+
+function htmlFragmentToNotesRichHtml(root) {
+  if (!root) return "";
+  const chunks = [];
+  [...root.childNodes].forEach((node) => {
+    if (node.nodeType === Node.ELEMENT_NODE) {
+      const tag = String(node.tagName || "").toLowerCase();
+      if (tag === "div" || tag === "p") {
+        const inner = [...node.childNodes].map(serializeNotesInlineNode).join("");
+        if (inner) chunks.push(inner);
+        return;
+      }
+    }
+    const piece = serializeNotesInlineNode(node);
+    if (piece) chunks.push(piece);
+  });
+  return chunks.join("<br>");
+}
+
+function readNotesEditorRichHtml(editor) {
+  if (!editor) return "";
+  const clone = editor.cloneNode(true);
+  clone.querySelectorAll("img").forEach((image) => image.remove());
+  return htmlFragmentToNotesRichHtml(clone);
+}
+
+function normalizeEditorStrikeTags(editor) {
+  editor?.querySelectorAll("strike, del").forEach((element) => {
+    const replacement = document.createElement("s");
+    replacement.innerHTML = element.innerHTML;
+    element.replaceWith(replacement);
+  });
+}
+
+function applyNotesEditorFormat(editor, command) {
+  if (!editor) return;
+  editor.focus();
+  if (command === "strikeThrough") {
+    document.execCommand("strikeThrough", false, null);
+    normalizeEditorStrikeTags(editor);
+  }
 }
 
 function normalizePriority(value) {
@@ -835,7 +894,8 @@ function parseNotesHtmlParts(html) {
   });
 
   const text = htmlFragmentToNotesText(doc.body);
-  return { text, attachments };
+  const textHtml = htmlFragmentToNotesRichHtml(doc.body);
+  return { text, textHtml, attachments };
 }
 
 function collectAttachmentsFromPanel(panel) {
@@ -846,10 +906,20 @@ function collectAttachmentsFromPanel(panel) {
   }));
 }
 
-function buildNotesHtmlFromParts(text, attachments) {
+function buildNotesHtmlFromParts(textOrParts, attachments) {
+  let text = "";
+  let textHtml = "";
+  if (textOrParts && typeof textOrParts === "object" && !Array.isArray(textOrParts)) {
+    text = String(textOrParts.text || "");
+    textHtml = String(textOrParts.textHtml || "");
+  } else {
+    text = String(textOrParts || "");
+  }
+
   const parts = [];
-  if (text) {
-    parts.push(escapeHtml(text).replace(/\n/g, "<br>"));
+  const rich = textHtml || (text ? escapeHtml(text).replace(/\n/g, "<br>") : "");
+  if (rich) {
+    parts.push(rich);
   }
   attachments.forEach((item) => {
     const driveUrl = item.driveUrl || "";
@@ -1947,6 +2017,15 @@ function getTicketRemarksText(ticket) {
   return stripPresentationTag(stripScreenshotMetadata(cleanNotesText(ticket.Remarks || ticket.Notes || "")));
 }
 
+function getTicketRemarksRichHtml(ticket) {
+  if (ticket?.NotesHtml) {
+    const { textHtml } = parseNotesHtmlParts(ticket.NotesHtml);
+    if (textHtml) return textHtml;
+  }
+  const plain = getTicketRemarksText(ticket);
+  return plain ? escapeHtml(plain).replace(/\n/g, "<br>") : "";
+}
+
 function hasImportantRemarks(ticket) {
   return getTicketRemarksText(ticket).toLowerCase().includes("important");
 }
@@ -1954,6 +2033,7 @@ function hasImportantRemarks(ticket) {
 function renderTicketRemarksCell(ticket) {
   const screenshots = getTicketScreenshots(ticket);
   const text = getTicketRemarksText(ticket);
+  const richHtml = getTicketRemarksRichHtml(ticket);
   const localOnly = ticketHasLocalScreenshotsOnly(ticket);
   const labeledCount = ticketAttachmentLabelCount(ticket);
   const previewCount = screenshots.length || labeledCount;
@@ -1963,8 +2043,8 @@ function renderTicketRemarksCell(ticket) {
   }
 
   const parts = [];
-  if (text) {
-    parts.push(`<span class="remarks-text">${escapeHtml(text).replace(/\n/g, "<br>")}</span>`);
+  if (richHtml) {
+    parts.push(`<span class="remarks-text">${richHtml}</span>`);
   }
 
   if (localOnly) {
@@ -2277,9 +2357,10 @@ function readTicketNotesEditor(editor) {
   }
 
   const panel = getNotesAttachmentPanel(editor);
+  const textHtml = readNotesEditorRichHtml(editor);
   const text = editor.innerText.replace(/\u00a0/g, " ").trim();
   const attachments = collectAttachmentsFromPanel(panel);
-  const html = buildNotesHtmlFromParts(text, attachments);
+  const html = buildNotesHtmlFromParts({ text, textHtml }, attachments);
 
   return {
     text,
@@ -2299,11 +2380,13 @@ function setTicketNotesEditorContent(editor, hiddenInput, ticket = {}) {
 
   const panel = getNotesAttachmentPanel(editor);
   let text = "";
+  let textHtml = "";
   let attachments = [];
 
   if (ticket.NotesHtml) {
     const parts = parseNotesHtmlParts(ticket.NotesHtml);
     text = parts.text || stripScreenshotMetadata(getTicketRemarksText(ticket));
+    textHtml = parts.textHtml || "";
     attachments = parts.attachments;
   } else {
     text = stripScreenshotMetadata(getTicketRemarksText(ticket));
@@ -2315,7 +2398,11 @@ function setTicketNotesEditorContent(editor, hiddenInput, ticket = {}) {
   ]);
 
   editor.innerHTML = "";
-  editor.textContent = text;
+  if (textHtml) {
+    editor.innerHTML = textHtml;
+  } else if (text) {
+    editor.textContent = text;
+  }
   renderNotesAttachmentsPanel(panel, attachments, editor, hiddenInput);
   migrateInlineEditorImagesToPanel(editor, hiddenInput);
   syncTicketNotesHiddenInput(editor, hiddenInput);
@@ -2446,6 +2533,18 @@ function initTicketNotesEditor(editor, hiddenInput) {
   if (!editor || editor.dataset.notesReady === "true") return;
   editor.dataset.notesReady = "true";
 
+  const toolbar = editor.parentElement?.querySelector(".ticket-notes-toolbar");
+  toolbar?.querySelectorAll("[data-notes-format]").forEach((button) => {
+    button.addEventListener("mousedown", (event) => {
+      event.preventDefault();
+    });
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      applyNotesEditorFormat(editor, button.dataset.notesFormat);
+      syncTicketNotesHiddenInput(editor, hiddenInput);
+    });
+  });
+
   editor.addEventListener("paste", (event) => {
     handleTicketNotesPaste(event, editor, hiddenInput);
   });
@@ -2457,6 +2556,14 @@ function initTicketNotesEditor(editor, hiddenInput) {
   editor.addEventListener("dragover", (event) => {
     if ([...(event.dataTransfer?.types || [])].includes("Files")) {
       event.preventDefault();
+    }
+  });
+
+  editor.addEventListener("keydown", (event) => {
+    if (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === "x") {
+      event.preventDefault();
+      applyNotesEditorFormat(editor, "strikeThrough");
+      syncTicketNotesHiddenInput(editor, hiddenInput);
     }
   });
 
@@ -4190,7 +4297,7 @@ function sortKanbanTickets(tickets) {
 function renderKanbanCard(ticket) {
   const priorityClass = normalizePriority(ticket.Priority) === "80" ? "high" : "low";
   const screenshots = getTicketScreenshots(ticket);
-  const remarksText = getTicketRemarksText(ticket);
+  const remarksHtml = getTicketRemarksRichHtml(ticket);
   const localOnly = ticketHasLocalScreenshotsOnly(ticket);
   const previewCount = screenshots.length || ticketAttachmentLabelCount(ticket);
 
@@ -4218,7 +4325,7 @@ function renderKanbanCard(ticket) {
           data-screenshot-index="0"
         >Preview${previewCount > 1 ? ` (${previewCount})` : ""}</button>
       ` : ""}
-      ${remarksText ? `<p class="kanban-card-remarks">${escapeHtml(remarksText)}</p>` : ""}
+      ${remarksHtml ? `<p class="kanban-card-remarks">${remarksHtml}</p>` : ""}
     </article>
   `;
 }
@@ -5261,7 +5368,7 @@ function renderPerformanceRecent(tickets, selectedOwner = "") {
           <span>${escapeHtml(formatPriorityLabel(ticket.Priority))}</span>
           <span>${overdue ? "Overdue" : escapeHtml(formatActivityTime(ticket))}</span>
         </div>
-        ${ticket.Remarks ? `<p class="dashboard-recent-remarks">${escapeHtml(ticket.Remarks)}</p>` : ""}
+        ${getTicketRemarksRichHtml(ticket) ? `<p class="dashboard-recent-remarks">${getTicketRemarksRichHtml(ticket)}</p>` : ""}
       </article>
     `;
   }).join("");
@@ -5395,7 +5502,7 @@ function renderDashboardRecent(tickets) {
           <span>${escapeHtml(activityLabel)}</span>
         </div>
         ${renderScreenshotPreviewButton(ticket)}
-        ${ticket.Remarks ? `<p class="dashboard-recent-remarks">${escapeHtml(ticket.Remarks)}</p>` : ""}
+        ${getTicketRemarksRichHtml(ticket) ? `<p class="dashboard-recent-remarks">${getTicketRemarksRichHtml(ticket)}</p>` : ""}
       </article>
     `;
     })
@@ -5423,7 +5530,7 @@ function renderLatestTickets(tickets) {
           <span>${escapeHtml(formatTodayActivityLabel(ticket))}</span>
         </div>
         ${renderScreenshotPreviewButton(ticket)}
-        ${ticket.Remarks ? `<p class="latest-remarks">${escapeHtml(ticket.Remarks)}</p>` : ""}
+        ${getTicketRemarksRichHtml(ticket) ? `<p class="latest-remarks">${getTicketRemarksRichHtml(ticket)}</p>` : ""}
       </div>
     `)
     .join("");
@@ -7641,7 +7748,7 @@ function bindPresentationCardEditButtons(root) {
 }
 
 function renderPresentationCard(ticket, index) {
-  const remarks = getTicketRemarksText(ticket);
+  const remarksHtml = getTicketRemarksRichHtml(ticket);
   const milestone = formatDate(ticket.Milestone) || "—";
   const priorityClass = normalizePriority(ticket.Priority) === "80" ? "high" : "low";
   const attachHtml = renderPresentationAttachmentThumbs(ticket);
@@ -7679,8 +7786,8 @@ function renderPresentationCard(ticket, index) {
       <p class="presentation-milestone">
         <span class="presentation-milestone-line">Milestone · ${escapeHtml(milestone)}</span>
       </p>
-      ${remarks
-        ? `<p class="presentation-card-remarks">${escapeHtml(remarks)}</p>`
+      ${remarksHtml
+        ? `<p class="presentation-card-remarks">${remarksHtml}</p>`
         : ""}
     </article>
   `;

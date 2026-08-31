@@ -6,11 +6,11 @@
     <title>Tarmal IT Portal</title>
     <link rel="icon" href="./assets/tarmal-mark.png?v=1" type="image/png">
     <link rel="apple-touch-icon" href="./assets/apple-touch-icon.png?v=1">
-    <link rel="stylesheet" href="./styles.css?v=180">
+    <link rel="stylesheet" href="./styles.css?v=181">
     <!-- auth stays blocking so requireLogin runs before app chrome paints -->
     <script src="./auth.js?v=25"></script>
     <!-- Defer main bundles so HTML can parse while ~210KB+ app.js downloads -->
-    <script src="./app.js?v=195" defer></script>
+    <script src="./app.js?v=196" defer></script>
     <script src="./assets.js?v=13" defer></script>
     <script src="./documents.js?v=12" defer></script>
     <script src="./procurement.js?v=6" defer></script>
@@ -1216,6 +1216,15 @@
             <div class="field field-span-all ticket-notes-field">
               <span class="field-hint">Paste screenshots or add remarks. The same notes are copied to each ticket created.</span>
               <div class="ticket-notes-attachments-panel" data-notes-attachments hidden></div>
+              <div class="ticket-notes-toolbar" role="toolbar" aria-label="Notes formatting">
+                <button
+                  type="button"
+                  class="ticket-notes-format-btn"
+                  data-notes-format="strikeThrough"
+                  title="Strikethrough (Ctrl+Shift+X)"
+                  aria-label="Strikethrough"
+                ><span class="ticket-notes-format-strike" aria-hidden="true">S</span></button>
+              </div>
               <div
                 id="ticketNotesEditor"
                 class="ticket-notes-editor"
@@ -1373,6 +1382,15 @@
             <div class="field field-span-all ticket-notes-field">
               <span class="field-hint">Attachments appear above. Type notes below. Use Remove on an attachment to delete it, then Save Changes.</span>
               <div class="ticket-notes-attachments-panel" data-notes-attachments hidden></div>
+              <div class="ticket-notes-toolbar" role="toolbar" aria-label="Notes formatting">
+                <button
+                  type="button"
+                  class="ticket-notes-format-btn"
+                  data-notes-format="strikeThrough"
+                  title="Strikethrough (Ctrl+Shift+X)"
+                  aria-label="Strikethrough"
+                ><span class="ticket-notes-format-strike" aria-hidden="true">S</span></button>
+              </div>
               <div
                 id="ticketEditNotesEditor"
                 class="ticket-notes-editor"

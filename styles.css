@@ -2532,6 +2532,63 @@ body.sidebar-collapsed .sidebar-expand-bar {
   font-weight: 500;
 }
 
+.ticket-notes-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 6px;
+  padding: 4px 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);
+}
+
+.ticket-notes-format-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  min-height: 26px;
+  padding: 2px 7px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--ink-secondary);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease, box-shadow 0.12s ease;
+}
+
+.ticket-notes-format-btn:hover {
+  border-color: var(--blue);
+  color: var(--blue);
+  background: #eff6ff;
+}
+
+.ticket-notes-format-btn:focus-visible {
+  outline: none;
+  border-color: var(--blue);
+  box-shadow: 0 0 0 3px rgba(29, 78, 216, 0.12);
+}
+
+.ticket-notes-format-strike {
+  text-decoration: line-through;
+  text-decoration-thickness: 2px;
+}
+
+.ticket-notes-editor s,
+.remarks-text s,
+.kanban-card-remarks s,
+.presentation-card-remarks s,
+.dashboard-recent-remarks s,
+.latest-remarks s {
+  text-decoration: line-through;
+  text-decoration-thickness: 1.5px;
+  color: var(--muted);
+}
+
 .ticket-notes-editor {
   position: relative;
   z-index: 1;
