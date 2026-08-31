@@ -776,6 +776,13 @@ function cleanNotesText(value) {
 }
 
 const NOTES_STRIKE_TAGS = new Set(["s", "del", "strike"]);
+const NOTES_BLOCK_TAGS = new Set(["div", "p", "li"]);
+
+function collapseNotesRichHtml(html) {
+  return String(html || "")
+    .replace(/(<br\s*\/?>\s*){2,}/gi, "<br>")
+    .replace(/^(\s|<br\s*\/?>)+|(\s|<br\s*\/?>)+$/gi, "");
+}
 
 function htmlFragmentToNotesText(root) {
   if (!root) return "";
@@ -812,26 +819,49 @@ function serializeNotesInlineNode(node) {
   return [...node.childNodes].map(serializeNotesInlineNode).join("");
 }
 
-function htmlFragmentToNotesRichHtml(root) {
-  if (!root) return "";
-  const chunks = [];
-  [...root.childNodes].forEach((node) => {
-    if (node.nodeType === Node.ELEMENT_NODE) {
-      const tag = String(node.tagName || "").toLowerCase();
-      if (tag === "div" || tag === "p") {
-        const inner = [...node.childNodes].map(serializeNotesInlineNode).join("");
-        if (inner) chunks.push(inner);
+function notesBlockInnerHtml(node) {
+  const parts = [];
+  [...node.childNodes].forEach((child) => {
+    if (child.nodeType === Node.ELEMENT_NODE) {
+      const tag = String(child.tagName || "").toLowerCase();
+      if (tag === "br") {
+        parts.push("<br>");
+        return;
+      }
+      if (NOTES_BLOCK_TAGS.has(tag)) {
+        const inner = notesBlockInnerHtml(child);
+        if (inner) parts.push(inner);
         return;
       }
     }
-    const piece = serializeNotesInlineNode(node);
-    if (piece) chunks.push(piece);
+    const piece = serializeNotesInlineNode(child);
+    if (piece) parts.push(piece);
   });
-  return chunks.join("<br>");
+  return collapseNotesRichHtml(parts.join(""));
+}
+
+function htmlFragmentToNotesRichHtml(root) {
+  if (!root) return "";
+  const blocks = [];
+  [...root.childNodes].forEach((node) => {
+    if (node.nodeType === Node.ELEMENT_NODE) {
+      const tag = String(node.tagName || "").toLowerCase();
+      if (NOTES_BLOCK_TAGS.has(tag)) {
+        const inner = notesBlockInnerHtml(node);
+        if (inner) blocks.push(inner);
+        return;
+      }
+      if (tag === "br") return;
+    }
+    const piece = serializeNotesInlineNode(node);
+    if (piece) blocks.push(piece);
+  });
+  return collapseNotesRichHtml(blocks.join("<br>"));
 }
 
 function readNotesEditorRichHtml(editor) {
   if (!editor) return "";
+  normalizeNotesEditorDom(editor);
   const clone = editor.cloneNode(true);
   clone.querySelectorAll("img").forEach((image) => image.remove());
   return htmlFragmentToNotesRichHtml(clone);
@@ -845,12 +875,21 @@ function normalizeEditorStrikeTags(editor) {
   });
 }
 
+function normalizeNotesEditorDom(editor) {
+  if (!editor) return;
+  normalizeEditorStrikeTags(editor);
+  const normalized = htmlFragmentToNotesRichHtml(editor);
+  if (editor.innerHTML !== normalized) {
+    editor.innerHTML = normalized;
+  }
+}
+
 function applyNotesEditorFormat(editor, command) {
   if (!editor) return;
   editor.focus();
   if (command === "strikeThrough") {
     document.execCommand("strikeThrough", false, null);
-    normalizeEditorStrikeTags(editor);
+    normalizeNotesEditorDom(editor);
   }
 }
 
@@ -917,7 +956,7 @@ function buildNotesHtmlFromParts(textOrParts, attachments) {
   }
 
   const parts = [];
-  const rich = textHtml || (text ? escapeHtml(text).replace(/\n/g, "<br>") : "");
+  const rich = collapseNotesRichHtml(textHtml || (text ? escapeHtml(text).replace(/\n/g, "<br>") : ""));
   if (rich) {
     parts.push(rich);
   }
@@ -2399,7 +2438,8 @@ function setTicketNotesEditorContent(editor, hiddenInput, ticket = {}) {
 
   editor.innerHTML = "";
   if (textHtml) {
-    editor.innerHTML = textHtml;
+    editor.innerHTML = collapseNotesRichHtml(textHtml);
+    normalizeNotesEditorDom(editor);
   } else if (text) {
     editor.textContent = text;
   }
@@ -2568,6 +2608,11 @@ function initTicketNotesEditor(editor, hiddenInput) {
   });
 
   editor.addEventListener("input", () => {
+    syncTicketNotesHiddenInput(editor, hiddenInput);
+  });
+
+  editor.addEventListener("blur", () => {
+    normalizeNotesEditorDom(editor);
     syncTicketNotesHiddenInput(editor, hiddenInput);
   });
 }

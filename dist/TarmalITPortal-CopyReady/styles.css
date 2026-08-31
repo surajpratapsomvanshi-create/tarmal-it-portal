@@ -2578,6 +2578,13 @@ body.sidebar-collapsed .sidebar-expand-bar {
   text-decoration-thickness: 2px;
 }
 
+.ticket-notes-editor div,
+.ticket-notes-editor p {
+  margin: 0;
+  padding: 0;
+  line-height: inherit;
+}
+
 .ticket-notes-editor s,
 .remarks-text s,
 .kanban-card-remarks s,
