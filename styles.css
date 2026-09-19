@@ -3726,9 +3726,28 @@ body.modal-open {
   background: var(--soft);
 }
 
+/* Author display:grid would otherwise override the [hidden] attribute */
+.recurrence-form-controls[hidden],
+.recurrence-form-field .field[hidden] {
+  display: none !important;
+}
+
 .recurrence-form-controls .ticket-form-grid-note {
   grid-column: 1 / -1;
   margin: 0;
+}
+
+.recurrence-type-hint,
+.recurrence-instance-hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.recurrence-type-hint[hidden],
+.recurrence-instance-hint[hidden] {
+  display: none !important;
 }
 
 .subtask-indicator {

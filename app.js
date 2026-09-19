@@ -2422,7 +2422,7 @@ function buildTicketSheetPayload(ticket, options = {}) {
     "End date": ticket["End date"],
     Milestone: ticket.Milestone,
     parentSheetRow: Number(ticket.parentSheetRow) || 0,
-    Recurrence: normalizeRecurrenceValue(ticket.Recurrence || ""),
+    Recurrence: resolveTicketRecurrenceValue(ticket),
     RecurrenceNext: canonicalizeTicketDate(ticket.RecurrenceNext || ""),
     RecurrenceParentId: cleanText(ticket.RecurrenceParentId || ""),
     Notes: notesText,
@@ -2894,7 +2894,7 @@ function normalizeTicket(ticket) {
     ScreenshotUrls: screenshotUrls,
     "Bhanu List": cleanText(ticket["Bhanu List"]),
     ticketId: cleanText(ticket.ticketId || ticket.TicketId || ticket["Ticket ID"] || ""),
-    Recurrence: normalizeRecurrenceValue(ticket.Recurrence || ticket.recurrence || ""),
+    Recurrence: resolveTicketRecurrenceValue(ticket),
     RecurrenceNext: canonicalizeTicketDate(ticket.RecurrenceNext || ticket["Recurrence Next"] || ""),
     RecurrenceParentId: cleanText(
       ticket.RecurrenceParentId
@@ -6166,6 +6166,25 @@ function normalizeRecurrenceValue(value) {
   return "";
 }
 
+function resolveTicketRecurrenceValue(ticket) {
+  if (!ticket) return "";
+  return normalizeRecurrenceValue(
+    ticket.Recurrence
+    || ticket.recurrence
+    || ticket.Recurring
+    || ticket.Repeat
+    || ""
+  );
+}
+
+function isDailyCategoryType(typeValue) {
+  return /^daily\b/i.test(String(typeValue || "").trim());
+}
+
+function suggestRecurrenceIntervalFromType(typeValue) {
+  return isDailyCategoryType(typeValue) ? "Daily" : "";
+}
+
 function formatRecurrenceLabel(value) {
   const normalized = normalizeRecurrenceValue(value);
   if (!normalized) return "";
@@ -6180,7 +6199,7 @@ function formatRecurrenceLabel(value) {
 }
 
 function isRecurringTemplateTicket(ticket) {
-  return Boolean(normalizeRecurrenceValue(ticket?.Recurrence));
+  return Boolean(resolveTicketRecurrenceValue(ticket));
 }
 
 function advanceRecurrenceDateValue(dateValue, recurrence) {
@@ -6235,7 +6254,14 @@ function setRecurrenceFormState(prefix, ticket = null) {
   const customDays = document.querySelector(`#${prefix}RecurrenceCustomDays`);
   if (!toggle || !controls || !interval) return;
 
-  const recurrence = normalizeRecurrenceValue(ticket?.Recurrence || "");
+  let recurrence = resolveTicketRecurrenceValue(ticket);
+  const isGeneratedChild = Boolean(cleanText(ticket?.RecurrenceParentId)) && !recurrence;
+  // Edit open: Type "Daily - *" means daily work — show Recurring checked with Daily
+  // unless this row is a generated child instance (parent id only).
+  if (!recurrence && ticket && prefix === "ticketEdit" && !isGeneratedChild) {
+    const fromType = suggestRecurrenceIntervalFromType(ticket.Type);
+    if (fromType) recurrence = fromType;
+  }
   const enabled = Boolean(recurrence);
   toggle.checked = enabled;
   controls.hidden = !enabled;
@@ -6250,7 +6276,25 @@ function setRecurrenceFormState(prefix, ticket = null) {
   }
 
   if (customWrap) {
-    customWrap.hidden = interval.value !== "Custom";
+    customWrap.hidden = !enabled || interval.value !== "Custom";
+  }
+
+  const nextInput = document.querySelector(`#${prefix}RecurrenceNext`);
+  if (nextInput) {
+    nextInput.value = canonicalizeTicketDate(ticket?.RecurrenceNext || "") || "";
+  }
+  const parentInput = document.querySelector(`#${prefix}RecurrenceParentId`);
+  if (parentInput) {
+    parentInput.value = cleanText(ticket?.RecurrenceParentId || "");
+  }
+
+  const instanceHint = document.querySelector(`#${prefix}RecurrenceInstanceHint`);
+  if (instanceHint) {
+    instanceHint.hidden = !isGeneratedChild;
+  }
+  const typeHint = document.querySelector(`#${prefix}RecurrenceTypeHint`);
+  if (typeHint) {
+    typeHint.hidden = enabled || isGeneratedChild;
   }
 }
 
@@ -6260,6 +6304,17 @@ function syncRecurrenceFormVisibility(prefix) {
   const interval = document.querySelector(`#${prefix}RecurrenceInterval`);
   const customWrap = document.querySelector(`#${prefix}RecurrenceCustomWrap`);
   if (!toggle || !controls) return;
+
+  if (toggle.checked && interval) {
+    // First enable: prefer Daily when the ticket Type is a Daily-* category.
+    const form = toggle.closest("form");
+    const typeValue = form?.elements?.Type?.value || activeEditTicket?.Type || "";
+    const suggested = suggestRecurrenceIntervalFromType(typeValue);
+    if (suggested && (interval.value === "Weekly" || !interval.value)) {
+      interval.value = suggested;
+    }
+  }
+
   controls.hidden = !toggle.checked;
   if (customWrap && interval) {
     customWrap.hidden = !toggle.checked || interval.value !== "Custom";
@@ -6338,9 +6393,15 @@ function applyTicketSyncResult(sheetRow, result = {}, expected = {}) {
     Type: expected.Type ?? ticket.Type,
     "Bhanu List": expected["Bhanu List"] ?? ticket["Bhanu List"],
     parentSheetRow: expected.parentSheetRow ?? ticket.parentSheetRow,
-    Recurrence: expected.Recurrence ?? ticket.Recurrence,
-    RecurrenceNext: expected.RecurrenceNext ?? coalesceSyncValue(result.recurrenceNext, ticket.RecurrenceNext),
-    RecurrenceParentId: expected.RecurrenceParentId ?? coalesceSyncValue(result.recurrenceParentId, ticket.RecurrenceParentId),
+    Recurrence: Object.prototype.hasOwnProperty.call(expected, "Recurrence")
+      ? normalizeRecurrenceValue(expected.Recurrence)
+      : resolveTicketRecurrenceValue(ticket),
+    RecurrenceNext: Object.prototype.hasOwnProperty.call(expected, "RecurrenceNext")
+      ? canonicalizeTicketDate(expected.RecurrenceNext || "")
+      : coalesceSyncValue(result.recurrenceNext, ticket.RecurrenceNext),
+    RecurrenceParentId: Object.prototype.hasOwnProperty.call(expected, "RecurrenceParentId")
+      ? cleanText(expected.RecurrenceParentId)
+      : coalesceSyncValue(result.recurrenceParentId, ticket.RecurrenceParentId),
     Status: syncedStatus,
     Milestone: milestone,
     "Start date": startDate,

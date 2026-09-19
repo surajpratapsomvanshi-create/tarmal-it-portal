@@ -113,6 +113,10 @@ const PROCUREMENT_FOLDER_ID_KEY = "PROCUREMENT_FOLDER_ID";
 const DEFERRED_POST_SAVE_PROP_ = "deferredPostSaveQueue";
 const DEFERRED_POST_SAVE_HANDLER_ = "processDeferredPostSaveWork";
 const DEFERRED_POST_SAVE_DELAY_MS_ = 30000;
+// Skip getProjectTriggers() on the save hot path — listing triggers is slow and can
+// push doPost past Google's HTTP deadline (HTML error page after a successful write).
+const DEFERRED_POST_SAVE_TRIGGER_CACHE_KEY_ = "deferredPostSaveTriggerPending";
+const DEFERRED_POST_SAVE_TRIGGER_CACHE_TTL_SEC_ = 50;
 // Deferred work must NEVER take LockService.getScriptLock() — that lock serializes
 // user saves. Use a CacheService lease with TTL so a crashed run cannot block forever.
 const DEFERRED_POST_SAVE_LEASE_KEY_ = "deferredPostSaveLease";
@@ -627,6 +631,11 @@ function clearDeferredPostSaveQueue_() {
 }
 
 function clearDeferredPostSaveTriggers_() {
+  try {
+    CacheService.getScriptCache().remove(DEFERRED_POST_SAVE_TRIGGER_CACHE_KEY_);
+  } catch (cacheError) {
+    Logger.log(cacheError);
+  }
   ScriptApp.getProjectTriggers().forEach(function(trigger) {
     if (trigger.getHandlerFunction() === DEFERRED_POST_SAVE_HANDLER_) {
       try {
@@ -641,8 +650,8 @@ function clearDeferredPostSaveTriggers_() {
 /**
  * Coalesce non-critical post-save work into one ~30s one-shot trigger so
  * doPost can return immediately after writing ticket rows.
- * Approval emails are deferred here too (not on the save critical path).
- * Creating/deleting ScriptApp triggers is slow — only schedule when none exists.
+ * Approval emails + recurring kicks are deferred here too (not on the save
+ * critical path). Avoid ScriptApp.getProjectTriggers() here — it is slow.
  */
 function scheduleDeferredPostSaveWork_(options) {
   const opts = options || {};
@@ -651,18 +660,42 @@ function scheduleDeferredPostSaveWork_(options) {
   if (opts.projects !== false) queue.projects = true;
   if (opts.taskEmails) queue.taskEmails = true;
   if (opts.approvalEmails) queue.approvalEmails = true;
+  if (opts.recurring) queue.recurring = true;
   queue.requestedAt = Date.now();
   writeDeferredPostSaveQueue_(queue);
 
-  const hasTrigger = ScriptApp.getProjectTriggers().some(function(trigger) {
-    return trigger.getHandlerFunction() === DEFERRED_POST_SAVE_HANDLER_;
-  });
-  if (hasTrigger) return;
+  const cache = CacheService.getScriptCache();
+  try {
+    if (cache.get(DEFERRED_POST_SAVE_TRIGGER_CACHE_KEY_)) {
+      return;
+    }
+  } catch (cacheReadError) {
+    Logger.log(cacheReadError);
+  }
 
-  ScriptApp.newTrigger(DEFERRED_POST_SAVE_HANDLER_)
-    .timeBased()
-    .after(DEFERRED_POST_SAVE_DELAY_MS_)
-    .create();
+  try {
+    cache.put(
+      DEFERRED_POST_SAVE_TRIGGER_CACHE_KEY_,
+      "1",
+      DEFERRED_POST_SAVE_TRIGGER_CACHE_TTL_SEC_
+    );
+  } catch (cacheWriteError) {
+    Logger.log(cacheWriteError);
+  }
+
+  try {
+    ScriptApp.newTrigger(DEFERRED_POST_SAVE_HANDLER_)
+      .timeBased()
+      .after(DEFERRED_POST_SAVE_DELAY_MS_)
+      .create();
+  } catch (triggerError) {
+    Logger.log(triggerError);
+    try {
+      cache.remove(DEFERRED_POST_SAVE_TRIGGER_CACHE_KEY_);
+    } catch (cacheClearError) {
+      Logger.log(cacheClearError);
+    }
+  }
 }
 
 function tryAcquireDeferredPostSaveLease_() {
@@ -710,7 +743,8 @@ function processDeferredPostSaveWork() {
     clearDeferredPostSaveQueue_();
     clearDeferredPostSaveTriggers_();
 
-    if (!queue || (!queue.audit && !queue.projects && !queue.taskEmails && !queue.approvalEmails)) {
+    if (!queue || (!queue.audit && !queue.projects && !queue.taskEmails
+      && !queue.approvalEmails && !queue.recurring)) {
       return;
     }
 
@@ -738,6 +772,13 @@ function processDeferredPostSaveWork() {
     if (queue.approvalEmails) {
       try {
         sendPendingCompletionApprovalEmails();
+      } catch (error) {
+        Logger.log(error);
+      }
+    }
+    if (queue.recurring) {
+      try {
+        kickRecurringTicketsAfterSave_();
       } catch (error) {
         Logger.log(error);
       }
@@ -839,7 +880,9 @@ function doPost(e) {
       data.deferApprovalEmail = true;
       data.action = "updateTicket";
       const result = updateTicket_(data);
-      const hadRecurrence = Boolean(result && (result.recurrence || result.recurrenceParentId));
+      const hadRecurrence = Boolean(result && (
+        result.recurrence || result.needsRecurringKick
+      ));
       lockAcquired = releaseWriteLock_(lock, lockAcquired);
 
       const needsApprovalEmail = result
@@ -850,19 +893,11 @@ function doPost(e) {
         scheduleDeferredPostSaveWork_({
           audit: true,
           projects: true,
-          approvalEmails: needsApprovalEmail
+          approvalEmails: needsApprovalEmail,
+          recurring: hadRecurrence
         });
       } catch (postUpdateError) {
         Logger.log(postUpdateError);
-      }
-
-      var recurringKick = null;
-      if (hadRecurrence) {
-        try {
-          recurringKick = kickRecurringTicketsAfterSave_();
-        } catch (recurringError) {
-          Logger.log(recurringError);
-        }
       }
 
       if (result) {
@@ -895,7 +930,8 @@ function doPost(e) {
         error: result.error || "",
         deferredPostSave: true,
         deferredApprovalEmail: needsApprovalEmail,
-        recurringCreated: recurringKick && recurringKick.created ? recurringKick.created : 0
+        deferredRecurring: hadRecurrence,
+        recurringCreated: 0
       }, e);
     }
 
@@ -940,7 +976,7 @@ function doPost(e) {
       });
 
       const hadRecurrence = results.some(function(item) {
-        return item && item.ok !== false && item.recurrence;
+        return item && item.ok !== false && (item.recurrence || item.needsRecurringKick);
       });
       lockAcquired = releaseWriteLock_(lock, lockAcquired);
 
@@ -952,19 +988,11 @@ function doPost(e) {
           taskEmails: true,
           approvalEmails: results.some(function(item) {
             return item.ok !== false && item.approvalPending === true;
-          })
+          }),
+          recurring: hadRecurrence
         });
       } catch (postAppendError) {
         Logger.log(postAppendError);
-      }
-
-      var recurringKick = null;
-      if (hadRecurrence) {
-        try {
-          recurringKick = kickRecurringTicketsAfterSave_();
-        } catch (recurringError) {
-          Logger.log(recurringError);
-        }
       }
 
       return buildResponse_({
@@ -972,7 +1000,8 @@ function doPost(e) {
         count: successCount,
         results: results,
         deferredPostSave: true,
-        recurringCreated: recurringKick && recurringKick.created ? recurringKick.created : 0,
+        deferredRecurring: hadRecurrence,
+        recurringCreated: 0,
         error: successCount === 0 ? "All ticket creates failed." : ""
       }, e);
     }
@@ -1016,7 +1045,8 @@ function doPost(e) {
         audit: true,
         projects: true,
         taskEmails: true,
-        approvalEmails: needsAppendApprovalEmail
+        approvalEmails: needsAppendApprovalEmail,
+        recurring: Boolean(appendResult && (appendResult.recurrence || appendResult.needsRecurringKick))
       });
     } catch (postAppendError) {
       Logger.log(postAppendError);
@@ -1038,7 +1068,8 @@ function doPost(e) {
       approvalMessage: appendResult.approvalMessage || "",
       approved: appendResult.approved === true,
       deferredPostSave: true,
-      deferredApprovalEmail: needsAppendApprovalEmail
+      deferredApprovalEmail: needsAppendApprovalEmail,
+      deferredRecurring: Boolean(appendResult && (appendResult.recurrence || appendResult.needsRecurringKick))
     }, e);
   } catch (error) {
     return buildResponse_({ ok: false, error: error.message }, e);
@@ -1096,12 +1127,12 @@ function readTickets_(options) {
     throw new Error(`Sheet "${TASKS_SHEET}" was not found.`);
   }
 
+  // Ensure Recurrence columns exist so templates round-trip on GET after first deploy.
+  const columnMap = ensureTasksColumns_(sheet);
   const lastRow = sheet.getLastRow();
   const lastCol = sheet.getLastColumn();
   if (lastRow < 2 || lastCol < 1) return [];
 
-  const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
-  const columnMap = buildColumnMap_(headers);
   const auditMap = includeAudit ? readTaskAuditMap_() : {};
   const notesIndex = resolveColumnIndex_(columnMap, "notes");
   const values = readTicketGridValues_(sheet, lastRow, lastCol, notesIndex, omitNotes);
@@ -1759,7 +1790,8 @@ function writeTicketToSheetRow_(sheet, sheetRow, data) {
   };
 
   if (fields.recurrence) {
-    ensureRecurringTicketsTrigger_();
+    // Hourly trigger + catch-up runs via deferred post-save — never block doPost.
+    result.needsRecurringKick = true;
   }
 
   if (data.deferApprovalEmail === true && workflow && workflow.approvalSent) {
@@ -1902,7 +1934,8 @@ function appendTicket_(data) {
   result.recurrenceNext = formatTicketFieldDate_(fields.recurrenceNext) || "";
   result.recurrenceParentId = fields.recurrenceParentId || "";
   if (fields.recurrence) {
-    ensureRecurringTicketsTrigger_();
+    // Hourly trigger + catch-up runs via deferred post-save — never block doPost.
+    result.needsRecurringKick = true;
   }
   if (data.deferApprovalEmail === true && workflow && workflow.approvalSent) {
     result.approvalSentTo = "";
@@ -2541,18 +2574,32 @@ function toSheetDate_(value) {
 }
 
 function buildResponse_(payload, e) {
-  const callback = e && e.parameter && e.parameter.callback;
-  const body = JSON.stringify(payload);
+  try {
+    const safePayload = payload && typeof payload === "object"
+      ? payload
+      : { ok: false, error: "Empty response payload." };
+    const callback = e && e.parameter && e.parameter.callback;
+    const body = JSON.stringify(safePayload);
 
-  if (callback) {
+    if (callback) {
+      return ContentService
+        .createTextOutput(String(callback) + "(" + body + ");")
+        .setMimeType(ContentService.MimeType.JAVASCRIPT);
+    }
+
     return ContentService
-      .createTextOutput(`${callback}(${body});`)
-      .setMimeType(ContentService.MimeType.JAVASCRIPT);
+      .createTextOutput(body)
+      .setMimeType(ContentService.MimeType.JSON);
+  } catch (error) {
+    // Never let response encoding throw an uncaught exception (Google HTML error page).
+    const fallback = JSON.stringify({
+      ok: false,
+      error: "Response encoding failed: " + String(error && error.message || error)
+    });
+    return ContentService
+      .createTextOutput(fallback)
+      .setMimeType(ContentService.MimeType.JSON);
   }
-
-  return ContentService
-    .createTextOutput(body)
-    .setMimeType(ContentService.MimeType.JSON);
 }
 
 
