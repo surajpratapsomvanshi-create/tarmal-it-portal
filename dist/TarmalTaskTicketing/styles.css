@@ -8280,6 +8280,10 @@ body.view-focus .dashboard-layout {
   max-width: 7.25rem;
 }
 
+.presentation-filter-field--priority select {
+  max-width: 7.5rem;
+}
+
 .presentation-filter-field--search {
   flex: 1 1 10rem;
   min-width: 7.5rem;

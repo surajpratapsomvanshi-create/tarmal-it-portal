@@ -6,11 +6,11 @@
     <title>Tarmal IT Portal</title>
     <link rel="icon" href="./assets/tarmal-mark.png?v=1" type="image/png">
     <link rel="apple-touch-icon" href="./assets/apple-touch-icon.png?v=1">
-    <link rel="stylesheet" href="./styles.css?v=183">
+    <link rel="stylesheet" href="./styles.css?v=184">
     <!-- auth stays blocking so requireLogin runs before app chrome paints -->
-    <script src="./auth.js?v=25"></script>
+    <script src="./auth.js?v=26"></script>
     <!-- Defer main bundles so HTML can parse while ~210KB+ app.js downloads -->
-    <script src="./app.js?v=199" defer></script>
+    <script src="./app.js?v=201" defer></script>
     <script src="./assets.js?v=13" defer></script>
     <script src="./documents.js?v=12" defer></script>
     <script src="./procurement.js?v=6" defer></script>
@@ -601,6 +601,13 @@
                     <option value="all">All owners</option>
                     <option value="Bhanu">Bhanu</option>
                     <option value="Suraj">Suraj</option>
+                  </select>
+                </label>
+                <label class="presentation-filter-field presentation-filter-field--priority">
+                  <select id="presentationPriorityFilter" aria-label="Priority">
+                    <option value="all">All priorities</option>
+                    <option value="80">High</option>
+                    <option value="20">Low</option>
                   </select>
                 </label>
                 <label class="presentation-filter-field presentation-filter-field--search">

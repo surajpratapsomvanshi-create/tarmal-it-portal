@@ -147,6 +147,7 @@ const presentationBoard = document.querySelector(".presentation-board");
 const togglePresentationHeroButton = document.querySelector("#togglePresentationHeroButton");
 const presentationTypeFilter = document.querySelector("#presentationTypeFilter");
 const presentationOwnerFilter = document.querySelector("#presentationOwnerFilter");
+const presentationPriorityFilter = document.querySelector("#presentationPriorityFilter");
 const presentationSearchFilter = document.querySelector("#presentationSearchFilter");
 const presentationPeriodFilters = document.querySelector("#presentationPeriodFilters");
 const presentationCustomRange = document.querySelector("#presentationCustomRange");
@@ -244,6 +245,7 @@ const TOOLBAR_COLLAPSED_PREFIX = "tarmal-toolbar-";
 const PRESENTATION_HERO_COLLAPSED_KEY = "tarmal-presentation-hero-collapsed";
 let selectedPresentationType = "all";
 let selectedPresentationOwner = "all";
+let selectedPresentationPriority = "all";
 let selectedPresentationPeriod = "all";
 let presentModeFullscreenSync = false;
 const DEFAULT_COLLAPSED_TOOLBARS = new Set(["tickets", "projects", "procurement", "kanban", "assets", "users"]);
@@ -3370,10 +3372,21 @@ function ticketMatchesPresentationType(ticket, typeFilter = getActivePresentatio
   return true;
 }
 
+function normalizePresentationPriorityFilter(value) {
+  const text = cleanText(value).toLowerCase();
+  if (!text || text === "all") return "all";
+  if (text === "high" || text === "80") return "80";
+  if (text === "low" || text === "20") return "20";
+  return "all";
+}
+
 function syncPresentationFiltersFromDom() {
   selectedPresentationType = getActivePresentationTypeFilter();
   if (presentationOwnerFilter) {
     selectedPresentationOwner = cleanText(presentationOwnerFilter.value) || "all";
+  }
+  if (presentationPriorityFilter) {
+    selectedPresentationPriority = normalizePresentationPriorityFilter(presentationPriorityFilter.value);
   }
 }
 
@@ -6444,13 +6457,27 @@ function truncateForLog(text, max = 240) {
 }
 
 function looksLikeHtmlResponse(text) {
-  const head = String(text || "").trim().slice(0, 80).toLowerCase();
+  const head = String(text || "").trim().slice(0, 120).toLowerCase();
+  // Prefer strong document markers. Avoid bare "<div" — that false-positived
+  // non-HTML gateway text in the past. "<pre" is kept because Google error
+  // pages often wrap messages that way when JSON is missing.
   return head.startsWith("<!doctype")
     || head.startsWith("<html")
     || head.startsWith("<head")
     || head.startsWith("<body")
-    || head.startsWith("<pre")
-    || head.startsWith("<div");
+    || head.startsWith("<pre");
+}
+
+function classifyAppsScriptNonJsonResponse(text) {
+  const raw = String(text || "");
+  if (/accounts\.google\.com|sign in to continue|authorization needed|access denied/i.test(raw)) {
+    return "auth";
+  }
+  if (/exceeded maximum execution time|script function .* timed out|Service invoked too many times/i.test(raw)) {
+    return "timeout";
+  }
+  if (looksLikeHtmlResponse(raw)) return "html";
+  return "unknown";
 }
 
 function tryParseJsonText(candidate) {
@@ -6496,6 +6523,14 @@ function ticketSaveAppearsOnSheet(expected, remote) {
   const expectedStatus = cleanText(expected.Status || expected.expectedStatus);
   if (expectedStatus && !sheetSyncStatusesEquivalent(expectedStatus, remote.Status)) return false;
 
+  const expectedRow = Number(expected.sheetRow) || 0;
+  const remoteRow = Number(remote.sheetRow) || 0;
+  // Same sheet row + identity/status is strong enough after an ambiguous POST
+  // (HTML timeout pages often arrive after the write already succeeded).
+  if (expectedRow >= 2 && expectedRow === remoteRow) {
+    return true;
+  }
+
   const comparableFields = ["Priority", "Type", "Milestone", "Start date", "End date", "Bhanu List"];
   let compared = 0;
   let matched = 0;
@@ -6506,7 +6541,9 @@ function ticketSaveAppearsOnSheet(expected, remote) {
     if (cleanText(remote[field]) === expectedValue) matched += 1;
   });
 
-  const expectedNotes = normalizeNotesForCompare(expected);
+  // Lite compact refresh omits Notes — never fail reconcile on missing notes.
+  const notesOmitted = Boolean(remote.notesOmitted);
+  const expectedNotes = notesOmitted ? "" : normalizeNotesForCompare(expected);
   if (expectedNotes) {
     compared += 1;
     const remoteNotes = normalizeNotesForCompare(remote);
@@ -6562,8 +6599,12 @@ async function reconcileAmbiguousSheetSave(payload, expectedTicket = null) {
   if (!isTicketWrite) return null;
 
   try {
+    // Brief pause so Sheets sees the just-written row after an HTML/timeout response.
+    await sleepMs(700);
     const remotePayload = await fetchTicketsViaHttp(22000, { lite: true });
-    const remoteTickets = Array.isArray(remotePayload?.tickets) ? remotePayload.tickets : [];
+    const notesOmitted = Boolean(remotePayload?.notesOmitted || remotePayload?.lite);
+    const remoteTickets = (Array.isArray(remotePayload?.tickets) ? remotePayload.tickets : [])
+      .map((ticket) => (notesOmitted ? { ...ticket, notesOmitted: true } : ticket));
     if (!remoteTickets.length) return null;
 
     if (action === "createTickets" && Array.isArray(payload.tickets)) {
@@ -6626,6 +6667,7 @@ function parseAppsScriptResponseText(text, options = {}) {
   if (!raw) {
     const error = new Error("Empty response from Apps Script. Ticket may still be saved — click Refresh.");
     error.sheetSyncParseError = true;
+    error.sheetSyncRetryable = true;
     throw error;
   }
 
@@ -6659,8 +6701,13 @@ function parseAppsScriptResponseText(text, options = {}) {
   }
 
   console.error("Apps Script non-JSON response:", truncateForLog(raw));
+  const kind = classifyAppsScriptNonJsonResponse(raw);
   let message;
-  if (looksLikeHtmlResponse(raw)) {
+  if (kind === "auth") {
+    message = "Sheet sync needs Apps Script authorization. Redeploy the web app (Anyone) and try again.";
+  } else if (kind === "timeout") {
+    message = "Sheet sync timed out. The save may still have gone through — click Refresh to confirm.";
+  } else if (kind === "html") {
     message = "Sheet sync returned an HTML error page. The save may still have gone through — click Refresh to confirm.";
   } else if (options.httpStatus && Number(options.httpStatus) >= 500) {
     message = `Sheet sync server error (HTTP ${options.httpStatus}). Your changes may still be saved — click Refresh.`;
@@ -6669,6 +6716,8 @@ function parseAppsScriptResponseText(text, options = {}) {
   }
   const error = new Error(message);
   error.sheetSyncParseError = true;
+  error.sheetSyncRetryable = kind === "html" || kind === "timeout" || kind === "unknown";
+  error.sheetSyncResponseKind = kind;
   throw error;
 }
 
@@ -6680,11 +6729,21 @@ function isSheetSyncResponseParseError(error) {
   return /Unexpected token|Unterminated string|Expected property name|is not valid JSON/i.test(raw);
 }
 
+function shouldRetryAmbiguousSheetResponse(error, attempt) {
+  if (attempt > 2) return false;
+  if (error?.sheetSyncRetryable === true) return true;
+  const raw = String(error?.message || error || "");
+  return /HTML error page|timed out|Empty response|Could not read a response|HTTP 5\d\d/i.test(raw);
+}
+
 function friendlySheetSyncError(error) {
   const raw = String(error?.message || error || "").trim();
   if (!raw) return "Saved locally, but sync failed";
-  if (isSheetSyncResponseParseError(error)) {
-    return "Saved locally, but sheet sync response was unclear. Click Refresh to confirm.";
+  if (/authorization|redeploy the web app/i.test(raw)) {
+    return raw;
+  }
+  if (isSheetSyncResponseParseError(error) || /HTML error page|timed out|Empty response|Could not read a response/i.test(raw)) {
+    return "Saved locally, but sheet sync response was unclear. Click Refresh on the Tickets tab to confirm.";
   }
   if (/busy|lock|temporarily locked|try again shortly/i.test(raw)) {
     return "Sheet sync was temporarily locked after several retries. Your edits are saved locally — click Save again.";
@@ -6728,12 +6787,23 @@ async function postToSheetWithResponse(payload, options = {}) {
       if (!response.ok && !String(text || "").trim()) {
         const httpError = new Error(`Sheet sync HTTP ${response.status}. Your changes may still be saved — click Refresh.`);
         httpError.sheetSyncParseError = true;
+        httpError.sheetSyncRetryable = Number(response.status) >= 500;
         throw httpError;
       }
 
       parsed = parseAppsScriptResponseText(text, { httpStatus: response.status });
     } catch (error) {
       if (isSheetSyncResponseParseError(error)) {
+        if (shouldRetryAmbiguousSheetResponse(error, attempt) && attempt < maxAttempts) {
+          const retryAfter = BUSY_RETRY_DELAY_MS * attempt;
+          if (typeof options.onBusy === "function") {
+            options.onBusy(attempt, maxAttempts, retryAfter);
+          } else {
+            setStatus("", `Sheet sync unclear — retrying (${attempt}/${maxAttempts - 1})…`);
+          }
+          await sleepMs(retryAfter);
+          continue;
+        }
         const reconciled = await reconcileAmbiguousSheetSave(payload, options.expectedTicket);
         if (reconciled?.ok) {
           if (reconciled.reconciled) {
@@ -7049,7 +7119,7 @@ async function executeTicketDelete() {
     setStatus("online", "Task deleted");
     renderTickets();
   } catch (error) {
-    const message = error?.message || "Could not delete this task.";
+    const message = friendlySheetSyncError(error);
     showTicketDeleteError(`${message} Click Refresh on the Tickets tab, then try again.`);
     setStatus("error", "Delete failed — task kept");
     ticketEditDeleteInFlight = false;
@@ -7515,6 +7585,11 @@ function ticketMatchesPresentationOwner(ticket) {
   return true;
 }
 
+function ticketMatchesPresentationPriority(ticket) {
+  if (selectedPresentationPriority === "all") return true;
+  return normalizePriority(ticket?.Priority) === selectedPresentationPriority;
+}
+
 function getPresentationSearchQuery() {
   return cleanText(presentationSearchFilter?.value).toLowerCase();
 }
@@ -7549,6 +7624,12 @@ function ticketMatchesPresentationSearch(ticket, query = getPresentationSearchQu
 function presentationOwnerLabel() {
   if (selectedPresentationOwner === "Bhanu") return "Bhanu";
   if (selectedPresentationOwner === "Suraj") return "Suraj";
+  return "";
+}
+
+function presentationPriorityLabel() {
+  if (selectedPresentationPriority === "80") return "High";
+  if (selectedPresentationPriority === "20") return "Low";
   return "";
 }
 
@@ -7591,6 +7672,7 @@ function getPresentationTickets(tickets = getValidTickets()) {
     .filter((ticket) => isProjectTypeTicket(ticket) && !isSubtaskTicket(ticket))
     .filter((ticket) => ticketMatchesPresentationType(ticket, typeFilter))
     .filter((ticket) => ticketMatchesPresentationOwner(ticket))
+    .filter((ticket) => ticketMatchesPresentationPriority(ticket))
     .filter((ticket) => ticketMatchesPresentationPeriod(ticket))
     .filter((ticket) => ticketMatchesPresentationSearch(ticket, searchQuery))
     .sort(comparePresentationTickets);
@@ -7927,6 +8009,7 @@ function computePresentationBoardSignature(shown) {
   let body = [
     selectedPresentationType,
     selectedPresentationOwner,
+    selectedPresentationPriority,
     selectedPresentationPeriod,
     getPresentationSearchQuery(),
     presentationDateFrom?.value || "",
@@ -7958,17 +8041,21 @@ function renderPresentationView(tickets = getValidTickets()) {
     // Keep the visible select aligned with the normalized filter ("SAP" / "Infra" / "MOM" / "all").
     presentationTypeFilter.value = selectedPresentationType;
   }
+  if (presentationPriorityFilter && presentationPriorityFilter.value !== selectedPresentationPriority) {
+    presentationPriorityFilter.value = selectedPresentationPriority;
+  }
 
   const shown = getPresentationTickets(tickets);
   const typeLabel = selectedPresentationType === "all" ? "SAP, Infra & MOM" : selectedPresentationType;
   const ownerLabel = presentationOwnerLabel();
+  const priorityLabel = presentationPriorityLabel();
   const searchQuery = getPresentationSearchQuery();
   const searchLabel = searchQuery ? `“${searchQuery}”` : "";
   const periodLabel = selectedPresentationPeriod === "custom"
     ? "custom range"
     : (PERFORMANCE_PERIOD_OPTIONS.find((entry) => entry.id === selectedPresentationPeriod)?.label
       || selectedPresentationPeriod);
-  const filterBits = [typeLabel, ownerLabel, searchLabel, periodLabel].filter(Boolean);
+  const filterBits = [typeLabel, ownerLabel, priorityLabel, searchLabel, periodLabel].filter(Boolean);
   const boardSignature = computePresentationBoardSignature(shown);
 
   if (presentationSummary) {
@@ -9536,6 +9623,11 @@ presentationTypeFilter?.addEventListener("change", onPresentationTypeFilterChang
 presentationTypeFilter?.addEventListener("input", onPresentationTypeFilterChange);
 presentationOwnerFilter?.addEventListener("change", () => {
   selectedPresentationOwner = cleanText(presentationOwnerFilter.value) || "all";
+  schedulePresentationViewRender();
+});
+presentationPriorityFilter?.addEventListener("change", () => {
+  selectedPresentationPriority = normalizePresentationPriorityFilter(presentationPriorityFilter.value);
+  if (presentationPriorityFilter) presentationPriorityFilter.value = selectedPresentationPriority;
   schedulePresentationViewRender();
 });
 presentationSearchFilter?.addEventListener("input", () => {
