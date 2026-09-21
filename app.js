@@ -6254,14 +6254,9 @@ function setRecurrenceFormState(prefix, ticket = null) {
   const customDays = document.querySelector(`#${prefix}RecurrenceCustomDays`);
   if (!toggle || !controls || !interval) return;
 
-  let recurrence = resolveTicketRecurrenceValue(ticket);
-  const isGeneratedChild = Boolean(cleanText(ticket?.RecurrenceParentId)) && !recurrence;
-  // Edit open: Type "Daily - *" means daily work — show Recurring checked with Daily
-  // unless this row is a generated child instance (parent id only).
-  if (!recurrence && ticket && prefix === "ticketEdit" && !isGeneratedChild) {
-    const fromType = suggestRecurrenceIntervalFromType(ticket.Type);
-    if (fromType) recurrence = fromType;
-  }
+  // Recurrence is independent of Type. Checkbox follows stored Recurrence only.
+  const recurrence = resolveTicketRecurrenceValue(ticket);
+  const isGeneratedChild = Boolean(cleanText(ticket?.RecurrenceParentId));
   const enabled = Boolean(recurrence);
   toggle.checked = enabled;
   controls.hidden = !enabled;
@@ -6290,7 +6285,8 @@ function setRecurrenceFormState(prefix, ticket = null) {
 
   const instanceHint = document.querySelector(`#${prefix}RecurrenceInstanceHint`);
   if (instanceHint) {
-    instanceHint.hidden = !isGeneratedChild;
+    // Show discontinue guidance when this row is (or was) part of a series.
+    instanceHint.hidden = !(enabled || isGeneratedChild);
   }
   const typeHint = document.querySelector(`#${prefix}RecurrenceTypeHint`);
   if (typeHint) {

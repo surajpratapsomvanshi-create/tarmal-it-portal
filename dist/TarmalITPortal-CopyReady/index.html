@@ -10,7 +10,7 @@
     <!-- auth stays blocking so requireLogin runs before app chrome paints -->
     <script src="./auth.js?v=26"></script>
     <!-- Defer main bundles so HTML can parse while ~210KB+ app.js downloads -->
-    <script src="./app.js?v=203" defer></script>
+    <script src="./app.js?v=204" defer></script>
     <script src="./assets.js?v=13" defer></script>
     <script src="./documents.js?v=12" defer></script>
     <script src="./procurement.js?v=6" defer></script>
@@ -1211,7 +1211,7 @@
                     <span>Every N days</span>
                     <input type="number" name="RecurrenceCustomDays" id="ticketFormRecurrenceCustomDays" min="1" max="365" value="14">
                   </label>
-                  <p class="ticket-form-grid-note">This ticket is the template. Completing it still creates the next copy on the same interval (Not started, Milestone = that day). Clear recurrence or delete the template to stop.</p>
+                  <p class="ticket-form-grid-note">This ticket keeps Recurring checked until the next copy is created, then the new ticket inherits the schedule. Uncheck Recurring and save to stop further copies. Type is unrelated to recurrence.</p>
                 </div>
               </div>
             </div>
@@ -1364,7 +1364,7 @@
                 <input type="hidden" name="RecurrenceNext" id="ticketEditRecurrenceNext" value="">
                 <input type="hidden" name="RecurrenceParentId" id="ticketEditRecurrenceParentId" value="">
                 <p class="ticket-form-grid-note recurrence-type-hint" id="ticketEditRecurrenceTypeHint">Type (e.g. Daily - SAP) is a category only. Check below to auto-create tickets on a schedule.</p>
-                <p class="ticket-form-grid-note recurrence-instance-hint" id="ticketEditRecurrenceInstanceHint" hidden>This ticket was generated from a recurring template. Enable Recurring here only if you want this row to become its own template.</p>
+                <p class="ticket-form-grid-note recurrence-instance-hint" id="ticketEditRecurrenceInstanceHint" hidden>Uncheck Recurring and save to stop further copies of this series. Type stays independent of recurrence.</p>
                 <label class="multi-select-option recurrence-enable-option">
                   <input type="checkbox" id="ticketEditRecurringToggle" name="recurringEnabled" value="1">
                   <span>Recurring task — create a new ticket on a schedule</span>
@@ -1383,7 +1383,7 @@
                     <span>Every N days</span>
                     <input type="number" name="RecurrenceCustomDays" id="ticketEditRecurrenceCustomDays" min="1" max="365" value="14">
                   </label>
-                  <p class="ticket-form-grid-note" id="ticketEditRecurrenceHint">Generated tickets appear as normal work items. Completing a recurring ticket still creates the next one on the interval. Delete it or clear recurrence to stop.</p>
+                  <p class="ticket-form-grid-note" id="ticketEditRecurrenceHint">The next copy inherits Recurring + interval. Completing this ticket does not stop the series — uncheck Recurring and save to stop.</p>
                 </div>
               </div>
             </div>

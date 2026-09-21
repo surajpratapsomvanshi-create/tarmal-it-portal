@@ -1563,15 +1563,15 @@ function prepareTicketSave_(data, oldTicket) {
   );
   fields.status = workflow.status;
 
-  // Recurring template: keep RecurrenceNext filled so the time-driven job can fire.
+  // Recurring series head: keep RecurrenceNext filled so the time-driven job can fire.
   // Every recurring task uses the current date as Milestone.
+  // RecurrenceParentId may remain set for lineage after a chain handoff.
   if (fields.recurrence) {
     fields.milestone = toSheetDate_(todaySheetDateKey_());
     if (!fields.recurrenceNext) {
       // Due today so processRecurringTickets can create the first copy immediately.
       fields.recurrenceNext = toSheetDate_(todaySheetDateKey_());
     }
-    fields.recurrenceParentId = "";
   } else {
     fields.recurrence = "";
     fields.recurrenceNext = "";
@@ -4324,10 +4324,11 @@ function setupDriveAccess() {
 
 /* =====================================================
    RECURRING TASKS
-   Tickets with Recurrence set act as templates. A time-driven
-   trigger creates Not-started child tickets when Recurrence Next
-   is due. Completing a recurring ticket still generates the next
-   copy on schedule. Soft-deleted templates (or cleared recurrence) stop.
+   Tickets with Recurrence set are the active series head. A time-driven
+   trigger creates the next Not-started ticket when Recurrence Next is due,
+   copies Recurrence + RecurrenceNext onto that new ticket, and clears
+   recurrence on the previous head (chain handoff). Type is independent of
+   recurrence. Uncheck Recurring + save (or soft-delete) to stop the series.
 ===================================================== */
 
 function normalizeRecurrenceValue_(value) {
@@ -4468,20 +4469,54 @@ function setupRecurringTicketsTrigger() {
   return result;
 }
 
-function hasRecurringChildForPeriod_(tickets, templateTicketId, periodKey) {
+function findRecurringChildForPeriod_(tickets, templateTicketId, periodKey) {
   const parentId = String(templateTicketId || "").trim();
   const period = sheetDateKey_(periodKey);
-  if (!parentId || !period) return false;
+  if (!parentId || !period) return null;
   for (let i = 0; i < tickets.length; i++) {
     const ticket = tickets[i];
     if (String(ticket.RecurrenceParentId || "").trim() !== parentId) continue;
     if (isSoftDeletedStatus_(ticket.Status)) continue;
-    if (sheetDateKey_(ticket["Start date"]) === period) return true;
+    if (sheetDateKey_(ticket["Start date"]) === period) return ticket;
   }
-  return false;
+  return null;
 }
 
-function appendRecurringInstanceRow_(sheet, columnMap, template, periodKey) {
+function hasRecurringChildForPeriod_(tickets, templateTicketId, periodKey) {
+  return Boolean(findRecurringChildForPeriod_(tickets, templateTicketId, periodKey));
+}
+
+function clearTicketRecurrenceFields_(sheet, columnMap, ticket) {
+  if (!ticket || !ticket.sheetRow) return;
+  const recurrenceIndex = resolveColumnIndex_(columnMap, "recurrence");
+  const recurrenceNextIndex = resolveColumnIndex_(columnMap, "recurrenceNext");
+  if (recurrenceIndex >= 0) {
+    sheet.getRange(ticket.sheetRow, recurrenceIndex + 1).setValue("");
+  }
+  if (recurrenceNextIndex >= 0) {
+    sheet.getRange(ticket.sheetRow, recurrenceNextIndex + 1).setValue("");
+  }
+  ticket.Recurrence = "";
+  ticket.RecurrenceNext = "";
+}
+
+function writeTicketRecurrenceFields_(sheet, columnMap, ticket, recurrence, recurrenceNext) {
+  if (!ticket || !ticket.sheetRow) return;
+  const normalized = normalizeRecurrenceValue_(recurrence);
+  const nextKey = sheetDateKey_(recurrenceNext);
+  const recurrenceIndex = resolveColumnIndex_(columnMap, "recurrence");
+  const recurrenceNextIndex = resolveColumnIndex_(columnMap, "recurrenceNext");
+  if (recurrenceIndex >= 0) {
+    sheet.getRange(ticket.sheetRow, recurrenceIndex + 1).setValue(normalized);
+  }
+  if (recurrenceNextIndex >= 0) {
+    sheet.getRange(ticket.sheetRow, recurrenceNextIndex + 1).setValue(nextKey ? toSheetDate_(nextKey) : "");
+  }
+  ticket.Recurrence = normalized;
+  ticket.RecurrenceNext = nextKey || "";
+}
+
+function appendRecurringInstanceRow_(sheet, columnMap, template, periodKey, nextRecurrenceKey) {
   const sheetInfo = getTasksSheetHeaders_(sheet);
   const templateStart = sheetDateKey_(template["Start date"]);
   const templateEnd = sheetDateKey_(template["End date"]);
@@ -4491,6 +4526,10 @@ function appendRecurringInstanceRow_(sheet, columnMap, template, periodKey) {
   // Every generated recurring instance gets today's date as Milestone.
   const childMilestone = todaySheetDateKey_();
   const notes = stripScreenshotMetadata_(template.Notes || template.Remarks || "");
+  // Inherit recurrence onto the new ticket so the edit form shows Recurring checked
+  // and unchecking that ticket stops the series (chain handoff from the prior head).
+  const recurrence = normalizeRecurrenceValue_(template.Recurrence || template.recurrence || "");
+  const recurrenceNext = sheetDateKey_(nextRecurrenceKey);
   const fields = {
     task: template.Task || "",
     priority: template.Priority || "",
@@ -4505,8 +4544,8 @@ function appendRecurringInstanceRow_(sheet, columnMap, template, periodKey) {
     bhanuList: template["Bhanu List"] || "",
     parentSheetRow: "",
     ticketId: createTicketId_(),
-    recurrence: "",
-    recurrenceNext: "",
+    recurrence: recurrence,
+    recurrenceNext: recurrenceNext ? toSheetDate_(recurrenceNext) : "",
     recurrenceParentId: String(template.ticketId || "").trim()
   };
 
@@ -4523,13 +4562,26 @@ function appendRecurringInstanceRow_(sheet, columnMap, template, periodKey) {
   return {
     sheetRow: sheetRow,
     ticketId: fields.ticketId,
-    startDate: childStart
+    startDate: childStart,
+    recurrence: recurrence,
+    recurrenceNext: recurrenceNext || "",
+    Task: fields.task,
+    Type: fields.type,
+    Owner: fields.owner,
+    Status: fields.status,
+    "Start date": childStart,
+    "End date": childEnd,
+    Milestone: childMilestone,
+    Recurrence: recurrence,
+    RecurrenceNext: recurrenceNext || "",
+    RecurrenceParentId: fields.recurrenceParentId
   };
 }
 
 /**
- * Time-driven handler: create due recurring instances and advance Recurrence Next.
- * LockService-safe; skips soft-deleted / Completed templates; dedupes by parent + start date.
+ * Time-driven handler: create due recurring tickets and hand off Recurrence
+ * to the newest ticket (chain). LockService-safe; soft-deleted heads skip;
+ * dedupes by parent + start date; upgrades legacy children missing Recurrence.
  */
 function processRecurringTickets() {
   const lock = LockService.getScriptLock();
@@ -4569,54 +4621,99 @@ function processRecurringTickets() {
     const todayKey = todaySheetDateKey_();
     let created = 0;
     let advanced = 0;
+    let handedOff = 0;
 
     for (let i = 0; i < tickets.length; i++) {
-      const template = tickets[i];
-      if (!isRecurringTemplateActive_(template)) continue;
-      if (!String(template.ticketId || "").trim()) {
-        // Ensure templates have a stable id for child linking.
+      let active = tickets[i];
+      if (!isRecurringTemplateActive_(active)) continue;
+      if (!String(active.ticketId || "").trim()) {
+        // Ensure series heads have a stable id for child linking.
         const newId = createTicketId_();
         const ticketIdIndex = resolveColumnIndex_(columnMap, "ticketId");
         if (ticketIdIndex >= 0) {
-          sheet.getRange(template.sheetRow, ticketIdIndex + 1).setValue(newId);
-          template.ticketId = newId;
+          sheet.getRange(active.sheetRow, ticketIdIndex + 1).setValue(newId);
+          active.ticketId = newId;
           values[i][ticketIdIndex] = newId;
         }
       }
 
-      let nextKey = sheetDateKey_(template.RecurrenceNext)
+      let nextKey = sheetDateKey_(active.RecurrenceNext)
         || advanceRecurrenceDateKey_(
-          sheetDateKey_(template["Start date"]) || todayKey,
-          template.Recurrence
+          sheetDateKey_(active["Start date"]) || todayKey,
+          active.Recurrence
         );
       let catchUps = 0;
 
       while (nextKey && nextKey <= todayKey && catchUps < RECURRING_CATCH_UP_PER_TEMPLATE_) {
-        if (!hasRecurringChildForPeriod_(tickets, template.ticketId, nextKey)) {
-          const child = appendRecurringInstanceRow_(sheet, columnMap, template, nextKey);
-          tickets.push({
-            Task: template.Task,
-            Status: "Not started",
-            "Start date": child.startDate,
-            RecurrenceParentId: template.ticketId,
-            sheetRow: child.sheetRow,
-            ticketId: child.ticketId
-          });
+        if (!isRecurringTemplateActive_(active)) break;
+
+        const recurrenceValue = normalizeRecurrenceValue_(active.Recurrence || active.recurrence || "");
+        const followingNext = advanceRecurrenceDateKey_(nextKey, recurrenceValue);
+        const existingChild = findRecurringChildForPeriod_(tickets, active.ticketId, nextKey);
+        const parentId = String(active.ticketId || "").trim();
+
+        if (!existingChild) {
+          const child = appendRecurringInstanceRow_(
+            sheet,
+            columnMap,
+            active,
+            nextKey,
+            followingNext
+          );
+          clearTicketRecurrenceFields_(sheet, columnMap, active);
+          tickets.push(child);
+          active = child;
           created += 1;
+          handedOff += 1;
+        } else {
+          // Legacy children were spawned without Recurrence — hand the series
+          // onto that row so the edit form shows Recurring checked.
+          if (!normalizeRecurrenceValue_(existingChild.Recurrence || existingChild.recurrence || "")) {
+            writeTicketRecurrenceFields_(
+              sheet,
+              columnMap,
+              existingChild,
+              recurrenceValue,
+              followingNext
+            );
+            handedOff += 1;
+          }
+          if (String(active.ticketId || "").trim() !== String(existingChild.ticketId || "").trim()) {
+            clearTicketRecurrenceFields_(sheet, columnMap, active);
+          }
+          active = existingChild;
         }
-        nextKey = advanceRecurrenceDateKey_(nextKey, template.Recurrence);
+
+        // Keep parent link populated for lineage when we upgraded a legacy child.
+        if (active && parentId && !String(active.RecurrenceParentId || "").trim()) {
+          const parentIdIndex = resolveColumnIndex_(columnMap, "recurrenceParentId");
+          if (parentIdIndex >= 0 && active.sheetRow) {
+            sheet.getRange(active.sheetRow, parentIdIndex + 1).setValue(parentId);
+            active.RecurrenceParentId = parentId;
+          }
+        }
+
+        nextKey = sheetDateKey_(active.RecurrenceNext) || followingNext;
         catchUps += 1;
         advanced += 1;
       }
 
-      if (sheetDateKey_(template.RecurrenceNext) !== nextKey) {
-        sheet.getRange(template.sheetRow, recurrenceNextIndex + 1).setValue(toSheetDate_(nextKey));
-        template.RecurrenceNext = nextKey;
+      if (
+        isRecurringTemplateActive_(active)
+        && nextKey
+        && sheetDateKey_(active.RecurrenceNext) !== nextKey
+      ) {
+        sheet.getRange(active.sheetRow, recurrenceNextIndex + 1).setValue(toSheetDate_(nextKey));
+        active.RecurrenceNext = nextKey;
       }
     }
 
-    Logger.log("processRecurringTickets created=" + created + " advanced=" + advanced);
-    return { ok: true, created: created, advanced: advanced };
+    Logger.log(
+      "processRecurringTickets created=" + created
+      + " advanced=" + advanced
+      + " handedOff=" + handedOff
+    );
+    return { ok: true, created: created, advanced: advanced, handedOff: handedOff };
   } finally {
     releaseWriteLock_(lock, lockAcquired);
   }
