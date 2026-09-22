@@ -99,6 +99,7 @@ const RECURRENCE_HEADER_ = "Recurrence";
 const RECURRENCE_NEXT_HEADER_ = "Recurrence Next";
 const RECURRENCE_PARENT_ID_HEADER_ = "Recurrence Parent Id";
 const RECURRING_TICKETS_HANDLER_ = "processRecurringTickets";
+const MILESTONE_ROLLOVER_HANDLER_ = "processOpenMilestoneRollover";
 const RECURRING_CATCH_UP_PER_TEMPLATE_ = 5;
 
 const ATTACHMENTS_FOLDER_NAME = "Tarmal Ticket Screenshots";
@@ -2975,6 +2976,8 @@ function onOpen() {
     .addItem("Test approval email", "testCompletionApprovalEmail")
     .addItem("Setup recurring tasks trigger", "setupRecurringTicketsTrigger")
     .addItem("Run recurring tasks now", "processRecurringTickets")
+    .addItem("Setup milestone rollover trigger", "setupMilestoneRolloverTrigger")
+    .addItem("Run milestone rollover now", "processOpenMilestoneRollover")
     .addToUi();
 }
 
@@ -4319,6 +4322,8 @@ function setupDriveAccess() {
   Logger.log("Files in folder: " + info.fileCount);
   const trigger = ensureRecurringTicketsTrigger_();
   Logger.log("Recurring tasks trigger: " + (trigger.created ? "created" : "already present"));
+  const milestoneTrigger = ensureMilestoneRolloverTrigger_();
+  Logger.log("Milestone rollover trigger: " + (milestoneTrigger.created ? "created" : "already present"));
   return info;
 }
 
@@ -4438,21 +4443,34 @@ function ensureRecurringTicketsTrigger_() {
  */
 function kickRecurringTicketsAfterSave_() {
   const trigger = ensureRecurringTicketsTrigger_();
+  const milestoneTrigger = ensureMilestoneRolloverTrigger_();
   var processed = null;
+  var milestoneProcessed = null;
   try {
     processed = processRecurringTickets();
   } catch (error) {
     Logger.log("kickRecurringTicketsAfterSave_ process failed: " + error);
     processed = { ok: false, error: String(error && error.message || error) };
   }
+  try {
+    milestoneProcessed = processOpenMilestoneRollover();
+  } catch (error) {
+    Logger.log("kickRecurringTicketsAfterSave_ milestone rollover failed: " + error);
+    milestoneProcessed = { ok: false, error: String(error && error.message || error) };
+  }
   return {
     triggerOk: trigger.ok !== false,
     triggerCreated: trigger.created === true,
     triggerError: trigger.error || "",
+    milestoneTriggerOk: milestoneTrigger.ok !== false,
+    milestoneTriggerCreated: milestoneTrigger.created === true,
     processOk: processed && processed.ok !== false,
     created: processed && processed.created ? processed.created : 0,
     advanced: processed && processed.advanced ? processed.advanced : 0,
-    processError: processed && processed.error ? processed.error : ""
+    processError: processed && processed.error ? processed.error : "",
+    milestoneRolled: milestoneProcessed && milestoneProcessed.updated ? milestoneProcessed.updated : 0,
+    milestoneProcessOk: milestoneProcessed && milestoneProcessed.ok !== false,
+    milestoneProcessError: milestoneProcessed && milestoneProcessed.error ? milestoneProcessed.error : ""
   };
 }
 
@@ -4714,6 +4732,108 @@ function processRecurringTickets() {
       + " handedOff=" + handedOff
     );
     return { ok: true, created: created, advanced: advanced, handedOff: handedOff };
+  } finally {
+    releaseWriteLock_(lock, lockAcquired);
+  }
+}
+
+/* =====================================================
+   OPEN MILESTONE ROLLOVER
+   If an open (non-Completed, non-Deleted) ticket's Milestone day is over
+   (Milestone date key < today), bump Milestone to today. Closed tickets
+   are never changed. Time-driven hourly trigger mirrors recurring tasks.
+===================================================== */
+
+function isOpenTicketForMilestoneRollover_(ticket) {
+  if (!ticket) return false;
+  if (isSoftDeletedStatus_(ticket.Status)) return false;
+  if (isCompletedStatus(ticket.Status)) return false;
+  return true;
+}
+
+function ensureMilestoneRolloverTrigger_() {
+  try {
+    const existing = ScriptApp.getProjectTriggers().some(function(trigger) {
+      return trigger.getHandlerFunction() === MILESTONE_ROLLOVER_HANDLER_;
+    });
+    if (existing) {
+      return { ok: true, created: false };
+    }
+    ScriptApp.newTrigger(MILESTONE_ROLLOVER_HANDLER_)
+      .timeBased()
+      .everyHours(1)
+      .create();
+    return { ok: true, created: true };
+  } catch (error) {
+    Logger.log("ensureMilestoneRolloverTrigger_ failed: " + error);
+    return { ok: false, created: false, error: String(error && error.message || error) };
+  }
+}
+
+/**
+ * Manual / menu entry: create the hourly open-milestone rollover trigger if missing.
+ */
+function setupMilestoneRolloverTrigger() {
+  const result = ensureMilestoneRolloverTrigger_();
+  SpreadsheetApp.getActiveSpreadsheet().toast(
+    result.created
+      ? "Milestone rollover trigger created (hourly)."
+      : "Milestone rollover trigger already exists.",
+    "Tarmal IT",
+    6
+  );
+  return result;
+}
+
+/**
+ * Time-driven handler: bump past Milestone dates on open tickets to today.
+ */
+function processOpenMilestoneRollover() {
+  const lock = LockService.getScriptLock();
+  var lockAcquired = false;
+  try {
+    lockAcquired = lock.tryLock(WRITE_LOCK_WAIT_MS_);
+    if (!lockAcquired) {
+      Logger.log("processOpenMilestoneRollover: could not acquire lock");
+      return { ok: false, error: "locked" };
+    }
+
+    invalidateTasksHeaderCache_();
+    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(TASKS_SHEET);
+    if (!sheet) {
+      return { ok: false, error: "Tasks sheet missing" };
+    }
+
+    const columnMap = ensureTasksColumns_(sheet);
+    const milestoneIndex = resolveColumnIndex_(columnMap, "milestone");
+    if (milestoneIndex < 0) {
+      return { ok: false, error: "Milestone column missing" };
+    }
+
+    const lastRow = sheet.getLastRow();
+    if (lastRow < 2) {
+      return { ok: true, updated: 0 };
+    }
+
+    const sheetInfo = getTasksSheetHeaders_(sheet);
+    const values = sheet.getRange(2, 1, lastRow, sheetInfo.lastColumn).getValues();
+    const todayKey = todaySheetDateKey_();
+    let updated = 0;
+
+    for (let i = 0; i < values.length; i++) {
+      const ticket = rowToTicket_(values[i], columnMap, i + 2);
+      if (!isOpenTicketForMilestoneRollover_(ticket)) continue;
+
+      const milestoneKey = sheetDateKey_(ticket.Milestone);
+      if (!milestoneKey || !/^\d{4}-\d{2}-\d{2}$/.test(milestoneKey)) continue;
+      if (milestoneKey >= todayKey) continue;
+
+      sheet.getRange(ticket.sheetRow, milestoneIndex + 1).setValue(toSheetDate_(todayKey));
+      updated += 1;
+    }
+
+    Logger.log("processOpenMilestoneRollover updated=" + updated + " today=" + todayKey);
+    return { ok: true, updated: updated, today: todayKey };
   } finally {
     releaseWriteLock_(lock, lockAcquired);
   }
