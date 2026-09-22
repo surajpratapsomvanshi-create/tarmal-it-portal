@@ -9016,6 +9016,8 @@ async function refreshFromSheet(options = {}) {
   try {
     const remoteTickets = await loadSheetTickets(options);
     reconcileDeletedTicketTombstones(remoteTickets);
+    // Milestone rollover is server-only (Apps Script hourly/day job): yesterday → today
+    // for open tickets. Do not auto-bump on client load — that mass-overwrote history.
     const tickets = mergeRemoteTicketsWithLocal(remoteTickets);
     const nextSignature = computeTicketsDataSignature(tickets);
     const dataChanged = nextSignature !== lastRenderedTicketsSignature;
