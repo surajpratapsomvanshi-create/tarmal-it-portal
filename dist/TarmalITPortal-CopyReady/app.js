@@ -5112,61 +5112,6 @@ function isMilestoneToday(ticket) {
   return isSameCalendarDay(getEffectiveMilestone(ticket));
 }
 
-/** Open ticket whose Milestone calendar day is strictly before today. */
-function needsOpenMilestoneRollover(ticket) {
-  if (!ticket) return false;
-  if (cleanText(ticket.Status) === SOFT_DELETED_STATUS) return false;
-  if (isTicketCompleted(ticket)) return false;
-  const milestoneKey = canonicalizeTicketDate(ticket.Milestone);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(milestoneKey)) return false;
-  return milestoneKey < getTodayDateValue();
-}
-
-/**
- * On load/refresh: bump past Milestone dates on open tickets to today (local + sheet sync).
- * Completed and soft-deleted tickets are left unchanged.
- */
-function bumpPastOpenMilestonesOnLoad(tickets) {
-  const list = Array.isArray(tickets) ? tickets : [];
-  const today = getTodayDateValue();
-  const toSync = [];
-  let bumped = 0;
-
-  const next = list.map((ticket) => {
-    if (!needsOpenMilestoneRollover(ticket)) return ticket;
-    bumped += 1;
-    const updated = normalizeTicket({
-      ...ticket,
-      Milestone: today,
-      pendingSheetSync: Date.now(),
-      pendingFields: ["Milestone"]
-    });
-    if (updated.sheetRow && canEditTickets()) {
-      toSync.push(updated);
-    }
-    return updated;
-  });
-
-  if (!bumped) return { tickets: list, bumped: 0 };
-
-  if (toSync.length) {
-    Promise.allSettled(
-      toSync.map((ticket) =>
-        sendTicketUpdateToSheet({
-          ...ticket,
-          ...rowIdentityFields(ticket, ticket),
-          Milestone: today,
-          pendingFields: ["Milestone"]
-        }).catch((error) => {
-          console.warn("Milestone rollover sync failed", ticket.sheetRow, error);
-        })
-      )
-    ).catch(() => {});
-  }
-
-  return { tickets: next, bumped };
-}
-
 function isTicketCompleted(ticket) {
   return statusClass(ticket.Status) === "status-completed";
 }
@@ -9071,11 +9016,11 @@ async function refreshFromSheet(options = {}) {
   try {
     const remoteTickets = await loadSheetTickets(options);
     reconcileDeletedTicketTombstones(remoteTickets);
-    const mergedTickets = mergeRemoteTicketsWithLocal(remoteTickets);
-    const rollover = bumpPastOpenMilestonesOnLoad(mergedTickets);
-    const tickets = rollover.tickets;
+    // Milestone rollover is server-only (Apps Script hourly/day job): yesterday → today
+    // for open tickets. Do not auto-bump on client load — that mass-overwrote history.
+    const tickets = mergeRemoteTicketsWithLocal(remoteTickets);
     const nextSignature = computeTicketsDataSignature(tickets);
-    const dataChanged = nextSignature !== lastRenderedTicketsSignature || rollover.bumped > 0;
+    const dataChanged = nextSignature !== lastRenderedTicketsSignature;
     writeTickets(tickets);
     if (dataChanged) {
       lastFilterTicketSignature = "";

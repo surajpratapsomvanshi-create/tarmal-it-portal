@@ -4786,7 +4786,9 @@ function setupMilestoneRolloverTrigger() {
 }
 
 /**
- * Time-driven handler: bump past Milestone dates on open tickets to today.
+ * Time-driven handler: when a calendar day ends, roll Milestone to today ONLY for
+ * open tickets whose Milestone was that ending day (yesterdayKey). Does not bump
+ * older historical milestones.
  */
 function processOpenMilestoneRollover() {
   const lock = LockService.getScriptLock();
@@ -4818,6 +4820,12 @@ function processOpenMilestoneRollover() {
     const sheetInfo = getTasksSheetHeaders_(sheet);
     const values = sheet.getRange(2, 1, lastRow, sheetInfo.lastColumn).getValues();
     const todayKey = todaySheetDateKey_();
+    const todayDate = parseSheetDateKey_(todayKey);
+    if (!todayDate) {
+      return { ok: false, error: "invalid today key" };
+    }
+    const yesterdayDate = new Date(todayDate.getFullYear(), todayDate.getMonth(), todayDate.getDate() - 1);
+    const yesterdayKey = formatDateKeyFromDate_(yesterdayDate);
     let updated = 0;
 
     for (let i = 0; i < values.length; i++) {
@@ -4826,14 +4834,19 @@ function processOpenMilestoneRollover() {
 
       const milestoneKey = sheetDateKey_(ticket.Milestone);
       if (!milestoneKey || !/^\d{4}-\d{2}-\d{2}$/.test(milestoneKey)) continue;
-      if (milestoneKey >= todayKey) continue;
+      // Only the day that just ended — never all historical past milestones.
+      if (milestoneKey !== yesterdayKey) continue;
 
       sheet.getRange(ticket.sheetRow, milestoneIndex + 1).setValue(toSheetDate_(todayKey));
       updated += 1;
     }
 
-    Logger.log("processOpenMilestoneRollover updated=" + updated + " today=" + todayKey);
-    return { ok: true, updated: updated, today: todayKey };
+    Logger.log(
+      "processOpenMilestoneRollover updated=" + updated
+      + " today=" + todayKey
+      + " yesterday=" + yesterdayKey
+    );
+    return { ok: true, updated: updated, today: todayKey, yesterday: yesterdayKey };
   } finally {
     releaseWriteLock_(lock, lockAcquired);
   }
