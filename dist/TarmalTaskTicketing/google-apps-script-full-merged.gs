@@ -2978,6 +2978,7 @@ function onOpen() {
     .addItem("Run recurring tasks now", "processRecurringTickets")
     .addItem("Setup milestone rollover trigger", "setupMilestoneRolloverTrigger")
     .addItem("Run milestone rollover now", "processOpenMilestoneRollover")
+    .addItem("Restore milestones from MilestoneRestore sheet", "restoreMilestonesFromRestoreSheet")
     .addToUi();
 }
 
@@ -4739,9 +4740,10 @@ function processRecurringTickets() {
 
 /* =====================================================
    OPEN MILESTONE ROLLOVER
-   If an open (non-Completed, non-Deleted) ticket's Milestone day is over
-   (Milestone date key < today), bump Milestone to today. Closed tickets
-   are never changed. Time-driven hourly trigger mirrors recurring tasks.
+   Yesterday-only: when the calendar day ends, bump Milestone to today ONLY for
+   open tickets whose Milestone was exactly yesterday. Older historical
+   milestones are never changed. Closed/deleted tickets are never changed.
+   Hourly time-driven trigger. No client-side mass bump on refresh.
 ===================================================== */
 
 function isOpenTicketForMilestoneRollover_(ticket) {
@@ -4847,6 +4849,115 @@ function processOpenMilestoneRollover() {
       + " yesterday=" + yesterdayKey
     );
     return { ok: true, updated: updated, today: todayKey, yesterday: yesterdayKey };
+  } finally {
+    releaseWriteLock_(lock, lockAcquired);
+  }
+}
+
+/**
+ * One-time restore after a bad mass Milestone overwrite.
+ * Does NOT invent dates. Reads sheet "MilestoneRestore" with headers:
+ *   sheetRow | Milestone
+ * optional: Task | Start date (used only when sheetRow is blank — exact Task+Start match)
+ * Paste rows from a Version history copy of Tasks (pre-overwrite), then run this.
+ */
+function restoreMilestonesFromRestoreSheet() {
+  const lock = LockService.getScriptLock();
+  var lockAcquired = false;
+  try {
+    lockAcquired = lock.tryLock(WRITE_LOCK_WAIT_MS_);
+    if (!lockAcquired) {
+      SpreadsheetApp.getActiveSpreadsheet().toast("Could not acquire lock. Try again.", "Milestone restore", 6);
+      return { ok: false, error: "locked" };
+    }
+
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const restoreSheet = ss.getSheetByName("MilestoneRestore");
+    if (!restoreSheet) {
+      ss.toast(
+        "Create a sheet named MilestoneRestore with columns sheetRow, Milestone (optional Task, Start date).",
+        "Milestone restore",
+        10
+      );
+      return { ok: false, error: "MilestoneRestore sheet missing" };
+    }
+
+    const tasksSheet = ss.getSheetByName(TASKS_SHEET);
+    if (!tasksSheet) {
+      return { ok: false, error: "Tasks sheet missing" };
+    }
+
+    const columnMap = ensureTasksColumns_(tasksSheet);
+    const milestoneIndex = resolveColumnIndex_(columnMap, "milestone");
+    if (milestoneIndex < 0) {
+      return { ok: false, error: "Milestone column missing" };
+    }
+
+    const restoreValues = restoreSheet.getDataRange().getValues();
+    if (restoreValues.length < 2) {
+      ss.toast("MilestoneRestore has no data rows.", "Milestone restore", 6);
+      return { ok: false, error: "empty restore sheet" };
+    }
+
+    const restoreHeaders = restoreValues[0].map(function(h) {
+      return String(h || "").trim().toLowerCase();
+    });
+    const colSheetRow = restoreHeaders.indexOf("sheetrow");
+    const colMilestone = restoreHeaders.indexOf("milestone");
+    const colTask = restoreHeaders.indexOf("task");
+    const colStart = restoreHeaders.indexOf("start date");
+    if (colMilestone < 0) {
+      ss.toast("MilestoneRestore needs a Milestone column.", "Milestone restore", 8);
+      return { ok: false, error: "Milestone column missing on restore sheet" };
+    }
+
+    const tasksInfo = getTasksSheetHeaders_(tasksSheet);
+    const taskValues = tasksSheet.getRange(2, 1, tasksSheet.getLastRow(), tasksInfo.lastColumn).getValues();
+    const taskByRow = {};
+    const taskByKey = {};
+    for (let i = 0; i < taskValues.length; i++) {
+      const ticket = rowToTicket_(taskValues[i], columnMap, i + 2);
+      taskByRow[ticket.sheetRow] = ticket;
+      const key = String(ticket.Task || "").trim().toLowerCase()
+        + "|"
+        + (sheetDateKey_(ticket["Start date"]) || "");
+      if (key !== "|") taskByKey[key] = ticket;
+    }
+
+    let updated = 0;
+    let skipped = 0;
+    for (let r = 1; r < restoreValues.length; r++) {
+      const row = restoreValues[r];
+      const milestoneRaw = row[colMilestone];
+      const milestoneKey = sheetDateKey_(milestoneRaw);
+      if (!milestoneKey || !/^\d{4}-\d{2}-\d{2}$/.test(milestoneKey)) {
+        skipped += 1;
+        continue;
+      }
+
+      let target = null;
+      const sheetRowNum = colSheetRow >= 0 ? Number(row[colSheetRow]) : NaN;
+      if (Number.isFinite(sheetRowNum) && sheetRowNum >= 2) {
+        target = taskByRow[sheetRowNum] || null;
+      }
+      if (!target && colTask >= 0) {
+        const taskName = String(row[colTask] || "").trim().toLowerCase();
+        const startKey = colStart >= 0 ? (sheetDateKey_(row[colStart]) || "") : "";
+        target = taskByKey[taskName + "|" + startKey] || null;
+      }
+      if (!target || !target.sheetRow) {
+        skipped += 1;
+        continue;
+      }
+
+      tasksSheet.getRange(target.sheetRow, milestoneIndex + 1).setValue(toSheetDate_(milestoneKey));
+      updated += 1;
+    }
+
+    const msg = "Restored " + updated + " milestone(s); skipped " + skipped + ".";
+    Logger.log("restoreMilestonesFromRestoreSheet " + msg);
+    ss.toast(msg, "Milestone restore", 8);
+    return { ok: true, updated: updated, skipped: skipped };
   } finally {
     releaseWriteLock_(lock, lockAcquired);
   }
