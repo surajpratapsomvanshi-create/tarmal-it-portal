@@ -6040,7 +6040,7 @@ function openTicketEditor(sheetRow, options = {}) {
     return;
   }
 
-  activeEditTicket = { ...ticket };
+  activeEditTicket = repairTicketRecurrenceForEdit({ ...ticket });
   resetTicketDeleteUi();
   resetTicketEditRaisedByTracking();
   if (ticketEditSheetRow) {
@@ -6069,7 +6069,7 @@ function openTicketEditor(sheetRow, options = {}) {
   setDateFieldValue(ticketEditForm, "Start date", ticket["Start date"]);
   setDateFieldValue(ticketEditForm, "End date", ticket["End date"]);
   setDateFieldValue(ticketEditForm, "Milestone", ticket.Milestone);
-  setRecurrenceFormState("ticketEdit", ticket);
+  setRecurrenceFormState("ticketEdit", activeEditTicket);
   populateTicketEditParentContext(ticket);
   populateTicketEditApprovalNote(ticket);
 
@@ -6177,6 +6177,163 @@ function resolveTicketRecurrenceValue(ticket) {
   );
 }
 
+function buildTicketIdIndex(tickets = getValidTickets()) {
+  const map = new Map();
+  for (const ticket of tickets) {
+    const id = ticketStableId(ticket);
+    if (id) map.set(id, ticket);
+  }
+  return map;
+}
+
+/**
+ * Walk RecurrenceParentId to the series root so chain-handoff and legacy
+ * children that still point at the original parent group together.
+ */
+function resolveRecurringSeriesRootId(ticket, byId = buildTicketIdIndex()) {
+  if (!ticket) return "";
+  const seen = new Set();
+  let cur = ticket;
+  let guard = 0;
+  while (cur && guard++ < 50) {
+    const parentId = cleanText(cur.RecurrenceParentId);
+    if (!parentId) return ticketStableId(cur);
+    if (seen.has(parentId)) return parentId;
+    seen.add(parentId);
+    const parent = byId.get(parentId);
+    if (!parent) return parentId;
+    cur = parent;
+  }
+  return ticketStableId(ticket);
+}
+
+function collectRecurringSeriesTickets(ticket, tickets = getValidTickets()) {
+  if (!ticket) return [];
+  const byId = buildTicketIdIndex(tickets);
+  const rootId = resolveRecurringSeriesRootId(ticket, byId);
+  const selfId = ticketStableId(ticket);
+  const parentId = cleanText(ticket.RecurrenceParentId);
+  if (!rootId && !selfId && !parentId && !resolveTicketRecurrenceValue(ticket)) {
+    return [ticket];
+  }
+
+  return tickets.filter((entry) => {
+    if (!entry || cleanText(entry.Status) === SOFT_DELETED_STATUS) return false;
+    if (ticketsMatchIdentity(entry, ticket)) return true;
+    const entryId = ticketStableId(entry);
+    const entryParent = cleanText(entry.RecurrenceParentId);
+    if (rootId && entryId === rootId) return true;
+    if (rootId && entryParent === rootId) return true;
+    if (selfId && entryParent === selfId) return true;
+    if (parentId && (entryId === parentId || entryParent === parentId)) return true;
+    if (rootId && resolveRecurringSeriesRootId(entry, byId) === rootId) return true;
+    return false;
+  });
+}
+
+function pickNewestRecurringSeriesHead(members) {
+  const list = Array.isArray(members) ? members.filter(Boolean) : [];
+  if (!list.length) return null;
+  const open = list.filter((ticket) => isOpenTicket(ticket));
+  const pool = (open.length ? open : list).slice();
+  pool.sort((left, right) => {
+    const leftStart = canonicalizeTicketDate(left["Start date"]) || "";
+    const rightStart = canonicalizeTicketDate(right["Start date"]) || "";
+    if (leftStart !== rightStart) return leftStart < rightStart ? 1 : -1;
+    return (Number(right.sheetRow) || 0) - (Number(left.sheetRow) || 0);
+  });
+  return pool[0] || null;
+}
+
+function resolveSeriesRecurrenceValue(ticket) {
+  const direct = resolveTicketRecurrenceValue(ticket);
+  if (direct) return direct;
+  if (!cleanText(ticket?.RecurrenceParentId) && !direct) return "";
+  const series = collectRecurringSeriesTickets(ticket);
+  for (const member of series) {
+    const value = resolveTicketRecurrenceValue(member);
+    if (value) return value;
+  }
+  return "";
+}
+
+function resolveSeriesRecurrenceNext(ticket, recurrenceValue) {
+  const direct = canonicalizeTicketDate(ticket?.RecurrenceNext || "");
+  if (direct) return direct;
+  const series = collectRecurringSeriesTickets(ticket);
+  for (const member of series) {
+    const next = canonicalizeTicketDate(member?.RecurrenceNext || "");
+    if (next) return next;
+  }
+  if (recurrenceValue) {
+    return advanceRecurrenceDateValue(
+      canonicalizeTicketDate(ticket?.["Start date"]) || getTodayDateValue(),
+      recurrenceValue
+    );
+  }
+  return "";
+}
+
+/**
+ * Edit-open repair: newest open series member shows Recurring checked even when
+ * the sheet row still has blank Recurrence (legacy spawn). Older members show
+ * unchecked so only one active head is presented.
+ */
+function repairTicketRecurrenceForEdit(ticket) {
+  if (!ticket) return ticket;
+  const seriesRecurrence = resolveSeriesRecurrenceValue(ticket);
+  const inSeries = Boolean(seriesRecurrence || cleanText(ticket.RecurrenceParentId));
+  if (!inSeries) return ticket;
+
+  const series = collectRecurringSeriesTickets(ticket);
+  const head = pickNewestRecurringSeriesHead(series);
+  const isHead = Boolean(head && ticketsMatchIdentity(head, ticket));
+
+  if (isHead && seriesRecurrence) {
+    return {
+      ...ticket,
+      Recurrence: seriesRecurrence,
+      RecurrenceNext: resolveSeriesRecurrenceNext(ticket, seriesRecurrence),
+      RecurrenceParentId: cleanText(ticket.RecurrenceParentId)
+        || cleanText(head.RecurrenceParentId)
+        || ""
+    };
+  }
+
+  if (!isHead) {
+    return {
+      ...ticket,
+      Recurrence: "",
+      RecurrenceNext: "",
+      RecurrenceParentId: cleanText(ticket.RecurrenceParentId)
+        || ticketStableId(head)
+        || resolveRecurringSeriesRootId(ticket)
+        || ""
+    };
+  }
+
+  return ticket;
+}
+
+/**
+ * After saving the series head with Recurrence, clear Recurrence locally on
+ * older siblings so the board does not show two Recurring badges.
+ */
+function clearLocalSeriesRecurrenceExcept(headTicket) {
+  if (!headTicket || !resolveTicketRecurrenceValue(headTicket)) return;
+  const series = collectRecurringSeriesTickets(headTicket);
+  for (const member of series) {
+    if (ticketsMatchIdentity(member, headTicket)) continue;
+    if (!resolveTicketRecurrenceValue(member)) continue;
+    // Local UI only — server clearOtherSeriesRecurrenceHeads_ owns the sheet write.
+    updateLocalTicket({
+      ...member,
+      Recurrence: "",
+      RecurrenceNext: ""
+    }, { allowCreate: false, clearPendingSync: true });
+  }
+}
+
 function isDailyCategoryType(typeValue) {
   return /^daily\b/i.test(String(typeValue || "").trim());
 }
@@ -6254,12 +6411,23 @@ function setRecurrenceFormState(prefix, ticket = null) {
   const customDays = document.querySelector(`#${prefix}RecurrenceCustomDays`);
   if (!toggle || !controls || !interval) return;
 
-  // Recurrence is independent of Type. Checkbox follows stored Recurrence only.
-  const recurrence = resolveTicketRecurrenceValue(ticket);
-  const isGeneratedChild = Boolean(cleanText(ticket?.RecurrenceParentId));
+  // Empty Recurrence + RecurrenceParentId: resolve interval from series in memory
+  // (newest open head only) so the checkbox shows checked; save then persists it.
+  const source = prefix === "ticketEdit" && ticket
+    ? repairTicketRecurrenceForEdit(ticket)
+    : ticket;
+  const recurrence = resolveTicketRecurrenceValue(source);
+  const isGeneratedChild = Boolean(cleanText(source?.RecurrenceParentId || ticket?.RecurrenceParentId));
   const enabled = Boolean(recurrence);
   toggle.checked = enabled;
   controls.hidden = !enabled;
+  if (prefix === "ticketEdit" && source && activeEditTicket && ticketsMatchIdentity(activeEditTicket, source)) {
+    activeEditTicket.Recurrence = source.Recurrence || "";
+    activeEditTicket.RecurrenceNext = source.RecurrenceNext || "";
+    if (cleanText(source.RecurrenceParentId)) {
+      activeEditTicket.RecurrenceParentId = cleanText(source.RecurrenceParentId);
+    }
+  }
 
   if (/^Every:\d+$/i.test(recurrence)) {
     interval.value = "Custom";
@@ -6276,11 +6444,11 @@ function setRecurrenceFormState(prefix, ticket = null) {
 
   const nextInput = document.querySelector(`#${prefix}RecurrenceNext`);
   if (nextInput) {
-    nextInput.value = canonicalizeTicketDate(ticket?.RecurrenceNext || "") || "";
+    nextInput.value = canonicalizeTicketDate(source?.RecurrenceNext || ticket?.RecurrenceNext || "") || "";
   }
   const parentInput = document.querySelector(`#${prefix}RecurrenceParentId`);
   if (parentInput) {
-    parentInput.value = cleanText(ticket?.RecurrenceParentId || "");
+    parentInput.value = cleanText(source?.RecurrenceParentId || ticket?.RecurrenceParentId || "");
   }
 
   const instanceHint = document.querySelector(`#${prefix}RecurrenceInstanceHint`);
@@ -9530,6 +9698,9 @@ ticketEditForm?.addEventListener("submit", async (event) => {
 
   try {
     updateLocalTicket(localTicket, { allowCreate: false });
+    if (resolveTicketRecurrenceValue(localTicket)) {
+      clearLocalSeriesRecurrenceExcept(localTicket);
+    }
   } catch (localError) {
     ticketEditSubmitInFlight = false;
     ticketEditForm.classList.remove("ticket-form-submitting");
@@ -9544,6 +9715,9 @@ ticketEditForm?.addEventListener("submit", async (event) => {
 
   try {
     await sendTicketUpdateToSheet(sheetTicket);
+    if (resolveTicketRecurrenceValue(sheetTicket)) {
+      clearLocalSeriesRecurrenceExcept(sheetTicket);
+    }
     const hasPendingAttachments = extractNoteAttachments(updatedTicket.NotesHtml || "").length > 0;
     const attachmentsSaved = !hasPendingAttachments
       || await verifyDriveUploadAfterSave(updatedTicket.sheetRow);

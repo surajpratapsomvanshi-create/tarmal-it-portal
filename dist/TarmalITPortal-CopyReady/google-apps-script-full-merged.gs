@@ -1741,6 +1741,14 @@ function writeTicketToSheetRow_(sheet, sheetRow, data) {
 
   // Trust the values we just wrote — avoid an extra getValues round-trip on the critical path.
   const savedTicket = rowToTicket_(row, columnMap, sheetRow);
+  // Only one series head may keep Recurrence checked — clear older/sibling heads.
+  if (fields.recurrence) {
+    try {
+      clearOtherSeriesRecurrenceHeads_(sheet, columnMap, savedTicket);
+    } catch (clearError) {
+      Logger.log("clearOtherSeriesRecurrenceHeads_ failed: " + clearError);
+    }
+  }
   const expectedMilestone = formatTicketFieldDate_(data.Milestone);
   const expectedStart = formatTicketFieldDate_(data["Start date"]) || expectedMilestone;
   const expectedEnd = formatTicketFieldDate_(data["End date"]);
@@ -4488,21 +4496,238 @@ function setupRecurringTicketsTrigger() {
   return result;
 }
 
-function findRecurringChildForPeriod_(tickets, templateTicketId, periodKey) {
-  const parentId = String(templateTicketId || "").trim();
+function buildTicketIdMap_(tickets) {
+  const map = {};
+  for (let i = 0; i < (tickets || []).length; i++) {
+    const id = String(tickets[i] && tickets[i].ticketId || "").trim();
+    if (id) map[id] = tickets[i];
+  }
+  return map;
+}
+
+/**
+ * Walk RecurrenceParentId to the series root. Missing parents treat the
+ * dangling parent id as the root so legacy children still group together.
+ */
+function resolveRecurringSeriesRootId_(ticket, byId) {
+  if (!ticket) return "";
+  const ids = byId || {};
+  const seen = {};
+  let cur = ticket;
+  let guard = 0;
+  while (cur && guard++ < 50) {
+    const parentId = String(cur.RecurrenceParentId || "").trim();
+    if (!parentId) {
+      return String(cur.ticketId || "").trim();
+    }
+    if (seen[parentId]) return parentId;
+    seen[parentId] = true;
+    const parent = ids[parentId];
+    if (!parent) return parentId;
+    cur = parent;
+  }
+  return String(ticket.ticketId || "").trim();
+}
+
+function ticketInRecurringSeries_(ticket, seriesRootId, templateTicketId, byId) {
+  if (!ticket) return false;
+  const rootId = String(seriesRootId || "").trim();
+  const templateId = String(templateTicketId || "").trim();
+  const ticketId = String(ticket.ticketId || "").trim();
+  const parentId = String(ticket.RecurrenceParentId || "").trim();
+  if (templateId && ticketId === templateId) return true;
+  if (rootId && ticketId === rootId) return true;
+  if (parentId && (parentId === rootId || parentId === templateId)) return true;
+  if (rootId) {
+    const ticketRoot = resolveRecurringSeriesRootId_(ticket, byId);
+    if (ticketRoot && ticketRoot === rootId) return true;
+  }
+  return false;
+}
+
+/**
+ * Find any non-deleted series member whose Start date matches the period.
+ * Matches by series root (not only direct ParentId === current head), so
+ * legacy children that still point at the original root are found after handoff.
+ */
+function findRecurringChildForPeriod_(tickets, templateTicket, periodKey) {
   const period = sheetDateKey_(periodKey);
-  if (!parentId || !period) return null;
+  if (!period) return null;
+
+  // Back-compat: older callers passed a bare ticketId string.
+  let template = templateTicket;
+  let templateId = "";
+  if (typeof templateTicket === "string" || typeof templateTicket === "number") {
+    templateId = String(templateTicket || "").trim();
+    template = null;
+    for (let i = 0; i < (tickets || []).length; i++) {
+      if (String(tickets[i].ticketId || "").trim() === templateId) {
+        template = tickets[i];
+        break;
+      }
+    }
+  } else {
+    templateId = String(template && template.ticketId || "").trim();
+  }
+
+  const byId = buildTicketIdMap_(tickets);
+  const seriesRootId = (template
+    ? resolveRecurringSeriesRootId_(template, byId)
+    : "") || templateId;
+  if (!seriesRootId && !templateId) return null;
+
   for (let i = 0; i < tickets.length; i++) {
     const ticket = tickets[i];
-    if (String(ticket.RecurrenceParentId || "").trim() !== parentId) continue;
     if (isSoftDeletedStatus_(ticket.Status)) continue;
-    if (sheetDateKey_(ticket["Start date"]) === period) return ticket;
+    if (sheetDateKey_(ticket["Start date"]) !== period) continue;
+    if (templateId && String(ticket.ticketId || "").trim() === templateId) continue;
+    if (!ticketInRecurringSeries_(ticket, seriesRootId, templateId, byId)) continue;
+    return ticket;
   }
   return null;
 }
 
 function hasRecurringChildForPeriod_(tickets, templateTicketId, periodKey) {
   return Boolean(findRecurringChildForPeriod_(tickets, templateTicketId, periodKey));
+}
+
+function compareRecurringOccurrenceNewestFirst_(left, right) {
+  const leftStart = sheetDateKey_(left && left["Start date"]) || "";
+  const rightStart = sheetDateKey_(right && right["Start date"]) || "";
+  if (leftStart !== rightStart) {
+    return leftStart < rightStart ? 1 : -1;
+  }
+  return (Number(right && right.sheetRow) || 0) - (Number(left && left.sheetRow) || 0);
+}
+
+/**
+ * One active Recurrence head per series: the newest open occurrence.
+ * Upgrades legacy children with blank Recurrence; clears older heads.
+ */
+function repairRecurringSeriesHeads_(sheet, columnMap, tickets) {
+  const byId = buildTicketIdMap_(tickets);
+  const groups = {};
+  let repaired = 0;
+
+  for (let i = 0; i < tickets.length; i++) {
+    const ticket = tickets[i];
+    if (isSoftDeletedStatus_(ticket.Status)) continue;
+    const hasRecurrence = Boolean(normalizeRecurrenceValue_(ticket.Recurrence || ticket.recurrence || ""));
+    const parentId = String(ticket.RecurrenceParentId || "").trim();
+    if (!hasRecurrence && !parentId) continue;
+    const rootId = resolveRecurringSeriesRootId_(ticket, byId)
+      || String(ticket.ticketId || "").trim();
+    if (!rootId) continue;
+    if (!groups[rootId]) groups[rootId] = [];
+    groups[rootId].push(ticket);
+  }
+
+  const rootIds = Object.keys(groups);
+  for (let g = 0; g < rootIds.length; g++) {
+    const rootId = rootIds[g];
+    const members = groups[rootId];
+    const withRecurrence = [];
+    const openMembers = [];
+    for (let m = 0; m < members.length; m++) {
+      const member = members[m];
+      if (normalizeRecurrenceValue_(member.Recurrence || member.recurrence || "")) {
+        withRecurrence.push(member);
+      }
+      if (!isCompletedStatus(member.Status)) {
+        openMembers.push(member);
+      }
+    }
+    if (!withRecurrence.length) continue;
+
+    const headPool = openMembers.length ? openMembers : withRecurrence;
+    headPool.sort(compareRecurringOccurrenceNewestFirst_);
+    const head = headPool[0];
+    if (!head) continue;
+
+    let recurrenceValue = normalizeRecurrenceValue_(head.Recurrence || head.recurrence || "");
+    if (!recurrenceValue) {
+      recurrenceValue = normalizeRecurrenceValue_(
+        withRecurrence[0].Recurrence || withRecurrence[0].recurrence || ""
+      );
+    }
+    if (!recurrenceValue) continue;
+
+    let recurrenceNext = sheetDateKey_(head.RecurrenceNext);
+    if (!recurrenceNext) {
+      for (let w = 0; w < withRecurrence.length; w++) {
+        recurrenceNext = sheetDateKey_(withRecurrence[w].RecurrenceNext);
+        if (recurrenceNext) break;
+      }
+    }
+    if (!recurrenceNext) {
+      recurrenceNext = advanceRecurrenceDateKey_(
+        sheetDateKey_(head["Start date"]) || todaySheetDateKey_(),
+        recurrenceValue
+      );
+    }
+
+    if (!normalizeRecurrenceValue_(head.Recurrence || head.recurrence || "")
+      || sheetDateKey_(head.RecurrenceNext) !== recurrenceNext) {
+      writeTicketRecurrenceFields_(sheet, columnMap, head, recurrenceValue, recurrenceNext);
+      repaired += 1;
+    }
+
+    if (String(head.ticketId || "").trim() !== rootId
+      && !String(head.RecurrenceParentId || "").trim()) {
+      const parentIdIndex = resolveColumnIndex_(columnMap, "recurrenceParentId");
+      if (parentIdIndex >= 0 && head.sheetRow) {
+        sheet.getRange(head.sheetRow, parentIdIndex + 1).setValue(rootId);
+        head.RecurrenceParentId = rootId;
+        repaired += 1;
+      }
+    }
+
+    for (let m = 0; m < members.length; m++) {
+      const member = members[m];
+      if (String(member.ticketId || "").trim() === String(head.ticketId || "").trim()) continue;
+      if (!normalizeRecurrenceValue_(member.Recurrence || member.recurrence || "")) continue;
+      clearTicketRecurrenceFields_(sheet, columnMap, member);
+      repaired += 1;
+    }
+  }
+
+  return repaired;
+}
+
+/**
+ * After saving a ticket as the series head, clear Recurrence on every other
+ * member so only one checkbox stays checked.
+ */
+function clearOtherSeriesRecurrenceHeads_(sheet, columnMap, headTicket, allTickets) {
+  if (!sheet || !headTicket) return 0;
+  const tickets = allTickets || [];
+  if (!tickets.length) {
+    const sheetInfo = getTasksSheetHeaders_(sheet);
+    const lastRow = sheet.getLastRow();
+    if (lastRow < 2) return 0;
+    const values = sheet.getRange(2, 1, lastRow, sheetInfo.lastColumn).getValues();
+    for (let i = 0; i < values.length; i++) {
+      tickets.push(rowToTicket_(values[i], columnMap, i + 2));
+    }
+  }
+  const byId = buildTicketIdMap_(tickets);
+  const headId = String(headTicket.ticketId || "").trim();
+  const seriesRootId = resolveRecurringSeriesRootId_(headTicket, byId) || headId;
+  if (!seriesRootId && !headId) return 0;
+
+  let cleared = 0;
+  for (let i = 0; i < tickets.length; i++) {
+    const ticket = tickets[i];
+    if (isSoftDeletedStatus_(ticket.Status)) continue;
+    if (headId && String(ticket.ticketId || "").trim() === headId) continue;
+    if (Number(ticket.sheetRow) && Number(headTicket.sheetRow)
+      && Number(ticket.sheetRow) === Number(headTicket.sheetRow)) continue;
+    if (!normalizeRecurrenceValue_(ticket.Recurrence || ticket.recurrence || "")) continue;
+    if (!ticketInRecurringSeries_(ticket, seriesRootId, headId, byId)) continue;
+    clearTicketRecurrenceFields_(sheet, columnMap, ticket);
+    cleared += 1;
+  }
+  return cleared;
 }
 
 function clearTicketRecurrenceFields_(sheet, columnMap, ticket) {
@@ -4535,7 +4760,7 @@ function writeTicketRecurrenceFields_(sheet, columnMap, ticket, recurrence, recu
   ticket.RecurrenceNext = nextKey || "";
 }
 
-function appendRecurringInstanceRow_(sheet, columnMap, template, periodKey, nextRecurrenceKey) {
+function appendRecurringInstanceRow_(sheet, columnMap, template, periodKey, nextRecurrenceKey, seriesRootId) {
   const sheetInfo = getTasksSheetHeaders_(sheet);
   const templateStart = sheetDateKey_(template["Start date"]);
   const templateEnd = sheetDateKey_(template["End date"]);
@@ -4549,6 +4774,8 @@ function appendRecurringInstanceRow_(sheet, columnMap, template, periodKey, next
   // and unchecking that ticket stops the series (chain handoff from the prior head).
   const recurrence = normalizeRecurrenceValue_(template.Recurrence || template.recurrence || "");
   const recurrenceNext = sheetDateKey_(nextRecurrenceKey);
+  // Prefer stable series root for ParentId so period dedupe works after handoff.
+  const parentId = String(seriesRootId || template.ticketId || "").trim();
   const fields = {
     task: template.Task || "",
     priority: template.Priority || "",
@@ -4565,7 +4792,7 @@ function appendRecurringInstanceRow_(sheet, columnMap, template, periodKey, next
     ticketId: createTicketId_(),
     recurrence: recurrence,
     recurrenceNext: recurrenceNext ? toSheetDate_(recurrenceNext) : "",
-    recurrenceParentId: String(template.ticketId || "").trim()
+    recurrenceParentId: parentId
   };
 
   const lastCol = Math.max(
@@ -4600,7 +4827,8 @@ function appendRecurringInstanceRow_(sheet, columnMap, template, periodKey, next
 /**
  * Time-driven handler: create due recurring tickets and hand off Recurrence
  * to the newest ticket (chain). LockService-safe; soft-deleted heads skip;
- * dedupes by parent + start date; upgrades legacy children missing Recurrence.
+ * dedupes by series + start date; upgrades legacy children missing Recurrence;
+ * consolidates multiple Recurrence heads down to the newest open occurrence.
  */
 function processRecurringTickets() {
   const lock = LockService.getScriptLock();
@@ -4637,6 +4865,9 @@ function processRecurringTickets() {
       tickets.push(rowToTicket_(values[i], columnMap, i + 2));
     }
 
+    // Fix split heads (old head still Recurrence-set + child blank) before spawn.
+    let repaired = repairRecurringSeriesHeads_(sheet, columnMap, tickets);
+
     const todayKey = todaySheetDateKey_();
     let created = 0;
     let advanced = 0;
@@ -4668,8 +4899,29 @@ function processRecurringTickets() {
 
         const recurrenceValue = normalizeRecurrenceValue_(active.Recurrence || active.recurrence || "");
         const followingNext = advanceRecurrenceDateKey_(nextKey, recurrenceValue);
-        const existingChild = findRecurringChildForPeriod_(tickets, active.ticketId, nextKey);
-        const parentId = String(active.ticketId || "").trim();
+        const byId = buildTicketIdMap_(tickets);
+        const seriesRootId = resolveRecurringSeriesRootId_(active, byId)
+          || String(active.ticketId || "").trim();
+
+        // Head already represents this period — bump RecurrenceNext, do not spawn a twin.
+        if (sheetDateKey_(active["Start date"]) === nextKey) {
+          if (sheetDateKey_(active.RecurrenceNext) !== followingNext) {
+            writeTicketRecurrenceFields_(
+              sheet,
+              columnMap,
+              active,
+              recurrenceValue,
+              followingNext
+            );
+          }
+          nextKey = followingNext;
+          catchUps += 1;
+          advanced += 1;
+          continue;
+        }
+
+        const existingChild = findRecurringChildForPeriod_(tickets, active, nextKey);
+        const parentId = seriesRootId;
 
         if (!existingChild) {
           const child = appendRecurringInstanceRow_(
@@ -4677,7 +4929,8 @@ function processRecurringTickets() {
             columnMap,
             active,
             nextKey,
-            followingNext
+            followingNext,
+            seriesRootId
           );
           clearTicketRecurrenceFields_(sheet, columnMap, active);
           tickets.push(child);
@@ -4696,15 +4949,29 @@ function processRecurringTickets() {
               followingNext
             );
             handedOff += 1;
+          } else if (
+            String(active.ticketId || "").trim() !== String(existingChild.ticketId || "").trim()
+            && sheetDateKey_(existingChild.RecurrenceNext) !== followingNext
+          ) {
+            // Keep the surviving head's next date current when consolidating.
+            writeTicketRecurrenceFields_(
+              sheet,
+              columnMap,
+              existingChild,
+              normalizeRecurrenceValue_(existingChild.Recurrence || recurrenceValue),
+              followingNext
+            );
           }
           if (String(active.ticketId || "").trim() !== String(existingChild.ticketId || "").trim()) {
             clearTicketRecurrenceFields_(sheet, columnMap, active);
+            handedOff += 1;
           }
           active = existingChild;
         }
 
         // Keep parent link populated for lineage when we upgraded a legacy child.
-        if (active && parentId && !String(active.RecurrenceParentId || "").trim()) {
+        if (active && parentId && !String(active.RecurrenceParentId || "").trim()
+          && String(active.ticketId || "").trim() !== parentId) {
           const parentIdIndex = resolveColumnIndex_(columnMap, "recurrenceParentId");
           if (parentIdIndex >= 0 && active.sheetRow) {
             sheet.getRange(active.sheetRow, parentIdIndex + 1).setValue(parentId);
@@ -4727,12 +4994,21 @@ function processRecurringTickets() {
       }
     }
 
+    repaired += repairRecurringSeriesHeads_(sheet, columnMap, tickets);
+
     Logger.log(
       "processRecurringTickets created=" + created
       + " advanced=" + advanced
       + " handedOff=" + handedOff
+      + " repaired=" + repaired
     );
-    return { ok: true, created: created, advanced: advanced, handedOff: handedOff };
+    return {
+      ok: true,
+      created: created,
+      advanced: advanced,
+      handedOff: handedOff,
+      repaired: repaired
+    };
   } finally {
     releaseWriteLock_(lock, lockAcquired);
   }
