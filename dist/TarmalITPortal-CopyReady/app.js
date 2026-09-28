@@ -3753,12 +3753,74 @@ function applyTicketVisibilityFilter(tickets) {
   return tickets.filter((ticket) => isOwnerVisibleToCurrentUser(ticket.Owner));
 }
 
+function occurrenceIdentityKey(ticket) {
+  const task = cleanText(ticket?.Task).toLowerCase().replace(/\s+/g, " ");
+  const day = canonicalizeTicketDate(ticket?.["Start date"]);
+  const type = cleanText(ticket?.Type).toLowerCase().replace(/\s+/g, " ");
+  const owner = cleanText(ticket?.Owner).toLowerCase().replace(/\s+/g, " ");
+  if (!task || !/^\d{4}-\d{2}-\d{2}$/.test(day)) return "";
+  return `${task}\n${day}\n${type}\n${owner}`;
+}
+
+/**
+ * Hide open twins of a recurring occurrence (same task, start day, type, owner).
+ * Keeps the row with Recurrence. Soft-deleted rows are already removed by the caller.
+ */
+function omitDuplicateOpenRecurringTwins(tickets) {
+  const list = Array.isArray(tickets) ? tickets : [];
+  const groups = new Map();
+  for (const ticket of list) {
+    if (!ticket || cleanText(ticket.Status) === SOFT_DELETED_STATUS) continue;
+    if (isTicketCompleted(ticket)) continue;
+    if (Number(ticket.parentSheetRow) > 0) continue;
+    const key = occurrenceIdentityKey(ticket);
+    if (!key) continue;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(ticket);
+  }
+
+  const hidden = new Set();
+  for (const members of groups.values()) {
+    if (members.length < 2) continue;
+    const seriesLinked = members.some((ticket) =>
+      resolveTicketRecurrenceValue(ticket) || cleanText(ticket.RecurrenceParentId)
+    );
+    if (!seriesLinked) {
+      const sample = members[0];
+      const task = cleanText(sample.Task).toLowerCase().replace(/\s+/g, " ");
+      const type = cleanText(sample.Type).toLowerCase().replace(/\s+/g, " ");
+      const owner = cleanText(sample.Owner).toLowerCase().replace(/\s+/g, " ");
+      const seriesHasRecurrence = list.some((ticket) => (
+        ticket
+        && cleanText(ticket.Status) !== SOFT_DELETED_STATUS
+        && cleanText(ticket.Task).toLowerCase().replace(/\s+/g, " ") === task
+        && cleanText(ticket.Type).toLowerCase().replace(/\s+/g, " ") === type
+        && cleanText(ticket.Owner).toLowerCase().replace(/\s+/g, " ") === owner
+        && resolveTicketRecurrenceValue(ticket)
+      ));
+      if (!seriesHasRecurrence) continue;
+    }
+
+    const withRecurrence = members.filter((ticket) => resolveTicketRecurrenceValue(ticket));
+    const pool = (withRecurrence.length ? withRecurrence : members).slice();
+    pool.sort((left, right) => (Number(right.sheetRow) || 0) - (Number(left.sheetRow) || 0));
+    const keeper = pool[0];
+    for (const member of members) {
+      if (member === keeper) continue;
+      hidden.add(member);
+    }
+  }
+
+  if (!hidden.size) return list;
+  return list.filter((ticket) => !hidden.has(ticket));
+}
+
 function getValidTickets() {
-  return applyTicketVisibilityFilter(
+  return omitDuplicateOpenRecurringTwins(applyTicketVisibilityFilter(
     readTickets()
       .map(normalizeTicket)
       .filter((ticket) => ticket.Task && cleanText(ticket.Status) !== SOFT_DELETED_STATUS)
-  );
+  ));
 }
 
 function getMultiFilterValues(panel) {
