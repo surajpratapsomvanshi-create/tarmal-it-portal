@@ -712,18 +712,156 @@ function readTickets() {
 
 let ticketsWriteEpoch = 0;
 
-function writeTickets(tickets, options = {}) {
-  ticketsMemoryCache = tickets;
-  const json = JSON.stringify(tickets);
-  try {
-    const previous = localStorage.getItem(LOCAL_KEY);
-    if (previous && previous !== json) {
-      localStorage.setItem(LOCAL_BACKUP_KEY, previous);
-    }
-  } catch (error) {
-    console.warn("Could not write ticket drafts backup.", error);
+/** Plain-text notes kept in the local draft cache. HTML and images stay in memory and on the sheet. */
+const DRAFT_NOTES_MAX_CHARS = 2000;
+/** If the slim list still exceeds the browser quota, keep this many newest drafts and retry once. */
+const DRAFT_CACHE_KEEP = 200;
+/** Skip the backup copy when the slim payload is already large — the backup used to double quota use. */
+const DRAFT_BACKUP_MAX_CHARS = 1500000;
+
+function isStorageQuotaError(error) {
+  if (!error) return false;
+  const name = String(error.name || "");
+  if (name === "QuotaExceededError" || name === "NS_ERROR_DOM_QUOTA_REACHED") return true;
+  const code = Number(error.code);
+  if (code === 22 || code === 1014) return true;
+  return /quota/i.test(String(error.message || error));
+}
+
+function capDraftNotes(value) {
+  let text = cleanNotesText(value);
+  text = text.replace(/data:[^;,\s]+;base64,[a-z0-9+/=\s]+/gi, "");
+  if (text.length > DRAFT_NOTES_MAX_CHARS) text = text.slice(0, DRAFT_NOTES_MAX_CHARS);
+  return text.trim();
+}
+
+function slimScreenshotUrlsForDraft(urls) {
+  if (!Array.isArray(urls)) return [];
+  const kept = [];
+  for (const url of urls) {
+    const text = String(url || "").trim();
+    if (!text || text.length > 500 || /^data:/i.test(text)) continue;
+    kept.push(text);
+    if (kept.length >= 12) break;
   }
-  localStorage.setItem(LOCAL_KEY, json);
+  return kept;
+}
+
+/**
+ * Local cache is only for restoring the editor and the ticket list after reload.
+ * NotesHtml, base64 screenshots, and attachment binaries are omitted — those live
+ * in memory for this tab and on the sheet after sync.
+ */
+function slimTicketForDraftStorage(ticket) {
+  if (!ticket || typeof ticket !== "object") return ticket;
+  const notes = capDraftNotes(ticket.Notes || ticket.Remarks || "");
+  const slim = {
+    Task: cleanText(ticket.Task),
+    Priority: ticket.Priority || "",
+    Owner: cleanText(ticket.Owner),
+    "Raised By": cleanText(ticket["Raised By"]),
+    Status: cleanText(ticket.Status),
+    Type: cleanText(ticket.Type),
+    "Start date": ticket["Start date"] || "",
+    "End date": ticket["End date"] || "",
+    Milestone: ticket.Milestone || "",
+    parentSheetRow: Number(ticket.parentSheetRow) || 0,
+    Notes: notes,
+    Remarks: notes,
+    "Bhanu List": cleanText(ticket["Bhanu List"]),
+    ticketId: cleanText(ticket.ticketId || ticket.TicketId || ""),
+    Recurrence: resolveTicketRecurrenceValue(ticket),
+    RecurrenceNext: ticket.RecurrenceNext || ticket["Recurrence Next"] || "",
+    RecurrenceParentId: cleanText(ticket.RecurrenceParentId || ticket["Recurrence Parent Id"] || ""),
+    submissionId: cleanText(ticket.submissionId || ""),
+    sheetRow: Number(ticket.sheetRow) || 0,
+    pendingSheetSync: Number(ticket.pendingSheetSync) || 0,
+    pendingFields: Array.isArray(ticket.pendingFields) ? ticket.pendingFields.slice(0, 24) : [],
+    createdOn: ticket.createdOn || "",
+    lastUpdated: ticket.lastUpdated || "",
+    closedOn: ticket.closedOn || ""
+  };
+  const screenshots = slimScreenshotUrlsForDraft(ticket.ScreenshotUrls);
+  if (screenshots.length) slim.ScreenshotUrls = screenshots;
+  return slim;
+}
+
+function ticketDraftRecency(ticket, index) {
+  const updated = Date.parse(ticket?.lastUpdated || ticket?.createdOn || "") || 0;
+  const pending = Number(ticket?.pendingSheetSync) || 0;
+  return Math.max(updated, pending, index);
+}
+
+function pruneTicketDrafts(tickets, keep) {
+  const list = Array.isArray(tickets) ? tickets : [];
+  if (list.length <= keep) return list;
+  const ranked = list.map((ticket, index) => ({
+    index,
+    score: ticketDraftRecency(ticket, index)
+  }));
+  ranked.sort((a, b) => b.score - a.score);
+  const keepIndexes = new Set(ranked.slice(0, keep).map((entry) => entry.index));
+  return list.filter((_, index) => keepIndexes.has(index));
+}
+
+function persistTicketDraftCache(tickets) {
+  const slim = (Array.isArray(tickets) ? tickets : []).map(slimTicketForDraftStorage);
+  const dropBackup = () => {
+    try {
+      localStorage.removeItem(LOCAL_BACKUP_KEY);
+    } catch {
+      /* ignore */
+    }
+  };
+  const writeBackup = (json) => {
+    if (!json || json.length > DRAFT_BACKUP_MAX_CHARS) {
+      dropBackup();
+      return;
+    }
+    try {
+      localStorage.setItem(LOCAL_BACKUP_KEY, json);
+    } catch (error) {
+      console.warn("Could not write ticket drafts backup.", error);
+      dropBackup();
+    }
+  };
+
+  let json = JSON.stringify(slim);
+  try {
+    localStorage.setItem(LOCAL_KEY, json);
+    writeBackup(json);
+    return { ok: true, pruned: false };
+  } catch (error) {
+    if (!isStorageQuotaError(error)) {
+      console.warn("Could not write ticket drafts.", error);
+      return { ok: false, pruned: false };
+    }
+    console.warn("Ticket draft storage quota exceeded; pruning old drafts.", error);
+    dropBackup();
+    const pruned = pruneTicketDrafts(slim, DRAFT_CACHE_KEEP);
+    json = JSON.stringify(pruned);
+    try {
+      localStorage.setItem(LOCAL_KEY, json);
+      return { ok: true, pruned: pruned.length < slim.length };
+    } catch (retryError) {
+      console.warn("Ticket drafts still exceed storage quota after pruning.", retryError);
+      return { ok: false, pruned: true };
+    }
+  }
+}
+
+function writeTickets(tickets, options = {}) {
+  // Memory keeps the full ticket, including notes HTML, so sheet sync is unchanged.
+  ticketsMemoryCache = tickets;
+  let persistResult = { ok: false, pruned: false };
+  try {
+    persistResult = persistTicketDraftCache(tickets);
+  } catch (error) {
+    console.warn("Could not persist ticket drafts.", error);
+  }
+  if (!persistResult.ok && !options.skipStorageNotice) {
+    setStatus("warning", "Browser storage is full. Sheet save still continues.");
+  }
   const epoch = ++ticketsWriteEpoch;
   if (!options.skipBroadcast) {
     try {
@@ -1517,14 +1655,18 @@ function readDeletedTicketTombstones() {
 }
 
 function writeDeletedTicketTombstones(entries) {
-  localStorage.setItem(
-    DELETED_TICKETS_KEY,
-    JSON.stringify(
-      entries
-        .filter((entry) => entry && (entry.key || entry.ticketId))
-        .slice(-200)
-    )
-  );
+  try {
+    localStorage.setItem(
+      DELETED_TICKETS_KEY,
+      JSON.stringify(
+        entries
+          .filter((entry) => entry && (entry.key || entry.ticketId))
+          .slice(-200)
+      )
+    );
+  } catch (error) {
+    console.warn("Could not store deleted-ticket markers.", error);
+  }
 }
 
 // After a local delete, briefly hide the row if a slow sheet soft-delete still
