@@ -1595,12 +1595,22 @@ function prepareTicketSave_(data, oldTicket) {
   // Recurring series head: keep RecurrenceNext filled so the time-driven job can fire.
   // Every recurring task uses the current date as Milestone.
   // RecurrenceParentId may remain set for lineage after a chain handoff.
+  // This row already is the occurrence for its start day. RecurrenceNext on or
+  // before that day makes the post-save kick append a second open ticket.
   if (fields.recurrence) {
     fields.milestone = toSheetDate_(todaySheetDateKey_());
-    if (!fields.recurrenceNext) {
-      // Due today so processRecurringTickets can create the first copy immediately.
-      fields.recurrenceNext = toSheetDate_(todaySheetDateKey_());
+    const startKey = calendarDayKey_(fields.startDate)
+      || calendarDayKey_(fields.milestone)
+      || todaySheetDateKey_();
+    let nextKey = calendarDayKey_(fields.recurrenceNext);
+    const oldNext = oldTicket ? calendarDayKey_(oldTicket.RecurrenceNext) : "";
+    if (oldNext && oldNext > startKey && (!nextKey || nextKey <= startKey)) {
+      nextKey = oldNext;
     }
+    if (!nextKey || nextKey <= startKey) {
+      nextKey = advanceRecurrenceDateKey_(startKey, fields.recurrence);
+    }
+    fields.recurrenceNext = toSheetDate_(nextKey);
   } else {
     fields.recurrence = "";
     fields.recurrenceNext = "";
@@ -1930,6 +1940,69 @@ function ticketToRow_(data) {
   ];
 }
 
+function rememberRecentTicketCreate_(ticketId, sheetRow) {
+  const id = String(ticketId || "").trim();
+  const row = Number(sheetRow) || 0;
+  if (!id || row < 2) return;
+  try {
+    CacheService.getScriptCache().put("ticketCreate:" + id, String(row), 21600);
+  } catch (cacheError) {
+    Logger.log(cacheError);
+  }
+}
+
+function readRecentTicketCreateRow_(ticketId) {
+  const id = String(ticketId || "").trim();
+  if (!id) return 0;
+  try {
+    return Number(CacheService.getScriptCache().get("ticketCreate:" + id)) || 0;
+  } catch (cacheError) {
+    Logger.log(cacheError);
+    return 0;
+  }
+}
+
+function readTicketAtSheetRow_(sheet, columnMap, sheetRow) {
+  const rowNumber = Number(sheetRow) || 0;
+  if (!sheet || rowNumber < 2 || rowNumber > sheet.getLastRow()) return null;
+  const sheetInfo = getTasksSheetHeaders_(sheet);
+  const row = sheet.getRange(rowNumber, 1, 1, sheetInfo.lastColumn).getValues()[0];
+  return rowToTicket_(row, columnMap, rowNumber);
+}
+
+/**
+ * Oldest non-deleted row with this Ticket ID. Create retries reuse the same id
+ * and must update that row instead of appending another.
+ */
+function findActiveTicketByTicketId_(sheet, columnMap, ticketId) {
+  const id = String(ticketId || "").trim();
+  if (!id || !sheet) return null;
+
+  const cachedRow = readRecentTicketCreateRow_(id);
+  if (cachedRow >= 2) {
+    const cachedTicket = readTicketAtSheetRow_(sheet, columnMap, cachedRow);
+    if (cachedTicket
+      && String(cachedTicket.ticketId || "").trim() === id
+      && !isSoftDeletedStatus_(cachedTicket.Status)) {
+      return cachedTicket;
+    }
+  }
+
+  const idIndex = resolveColumnIndex_(columnMap, "ticketId");
+  if (idIndex < 0) return null;
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return null;
+  const idValues = sheet.getRange(2, idIndex + 1, lastRow - 1, 1).getValues();
+  for (let i = 0; i < idValues.length; i++) {
+    if (String(idValues[i][0] || "").trim() !== id) continue;
+    const ticket = readTicketAtSheetRow_(sheet, columnMap, i + 2);
+    if (!ticket || isSoftDeletedStatus_(ticket.Status)) continue;
+    rememberRecentTicketCreate_(id, ticket.sheetRow);
+    return ticket;
+  }
+  return null;
+}
+
 function appendTicket_(data) {
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(TASKS_SHEET);
   if (!sheet) {
@@ -1937,10 +2010,27 @@ function appendTicket_(data) {
   }
 
   const columnMap = ensureTasksColumns_(sheet);
-  const sheetInfo = getTasksSheetHeaders_(sheet);
+
+  // Edit payloads that arrive as create (retry, omitted action, nested createTickets)
+  // must update the existing row. Never append a second row for a known ticket.
+  const requestedRow = Number(data.sheetRow) || 0;
+  if (requestedRow >= 2 && requestedRow <= sheet.getLastRow()) {
+    return writeTicketToSheetRow_(sheet, requestedRow, data);
+  }
+
   if (!data.ticketId) {
     data = Object.assign({}, data, { ticketId: createTicketId_() });
   }
+  const existingById = findActiveTicketByTicketId_(sheet, columnMap, data.ticketId);
+  if (existingById && existingById.sheetRow) {
+    Logger.log(
+      "appendTicket_ idempotent update ticketId=" + data.ticketId
+      + " row=" + existingById.sheetRow
+    );
+    return writeTicketToSheetRow_(sheet, existingById.sheetRow, data);
+  }
+
+  const sheetInfo = getTasksSheetHeaders_(sheet);
   const prepared = prepareTicketSave_(data, null);
   const enriched = prepared.enriched;
   const fields = prepared.fields;
@@ -1957,6 +2047,7 @@ function appendTicket_(data) {
   sheet.appendRow(row);
   const sheetRow = sheet.getLastRow();
   writeOwnerCell_(sheet, sheetRow, columnMap, fields.owner);
+  rememberRecentTicketCreate_(fields.ticketId || data.ticketId, sheetRow);
 
   // Trust the appended row — skip a post-write getValues on the create path.
   const savedTicket = rowToTicket_(row, columnMap, sheetRow);
@@ -2605,9 +2696,15 @@ function formatTicketDateTime_(value) {
 
 function toSheetDate_(value) {
   if (!value) return "";
-  const parts = String(value).split("-");
-  if (parts.length !== 3) return value;
-  return new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+  // Noon avoids a spreadsheet-timezone shift that stores the previous calendar day.
+  const key = calendarDayKey_(value);
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(key || "");
+  if (match) {
+    return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]), 12, 0, 0);
+  }
+  const iso = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(value).trim());
+  if (!iso) return value;
+  return new Date(Number(iso[1]), Number(iso[2]) - 1, Number(iso[3]), 12, 0, 0);
 }
 
 function buildResponse_(payload, e) {
@@ -4607,7 +4704,7 @@ function findRecurringChildForPeriod_(tickets, templateTicket, periodKey) {
   for (let i = 0; i < tickets.length; i++) {
     const ticket = tickets[i];
     if (isSoftDeletedStatus_(ticket.Status)) continue;
-    if (calendarDayKey_(ticket["Start date"]) !== period) continue;
+    if (!ticketMatchesOccurrenceDay_(ticket, periodKey)) continue;
     if (templateId && String(ticket.ticketId || "").trim() === templateId) continue;
     if (!ticketInRecurringSeries_(ticket, seriesRootId, templateId, byId)) continue;
     return ticket;
@@ -4641,31 +4738,93 @@ function sameTicketIdentity_(left, right) {
   return Boolean(leftRow && rightRow && leftRow === rightRow);
 }
 
-/**
- * Same occurrence: normalized Task + calendar start day + Type + Owner.
- * Owner is required so two people with the same daily task are left alone.
- */
-function occurrenceGroupKey_(ticket) {
-  const task = normalizeTicketIdentity_(ticket && ticket.Task);
-  const day = calendarDayKey_(ticket && ticket["Start date"]);
-  const type = normalizeTicketIdentity_(ticket && ticket.Type);
-  const owner = normalizeTicketIdentity_(ticket && ticket.Owner);
-  if (!task || !day) return "";
-  return task + "\n" + day + "\n" + type + "\n" + owner;
+function pad2_(value) {
+  const text = String(value);
+  return text.length >= 2 ? text : ("0" + text);
 }
 
 /**
- * Open ticket with the same Task + start day (+ Type + Owner), ignoring
- * RecurrenceParentId. Used so processRecurringTickets does not append a twin.
+ * Calendar-day keys for one cell. ISO and Date values contribute one key.
+ * Ambiguous slash dates contribute both day/month and month/day readings so
+ * "9/10/2026" and "2026-10-09" can still be the same occurrence.
+ */
+function occurrenceDayKeys_(value) {
+  const keys = [];
+  const seen = {};
+  function add(key) {
+    if (!key || seen[key]) return;
+    seen[key] = true;
+    keys.push(key);
+  }
+  add(calendarDayKey_(value));
+  if (value === null || value === undefined || value === "") return keys;
+  if (Object.prototype.toString.call(value) === "[object Date]") return keys;
+  const slash = String(value).trim().match(/^(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{4})/);
+  if (!slash) return keys;
+  const a = Number(slash[1]);
+  const b = Number(slash[2]);
+  const year = Number(slash[3]);
+  if (a >= 1 && a <= 12 && b >= 1 && b <= 31) {
+    add(year + "-" + pad2_(a) + "-" + pad2_(b));
+  }
+  if (b >= 1 && b <= 12 && a >= 1 && a <= 31) {
+    add(year + "-" + pad2_(b) + "-" + pad2_(a));
+  }
+  return keys;
+}
+
+function ticketOccurrenceDayKeys_(ticket) {
+  const startKeys = occurrenceDayKeys_(ticket && ticket["Start date"]);
+  if (startKeys.length) return startKeys;
+  return occurrenceDayKeys_(ticket && ticket.Milestone);
+}
+
+function ticketMatchesOccurrenceDay_(ticket, periodKey) {
+  const periodKeys = occurrenceDayKeys_(periodKey);
+  if (!periodKeys.length || !ticket) return false;
+  const ticketKeys = ticketOccurrenceDayKeys_(ticket);
+  for (let i = 0; i < ticketKeys.length; i++) {
+    if (periodKeys.indexOf(ticketKeys[i]) >= 0) return true;
+  }
+  return false;
+}
+
+/** Collapse whitespace and punctuation so "Daily backup." and "daily  backup" match. */
+function normalizeLooseIdentity_(value) {
+  return String(value || "")
+    .replace(/[\u200B-\u200D\uFEFF]/g, "")
+    .replace(/\u00a0/g, " ")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * Same occurrence for open-twin cleanup: loose Task + calendar day + loose Owner.
+ * Type is ignored (Daily - Infra vs Daily Infra). Owner stays in the key so two
+ * people with the same daily task are not merged. Series-root grouping catches
+ * twins whose owner text changed.
+ */
+function occurrenceGroupKey_(ticket) {
+  const task = normalizeLooseIdentity_(ticket && ticket.Task);
+  const day = calendarDayKey_(ticket && ticket["Start date"]);
+  const owner = normalizeLooseIdentity_(ticket && ticket.Owner);
+  if (!task || !day) return "";
+  return task + "\n" + day + "\n" + owner;
+}
+
+/**
+ * Open ticket with the same loose Task + start day + loose Owner.
+ * Type is not required. Used so processRecurringTickets does not append a twin.
  */
 function findOpenOccurrenceByTaskAndStart_(tickets, template, periodKey) {
-  const taskKey = normalizeTicketIdentity_(template && template.Task);
-  const typeKey = normalizeTicketIdentity_(template && template.Type);
-  const ownerKey = normalizeTicketIdentity_(template && template.Owner);
-  const period = calendarDayKey_(periodKey);
+  const taskKey = normalizeLooseIdentity_(template && template.Task);
+  const ownerKey = normalizeLooseIdentity_(template && template.Owner);
   const templateId = String(template && template.ticketId || "").trim();
   const templateRow = Number(template && template.sheetRow) || 0;
-  if (!taskKey || !period) return null;
+  if (!taskKey || !occurrenceDayKeys_(periodKey).length) return null;
 
   let match = null;
   for (let i = 0; i < (tickets || []).length; i++) {
@@ -4673,10 +4832,9 @@ function findOpenOccurrenceByTaskAndStart_(tickets, template, periodKey) {
     if (!isOpenOccurrenceCandidate_(ticket)) continue;
     if (templateId && String(ticket.ticketId || "").trim() === templateId) continue;
     if (templateRow && Number(ticket.sheetRow) === templateRow) continue;
-    if (normalizeTicketIdentity_(ticket.Task) !== taskKey) continue;
-    if (normalizeTicketIdentity_(ticket.Type) !== typeKey) continue;
-    if (normalizeTicketIdentity_(ticket.Owner) !== ownerKey) continue;
-    if (calendarDayKey_(ticket["Start date"]) !== period) continue;
+    if (normalizeLooseIdentity_(ticket.Task) !== taskKey) continue;
+    if (normalizeLooseIdentity_(ticket.Owner) !== ownerKey) continue;
+    if (!ticketMatchesOccurrenceDay_(ticket, periodKey)) continue;
     if (!match) {
       match = ticket;
       continue;
@@ -4688,13 +4846,12 @@ function findOpenOccurrenceByTaskAndStart_(tickets, template, periodKey) {
   return match;
 }
 
-function lookupSeriesRecurrence_(tickets, taskKey, typeKey, ownerKey) {
+function lookupSeriesRecurrence_(tickets, taskKey, ownerKey) {
   for (let i = 0; i < (tickets || []).length; i++) {
     const ticket = tickets[i];
     if (!ticket || isSoftDeletedStatus_(ticket.Status)) continue;
-    if (normalizeTicketIdentity_(ticket.Task) !== taskKey) continue;
-    if (normalizeTicketIdentity_(ticket.Type) !== typeKey) continue;
-    if (normalizeTicketIdentity_(ticket.Owner) !== ownerKey) continue;
+    if (normalizeLooseIdentity_(ticket.Task) !== taskKey) continue;
+    if (normalizeLooseIdentity_(ticket.Owner) !== ownerKey) continue;
     if (!ticketHasRecurrenceValue_(ticket)) continue;
     return {
       value: normalizeRecurrenceValue_(ticket.Recurrence || ticket.recurrence || ""),
@@ -4702,6 +4859,30 @@ function lookupSeriesRecurrence_(tickets, taskKey, typeKey, ownerKey) {
     };
   }
   return null;
+}
+
+function periodReserveKeys_(template, periodKey, seriesRootId) {
+  const day = calendarDayKey_(periodKey) || "";
+  const keys = [];
+  const task = normalizeLooseIdentity_(template && template.Task);
+  const owner = normalizeLooseIdentity_(template && template.Owner);
+  if (task && day) keys.push("task\n" + task + "\n" + owner + "\n" + day);
+  const root = String(seriesRootId || "").trim();
+  if (root && day) keys.push("series\n" + root + "\n" + day);
+  return keys;
+}
+
+function rememberReservedPeriod_(reserved, template, periodKey, seriesRootId) {
+  const keys = periodReserveKeys_(template, periodKey, seriesRootId);
+  for (let i = 0; i < keys.length; i++) reserved[keys[i]] = true;
+}
+
+function periodAlreadyReserved_(reserved, template, periodKey, seriesRootId) {
+  const keys = periodReserveKeys_(template, periodKey, seriesRootId);
+  for (let i = 0; i < keys.length; i++) {
+    if (reserved[keys[i]]) return true;
+  }
+  return false;
 }
 
 function softDeleteDuplicateOccurrence_(sheet, columnMap, ticket) {
@@ -4744,9 +4925,8 @@ function dedupeDuplicateOpenOccurrences_(sheet, columnMap, tickets) {
     if (!members || members.length < 2) continue;
 
     const sample = members[0];
-    const taskKey = normalizeTicketIdentity_(sample.Task);
-    const typeKey = normalizeTicketIdentity_(sample.Type);
-    const ownerKey = normalizeTicketIdentity_(sample.Owner);
+    const taskKey = normalizeLooseIdentity_(sample.Task);
+    const ownerKey = normalizeLooseIdentity_(sample.Owner);
     let seriesLinked = false;
     for (let m = 0; m < members.length; m++) {
       if (ticketHasRecurrenceValue_(members[m]) || String(members[m].RecurrenceParentId || "").trim()) {
@@ -4754,7 +4934,7 @@ function dedupeDuplicateOpenOccurrences_(sheet, columnMap, tickets) {
         break;
       }
     }
-    const seriesRecurrence = lookupSeriesRecurrence_(tickets, taskKey, typeKey, ownerKey);
+    const seriesRecurrence = lookupSeriesRecurrence_(tickets, taskKey, ownerKey);
     if (!seriesLinked && !seriesRecurrence) continue;
 
     const withRecurrence = [];
@@ -4800,6 +4980,148 @@ function dedupeDuplicateOpenOccurrences_(sheet, columnMap, tickets) {
       if (sameTicketIdentity_(member, keeper)) continue;
       if (softDeleteDuplicateOccurrence_(sheet, columnMap, member)) removed += 1;
     }
+  }
+  removed += dedupeSeriesSameDayOpenTwins_(sheet, columnMap, tickets);
+  removed += dedupeBlankRecurrenceOpenTwins_(sheet, columnMap, tickets);
+  removed += dedupeSameTicketIdOpenRows_(sheet, columnMap, tickets);
+  return removed;
+}
+
+function isOpenSeriesTwinCandidate_(ticket) {
+  if (!ticket) return false;
+  if (isSoftDeletedStatus_(ticket.Status)) return false;
+  if (isCompletedStatus(ticket.Status)) return false;
+  return true;
+}
+
+function pickOpenTwinKeeper_(members) {
+  const withRecurrence = [];
+  for (let m = 0; m < members.length; m++) {
+    if (ticketHasRecurrenceValue_(members[m])) withRecurrence.push(members[m]);
+  }
+  const pool = (withRecurrence.length ? withRecurrence : members).slice();
+  pool.sort(compareRecurringOccurrenceNewestFirst_);
+  return pool[0] || null;
+}
+
+function softDeleteOpenTwinMembers_(sheet, columnMap, members, keeper) {
+  let removed = 0;
+  for (let m = 0; m < members.length; m++) {
+    if (sameTicketIdentity_(members[m], keeper)) continue;
+    if (softDeleteDuplicateOccurrence_(sheet, columnMap, members[m])) removed += 1;
+  }
+  return removed;
+}
+
+/**
+ * Same series + same start day, even when Task / Type / Owner text differs.
+ * Keeps the Recurrence row and soft-deletes the blank-Recurrence twin.
+ * Sub-tasks are included so a spawned copy is not left beside its parent row.
+ */
+function dedupeSeriesSameDayOpenTwins_(sheet, columnMap, tickets) {
+  const byId = buildTicketIdMap_(tickets);
+  const groups = {};
+  for (let i = 0; i < (tickets || []).length; i++) {
+    const ticket = tickets[i];
+    if (!isOpenSeriesTwinCandidate_(ticket)) continue;
+    const hasRecurrence = ticketHasRecurrenceValue_(ticket);
+    const parentId = String(ticket.RecurrenceParentId || "").trim();
+    if (!hasRecurrence && !parentId) continue;
+    const rootId = resolveRecurringSeriesRootId_(ticket, byId)
+      || String(ticket.ticketId || "").trim();
+    const day = calendarDayKey_(ticket["Start date"]);
+    if (!rootId || !day) continue;
+    const key = rootId + "\n" + day;
+    if (!groups[key]) groups[key] = [];
+    groups[key].push(ticket);
+  }
+
+  let removed = 0;
+  const keys = Object.keys(groups);
+  for (let g = 0; g < keys.length; g++) {
+    const members = groups[keys[g]];
+    if (!members || members.length < 2) continue;
+    const keeper = pickOpenTwinKeeper_(members);
+    if (!keeper) continue;
+    removed += softDeleteOpenTwinMembers_(sheet, columnMap, members, keeper);
+  }
+  return removed;
+}
+
+/**
+ * Blank-Recurrence row whose start day is the same occurrence as the series
+ * head, including slash-date readings that do not share a primary day key.
+ */
+function dedupeBlankRecurrenceOpenTwins_(sheet, columnMap, tickets) {
+  const byId = buildTicketIdMap_(tickets);
+  let removed = 0;
+  for (let h = 0; h < (tickets || []).length; h++) {
+    const head = tickets[h];
+    if (!isOpenSeriesTwinCandidate_(head) || !ticketHasRecurrenceValue_(head)) continue;
+    const headRoot = resolveRecurringSeriesRootId_(head, byId)
+      || String(head.ticketId || "").trim();
+    const headTask = normalizeLooseIdentity_(head.Task);
+    const headOwner = normalizeLooseIdentity_(head.Owner);
+    for (let i = 0; i < tickets.length; i++) {
+      const twin = tickets[i];
+      if (!isOpenSeriesTwinCandidate_(twin) || sameTicketIdentity_(twin, head)) continue;
+      if (ticketHasRecurrenceValue_(twin)) continue;
+      const parentId = String(twin.RecurrenceParentId || "").trim();
+      const sameSeries = Boolean(headRoot) && ticketInRecurringSeries_(twin, headRoot, head.ticketId, byId);
+      const sameTaskOwner = normalizeLooseIdentity_(twin.Task) === headTask
+        && normalizeLooseIdentity_(twin.Owner) === headOwner;
+      if (!sameSeries && !(parentId && sameTaskOwner)) continue;
+      if (!ticketMatchesOccurrenceDay_(twin, head["Start date"])) continue;
+      if (softDeleteDuplicateOccurrence_(sheet, columnMap, twin)) removed += 1;
+    }
+  }
+  return removed;
+}
+
+/**
+ * Create retries that already inserted a second row with the same Ticket ID.
+ * Keeps the earliest open row (the one the client stored) and soft-deletes the rest.
+ */
+function dedupeSameTicketIdOpenRows_(sheet, columnMap, tickets) {
+  const groups = {};
+  for (let i = 0; i < (tickets || []).length; i++) {
+    const ticket = tickets[i];
+    if (!isOpenSeriesTwinCandidate_(ticket)) continue;
+    const id = String(ticket.ticketId || "").trim();
+    if (!id) continue;
+    if (!groups[id]) groups[id] = [];
+    groups[id].push(ticket);
+  }
+
+  let removed = 0;
+  const ids = Object.keys(groups);
+  for (let g = 0; g < ids.length; g++) {
+    const members = groups[ids[g]];
+    if (!members || members.length < 2) continue;
+    let keeper = members[0];
+    for (let m = 1; m < members.length; m++) {
+      if ((Number(members[m].sheetRow) || 0) < (Number(keeper.sheetRow) || 0)) keeper = members[m];
+    }
+    if (!ticketHasRecurrenceValue_(keeper)) {
+      for (let m = 0; m < members.length; m++) {
+        if (!ticketHasRecurrenceValue_(members[m])) continue;
+        const recurrenceValue = normalizeRecurrenceValue_(members[m].Recurrence || members[m].recurrence || "");
+        if (!recurrenceValue) continue;
+        writeTicketRecurrenceFields_(
+          sheet,
+          columnMap,
+          keeper,
+          recurrenceValue,
+          calendarDayKey_(members[m].RecurrenceNext)
+            || advanceRecurrenceDateKey_(
+              calendarDayKey_(keeper["Start date"]) || todaySheetDateKey_(),
+              recurrenceValue
+            )
+        );
+        break;
+      }
+    }
+    removed += softDeleteOpenTwinMembers_(sheet, columnMap, members, keeper);
   }
   return removed;
 }
@@ -5001,7 +5323,7 @@ function appendRecurringInstanceRow_(sheet, columnMap, template, periodKey, next
     milestone: toSheetDate_(childMilestone),
     notes: notes,
     bhanuList: template["Bhanu List"] || "",
-    parentSheetRow: "",
+    parentSheetRow: Number(template.parentSheetRow || template["Parent Sheet Row"]) || "",
     ticketId: createTicketId_(),
     recurrence: recurrence,
     recurrenceNext: recurrenceNext ? toSheetDate_(recurrenceNext) : "",
@@ -5039,10 +5361,10 @@ function appendRecurringInstanceRow_(sheet, columnMap, template, periodKey, next
 
 /**
  * Time-driven handler: create due recurring tickets and hand off Recurrence
- * to the newest ticket (chain). LockService-safe; soft-deleted heads skip;
- * dedupes open twins by Task + start day + Type + Owner even when
- * RecurrenceParentId does not match; upgrades legacy children missing Recurrence;
- * consolidates multiple Recurrence heads down to the newest open occurrence.
+ * to the newest ticket (chain). LockService-safe; soft-deleted heads skip.
+ * Does not append when a series child or a loose task+day+owner match already
+ * exists for that period. Soft-deletes open twins (blank Recurrence row, same
+ * Ticket ID retries) before and after spawn.
  */
 function processRecurringTickets() {
   const lock = LockService.getScriptLock();
@@ -5079,7 +5401,7 @@ function processRecurringTickets() {
       tickets.push(rowToTicket_(values[i], columnMap, i + 2));
     }
 
-    // Remove open twins (same task, day, type, owner) before spawning another row.
+    // Remove open twins before spawning another row (series, loose task+day, same Ticket ID).
     let deduped = dedupeDuplicateOpenOccurrences_(sheet, columnMap, tickets);
     // Fix split heads (old head still Recurrence-set + child blank) before spawn.
     let repaired = repairRecurringSeriesHeads_(sheet, columnMap, tickets);
@@ -5088,6 +5410,7 @@ function processRecurringTickets() {
     let created = 0;
     let advanced = 0;
     let handedOff = 0;
+    const reservedPeriods = {};
 
     for (let i = 0; i < tickets.length; i++) {
       let active = tickets[i];
@@ -5120,7 +5443,8 @@ function processRecurringTickets() {
           || String(active.ticketId || "").trim();
 
         // Head already represents this period — bump RecurrenceNext, do not spawn a twin.
-        if (calendarDayKey_(active["Start date"]) === calendarDayKey_(nextKey)) {
+        if (ticketMatchesOccurrenceDay_(active, nextKey)) {
+          rememberReservedPeriod_(reservedPeriods, active, nextKey, seriesRootId);
           if (sheetDateKey_(active.RecurrenceNext) !== followingNext) {
             writeTicketRecurrenceFields_(
               sheet,
@@ -5139,6 +5463,14 @@ function processRecurringTickets() {
         const existingChild = findRecurringChildForPeriod_(tickets, active, nextKey)
           || findOpenOccurrenceByTaskAndStart_(tickets, active, nextKey);
         const parentId = seriesRootId;
+
+        if (!existingChild && periodAlreadyReserved_(reservedPeriods, active, nextKey, seriesRootId)) {
+          nextKey = followingNext;
+          catchUps += 1;
+          advanced += 1;
+          continue;
+        }
+        rememberReservedPeriod_(reservedPeriods, active, nextKey, seriesRootId);
 
         if (!existingChild) {
           const child = appendRecurringInstanceRow_(

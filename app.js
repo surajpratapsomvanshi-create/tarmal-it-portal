@@ -6597,14 +6597,15 @@ function readRecurrenceFromFormData(data) {
     value = normalizeRecurrenceValue(interval);
   }
   if (!value) return { value: "", next: "" };
-  // Prefer explicit form value, then existing template next date (edit), else due today
-  // so the first generated copy is created as soon as Apps Script processes recurrence.
+  // This ticket is already the occurrence for its start day. Next must be after
+  // that day so a save does not ask Apps Script to append a second open copy.
+  const startKey = canonicalizeTicketDate(data.get("Start date") || "") || getTodayDateValue();
   const existingNext = canonicalizeTicketDate(data.get("RecurrenceNext") || "")
     || canonicalizeTicketDate(activeEditTicket?.RecurrenceNext || "");
-  return {
-    value,
-    next: existingNext || getTodayDateValue()
-  };
+  const next = existingNext && existingNext > startKey
+    ? existingNext
+    : advanceRecurrenceDateValue(startKey, value);
+  return { value, next };
 }
 
 function setRecurrenceFormState(prefix, ticket = null) {
@@ -9094,6 +9095,11 @@ async function sendToSheet(ticket, options = {}) {
     throw new Error("Owner is required before syncing.");
   }
 
+  // A row that already exists must update. Never fall through to create.
+  if (Number(ticket.sheetRow) >= 2) {
+    return sendTicketUpdateToSheet(ticket);
+  }
+
   const result = await postToSheetWithResponse(buildTicketSheetPayload(ticket, options), {
     expectedTicket: ticket
   });
@@ -9118,16 +9124,30 @@ async function sendNewTicketsToSheet(tickets, onProgress) {
 
   let uploadedTotal = 0;
   const outcomes = [];
+  const creates = [];
+  for (const ticket of tickets) {
+    if (Number(ticket.sheetRow) >= 2) {
+      const updated = await sendTicketUpdateToSheet(ticket);
+      outcomes.push(updated);
+      uploadedTotal += Number(updated?.uploadedCount) || 0;
+    } else {
+      creates.push(ticket);
+    }
+  }
+  if (!creates.length) {
+    return { synced: true, uploadedCount: uploadedTotal, count: tickets.length, outcomes };
+  }
+
   // Defer Drive uploads on create so Apps Script can return after writing rows.
   const createOptions = { deferAttachments: true };
 
-  if (tickets.length > 1) {
-    onProgress?.(0, tickets.length);
+  if (creates.length > 1) {
+    onProgress?.(0, creates.length);
     const result = await postToSheetWithResponse({
       action: "createTickets",
-      tickets: tickets.map((ticket) => buildTicketSheetPayload(ticket, createOptions))
+      tickets: creates.map((ticket) => buildTicketSheetPayload(ticket, createOptions))
     }, {
-      expectedTicket: tickets.length === 1 ? tickets[0] : null
+      expectedTicket: creates.length === 1 ? creates[0] : null
     });
 
     if (!result?.ok && !Array.isArray(result?.results)) {
@@ -9143,20 +9163,20 @@ async function sendNewTicketsToSheet(tickets, onProgress) {
         outcomes.push(item);
         return;
       }
-      applyCreatedTicketSyncResult(tickets[index], item);
+      applyCreatedTicketSyncResult(creates[index], item);
       uploadedTotal += Number(item?.uploadedCount) || 0;
       outcomes.push(item);
       successCount += 1;
     });
-    onProgress?.(tickets.length - 1, tickets.length);
+    onProgress?.(creates.length - 1, creates.length);
     if (!successCount && failCount) {
       throw new Error(result?.error || items.find((item) => item?.error)?.error || "Ticket submit failed.");
     }
     if (failCount) {
-      setStatus("error", `Saved ${successCount} of ${tickets.length} tickets — retry failed ones`);
+      setStatus("error", `Saved ${successCount} of ${creates.length} tickets — retry failed ones`);
     }
   } else {
-    const ticket = tickets[0];
+    const ticket = creates[0];
     if (!cleanText(ticket.Owner)) {
       throw new Error("Each ticket must have an owner before syncing.");
     }
