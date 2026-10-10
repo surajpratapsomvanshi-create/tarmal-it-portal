@@ -6,11 +6,11 @@
     <title>Tarmal IT Portal</title>
     <link rel="icon" href="./assets/tarmal-mark.png?v=1" type="image/png">
     <link rel="apple-touch-icon" href="./assets/apple-touch-icon.png?v=1">
-    <link rel="stylesheet" href="./styles.css?v=191">
+    <link rel="stylesheet" href="./styles.css?v=196">
     <!-- auth stays blocking so requireLogin runs before app chrome paints -->
     <script src="./auth.js?v=26"></script>
     <!-- Defer main bundles so HTML can parse while ~210KB+ app.js downloads -->
-    <script src="./app.js?v=217" defer></script>
+    <script src="./app.js?v=222" defer></script>
     <script src="./assets.js?v=13" defer></script>
     <script src="./documents.js?v=12" defer></script>
     <script src="./procurement.js?v=6" defer></script>
@@ -440,10 +440,7 @@
                 <option value="outside-hours">Completed outside office hours</option>
               </select>
             </label>
-            <div class="ticket-filter-actions">
-              <button class="secondary-button filter-clear today-hours-toggle" id="ticketOutsideHoursButton" type="button" aria-pressed="false">Completed outside office hours</button>
-              <button class="secondary-button filter-clear clear-filters-button" id="clearTicketFilters" type="button">Clear Filters</button>
-            </div>
+            <button class="secondary-button filter-clear clear-filters-button" id="clearTicketFilters" type="button">Clear Filters</button>
           </div>
           <p class="filter-summary" id="ticketFilterSummary"></p>
             </div>

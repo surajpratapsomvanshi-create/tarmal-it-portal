@@ -116,7 +116,6 @@ const ticketPriorityFilterTrigger = document.querySelector("#ticketPriorityFilte
 const ticketBhanuFilterPanel = document.querySelector("#ticketBhanuFilterPanel");
 const ticketBhanuFilterTrigger = document.querySelector("#ticketBhanuFilterTrigger");
 const ticketSortFilter = document.querySelector("#ticketSortFilter");
-const ticketOutsideHoursButton = document.querySelector("#ticketOutsideHoursButton");
 const ticketCompletedAtHeader = document.querySelector("#ticketCompletedAtHeader");
 const clearTicketFilters = document.querySelector("#clearTicketFilters");
 const ticketFilterSummary = document.querySelector("#ticketFilterSummary");
@@ -1787,7 +1786,6 @@ function getFilterUiSignature() {
   return [
     ticketSearchFilter?.value || "",
     ticketSortFilter?.value || "",
-    ticketOutsideHoursButton?.getAttribute("aria-pressed") || "",
     ticketStatusFilterPanel ? getMultiFilterValues(ticketStatusFilterPanel).join(",") : "",
     ticketOwnerFilterPanel ? getMultiFilterValues(ticketOwnerFilterPanel).join(",") : "",
     ticketTypeFilterPanel ? getMultiFilterValues(ticketTypeFilterPanel).join(",") : "",
@@ -5400,22 +5398,16 @@ function completionOutsideOffice(ticket) {
 }
 
 function isTicketOutsideHoursFilterOn() {
-  return ticketSortFilter?.value === "outside-hours"
-    || ticketOutsideHoursButton?.getAttribute("aria-pressed") === "true";
+  return ticketSortFilter?.value === "outside-hours";
 }
 
 function setTicketOutsideHoursFilter(on) {
-  const active = Boolean(on);
-  if (ticketOutsideHoursButton) {
-    ticketOutsideHoursButton.setAttribute("aria-pressed", active ? "true" : "false");
-    ticketOutsideHoursButton.classList.toggle("is-active", active);
-  }
   if (!ticketSortFilter) return;
-  if (active && ticketSortFilter.value !== "outside-hours") {
-    setTicketSortFilter("outside-hours");
-  } else if (!active && ticketSortFilter.value === "outside-hours") {
-    setTicketSortFilter(DEFAULT_TICKET_SORT);
+  if (on) {
+    if (ticketSortFilter.value !== "outside-hours") setTicketSortFilter("outside-hours");
+    return;
   }
+  if (ticketSortFilter.value === "outside-hours") setTicketSortFilter(DEFAULT_TICKET_SORT);
 }
 
 function ticketHasEndDate(ticket) {
@@ -10329,15 +10321,6 @@ setSelectedPerformancePeriod(selectedPerformancePeriod);
 
 ticketSearchFilter?.addEventListener("input", () => scheduleRenderTickets());
 ticketSortFilter?.addEventListener("change", () => {
-  const active = ticketSortFilter.value === "outside-hours";
-  if (ticketOutsideHoursButton) {
-    ticketOutsideHoursButton.setAttribute("aria-pressed", active ? "true" : "false");
-    ticketOutsideHoursButton.classList.toggle("is-active", active);
-  }
-  scheduleRenderTickets({ immediate: true });
-});
-ticketOutsideHoursButton?.addEventListener("click", () => {
-  setTicketOutsideHoursFilter(!isTicketOutsideHoursFilterOn());
   scheduleRenderTickets({ immediate: true });
 });
 projectSearchFilter?.addEventListener("input", () => scheduleRenderTickets());
