@@ -5400,14 +5400,22 @@ function completionOutsideOffice(ticket) {
 }
 
 function isTicketOutsideHoursFilterOn() {
-  return ticketOutsideHoursButton?.getAttribute("aria-pressed") === "true";
+  return ticketSortFilter?.value === "outside-hours"
+    || ticketOutsideHoursButton?.getAttribute("aria-pressed") === "true";
 }
 
 function setTicketOutsideHoursFilter(on) {
-  if (!ticketOutsideHoursButton) return;
   const active = Boolean(on);
-  ticketOutsideHoursButton.setAttribute("aria-pressed", active ? "true" : "false");
-  ticketOutsideHoursButton.classList.toggle("is-active", active);
+  if (ticketOutsideHoursButton) {
+    ticketOutsideHoursButton.setAttribute("aria-pressed", active ? "true" : "false");
+    ticketOutsideHoursButton.classList.toggle("is-active", active);
+  }
+  if (!ticketSortFilter) return;
+  if (active && ticketSortFilter.value !== "outside-hours") {
+    setTicketSortFilter("outside-hours");
+  } else if (!active && ticketSortFilter.value === "outside-hours") {
+    setTicketSortFilter(DEFAULT_TICKET_SORT);
+  }
 }
 
 function ticketHasEndDate(ticket) {
@@ -10320,7 +10328,14 @@ performancePeriodFilters?.querySelectorAll("[data-period]").forEach((button) => 
 setSelectedPerformancePeriod(selectedPerformancePeriod);
 
 ticketSearchFilter?.addEventListener("input", () => scheduleRenderTickets());
-ticketSortFilter?.addEventListener("change", () => scheduleRenderTickets({ immediate: true }));
+ticketSortFilter?.addEventListener("change", () => {
+  const active = ticketSortFilter.value === "outside-hours";
+  if (ticketOutsideHoursButton) {
+    ticketOutsideHoursButton.setAttribute("aria-pressed", active ? "true" : "false");
+    ticketOutsideHoursButton.classList.toggle("is-active", active);
+  }
+  scheduleRenderTickets({ immediate: true });
+});
 ticketOutsideHoursButton?.addEventListener("click", () => {
   setTicketOutsideHoursFilter(!isTicketOutsideHoursFilterOn());
   scheduleRenderTickets({ immediate: true });
