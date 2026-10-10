@@ -6,11 +6,11 @@
     <title>Tarmal IT Portal</title>
     <link rel="icon" href="./assets/tarmal-mark.png?v=1" type="image/png">
     <link rel="apple-touch-icon" href="./assets/apple-touch-icon.png?v=1">
-    <link rel="stylesheet" href="./styles.css?v=185">
+    <link rel="stylesheet" href="./styles.css?v=186">
     <!-- auth stays blocking so requireLogin runs before app chrome paints -->
     <script src="./auth.js?v=26"></script>
     <!-- Defer main bundles so HTML can parse while ~210KB+ app.js downloads -->
-    <script src="./app.js?v=211" defer></script>
+    <script src="./app.js?v=212" defer></script>
     <script src="./assets.js?v=13" defer></script>
     <script src="./documents.js?v=12" defer></script>
     <script src="./procurement.js?v=6" defer></script>
@@ -41,6 +41,9 @@
           </button>
           <button class="tab-button" type="button" data-tab="tickets" data-requires="dashboard" data-short="TK">
             <span class="tab-button-label">Tickets</span>
+          </button>
+          <button class="tab-button" type="button" data-tab="today" data-requires="dashboard" data-short="TD">
+            <span class="tab-button-label">Today</span>
           </button>
           <button class="tab-button" type="button" data-tab="projects" data-requires="dashboard" data-short="PJ">
             <span class="tab-button-label">Projects</span>
@@ -464,6 +467,30 @@
               <tbody id="ticketRows"></tbody>
             </table>
           </div>
+        </section>
+      </section>
+
+      <section class="tab-panel" data-panel="today" aria-label="Today">
+        <section class="ticket-board today-board" aria-label="Today planner">
+          <div class="board-header">
+            <div>
+              <p class="eyebrow">Daily planner</p>
+              <h2>Today</h2>
+            </div>
+            <div class="board-actions today-toolbar">
+              <label class="field filter-field today-owner-field">
+                <span>Owner</span>
+                <select id="todayOwnerFilter" aria-label="Owner">
+                  <option value="all">All owners</option>
+                </select>
+              </label>
+              <button class="secondary-button today-hours-toggle" id="todayOutsideHoursButton" type="button" aria-pressed="false">
+                Completed outside office hours
+              </button>
+            </div>
+          </div>
+          <p class="filter-summary" id="todaySummary"></p>
+          <div id="todayPlanner"></div>
         </section>
       </section>
 

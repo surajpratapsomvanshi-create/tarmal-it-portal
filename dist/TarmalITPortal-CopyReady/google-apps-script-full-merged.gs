@@ -923,6 +923,7 @@ function doPost(e) {
         status: result.status || "",
         ticketId: result.ticketId || "",
         lastUpdated: result.lastUpdated || "",
+        closedOn: result.closedOn || "",
         approvalPending: result.approvalPending === true,
         approvalSentTo: result.approvalSentTo || "",
         approvalEmailError: result.approvalEmailError || "",
@@ -1064,6 +1065,7 @@ function doPost(e) {
       status: appendResult.status || "",
       ticketId: appendResult.ticketId || "",
       lastUpdated: appendResult.lastUpdated || "",
+      closedOn: appendResult.closedOn || "",
       approvalPending: appendResult.approvalPending === true,
       approvalSentTo: appendResult.approvalSentTo || "",
       approvalMessage: appendResult.approvalMessage || "",
@@ -1831,6 +1833,12 @@ function writeTicketToSheetRow_(sheet, sheetRow, data) {
     approvalEmailError: approvalEmailResult.error || "",
     approvalMessage: workflow.message || "",
     approved: workflow.approved === true,
+    closedOn: rememberClientClosedOn_(
+      savedTicket.Task || data.Task,
+      savedTicket.Owner || fields.owner,
+      savedTicket.Status || fields.status,
+      data.closedOn
+    ),
     recurrence: fields.recurrence || "",
     recurrenceNext: formatTicketFieldDate_(fields.recurrenceNext) || formatTicketFieldDate_(savedTicket.RecurrenceNext) || "",
     recurrenceParentId: fields.recurrenceParentId || ""
@@ -2058,6 +2066,12 @@ function appendTicket_(data) {
   const result = buildTicketSyncResult_(data, enriched, fields, sheetRow, workflow);
   result.ticketId = savedTicket.ticketId || fields.ticketId || "";
   result.lastUpdated = nowIsoStamp_();
+  result.closedOn = rememberClientClosedOn_(
+    savedTicket.Task || data.Task,
+    savedTicket.Owner || fields.owner,
+    savedTicket.Status || fields.status,
+    data.closedOn
+  );
   result.recurrence = fields.recurrence || "";
   result.recurrenceNext = formatTicketFieldDate_(fields.recurrenceNext) || "";
   result.recurrenceParentId = fields.recurrenceParentId || "";
@@ -2694,6 +2708,76 @@ function formatTicketDateTime_(value) {
   return String(value).trim();
 }
 
+var CLIENT_CLOSED_ON_CACHE_KEY_ = "clientClosedOnStampsV1";
+
+function parseClientWallClock_(value) {
+  var text = String(value || "").trim();
+  var match = /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2}))?/.exec(text);
+  if (!match) return null;
+  var hh = Number(match[4]);
+  var mm = Number(match[5]);
+  var ss = Number(match[6] || 0);
+  if (hh === 0 && mm === 0 && ss === 0) return null;
+  return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]), hh, mm, ss);
+}
+
+function readClientClosedOnStash_() {
+  try {
+    return JSON.parse(CacheService.getScriptCache().get(CLIENT_CLOSED_ON_CACHE_KEY_) || "{}") || {};
+  } catch (error) {
+    return {};
+  }
+}
+
+function stashClientClosedOn_(taskKey, formatted) {
+  if (!taskKey || !formatted) return;
+  var map = readClientClosedOnStash_();
+  map[taskKey] = formatted;
+  var keys = Object.keys(map);
+  if (keys.length > 200) {
+    keys.slice(0, keys.length - 200).forEach(function (key) {
+      delete map[key];
+    });
+  }
+  try {
+    CacheService.getScriptCache().put(CLIENT_CLOSED_ON_CACHE_KEY_, JSON.stringify(map), 21600);
+  } catch (error) {
+    Logger.log(error);
+  }
+}
+
+function stashedClientClosedOn_(taskKey) {
+  if (!taskKey) return null;
+  return parseClientWallClock_(readClientClosedOnStash_()[taskKey]);
+}
+
+/**
+ * Persist the browser's completion wall clock onto TaskAudit.Closed On.
+ * Existing Closed On values are kept. Deferred audit reads the stash when the row is new.
+ */
+function rememberClientClosedOn_(taskName, owner, status, clientClosedOn) {
+  if (!isCompletedStatus(status)) return "";
+  var stamp = parseClientWallClock_(clientClosedOn) || new Date();
+  var formatted = formatTicketDateTime_(stamp);
+  var taskKey = buildTaskKey(taskName, owner);
+  stashClientClosedOn_(taskKey, formatted);
+
+  var auditSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("TaskAudit");
+  if (!auditSheet) return formatted;
+  var lastRow = auditSheet.getLastRow();
+  if (lastRow < 2) return formatted;
+  var keys = auditSheet.getRange(2, 1, lastRow, 1).getValues();
+  for (var i = 0; i < keys.length; i++) {
+    if (String(keys[i][0] || "").trim() !== taskKey) continue;
+    var existing = auditSheet.getRange(i + 2, 5).getValue();
+    if (existing) return formatTicketDateTime_(existing);
+    auditSheet.getRange(i + 2, 5).setValue(stamp);
+    invalidateScriptCacheKey_(TASK_AUDIT_CACHE_KEY_);
+    return formatted;
+  }
+  return formatted;
+}
+
 function toSheetDate_(value) {
   if (!value) return "";
   // Noon avoids a spreadsheet-timezone shift that stores the previous calendar day.
@@ -2882,7 +2966,8 @@ function updateHiddenTaskAudit() {
     const completed = isCompletedStatus(status);
 
     if (!auditMap[taskKey]) {
-      const closedOn = completed ? now : "";
+      const stashedClosedOn = stashedClientClosedOn_(taskKey);
+      const closedOn = completed ? (stashedClosedOn || now) : "";
 
       newAuditRows.push([
         taskKey,
@@ -2899,7 +2984,7 @@ function updateHiddenTaskAudit() {
       let closedOnValue = audit.closedOn;
 
       if (completed && !closedOnValue) {
-        closedOnValue = now;
+        closedOnValue = stashedClientClosedOn_(taskKey) || now;
       }
 
       if (!completed) {

@@ -9292,6 +9292,65 @@ body.present-mode .presentation-files-chip {
   }
 }
 
+.today-toolbar {
+  align-items: flex-end;
+}
+
+.today-owner-field {
+  min-width: 180px;
+  margin: 0;
+}
+
+.today-hours-toggle.is-active,
+.today-hours-toggle[aria-pressed="true"] {
+  background: var(--navy);
+  border-color: var(--navy);
+  color: #fff;
+}
+
+.today-section {
+  margin-top: 16px;
+}
+
+.today-section-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.today-section-head h3 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.today-section-count {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.today-empty {
+  margin-top: 12px;
+}
+
+.today-table tbody tr[data-sheet-row] {
+  cursor: pointer;
+}
+
+.today-when-before {
+  color: #9a3412;
+  background: #ffedd5;
+  border-color: #fdba74;
+}
+
+.today-when-after {
+  color: #1e3a8a;
+  background: var(--blue-soft);
+  border-color: #bfdbfe;
+}
+
 @media print {
   body.present-mode .presentation-hero-toolbar-actions,
   body.present-mode .presentation-card-pin {

@@ -171,6 +171,10 @@ const activeTabLabel = document.querySelector("#activeTabLabel");
 const topbarPageTitle = document.querySelector("#topbarPageTitle");
 const topbarExpandPageTitle = document.querySelector("#topbarExpandPageTitle");
 const ticketTable = document.querySelector("#ticketTable");
+const todayOwnerFilter = document.querySelector("#todayOwnerFilter");
+const todayOutsideHoursButton = document.querySelector("#todayOutsideHoursButton");
+const todaySummary = document.querySelector("#todaySummary");
+const todayPlanner = document.querySelector("#todayPlanner");
 const ticketActionsHeader = document.querySelector("#ticketActionsHeader");
 const ticketEditModal = document.querySelector("#ticketEditModal");
 const ticketCreateModal = document.querySelector("#ticketCreateModal");
@@ -225,6 +229,7 @@ const TAB_LABELS = {
   dashboard: "Dashboard",
   performance: "Performance",
   tickets: "Tickets",
+  today: "Today",
   projects: "Projects",
   presentation: "Presentation",
   procurement: "Procurement",
@@ -2086,6 +2091,7 @@ function mergeTicketFromSheet(remoteTicket, index, localBySheetRow = null, local
     ScreenshotUrls: screenshotUrls,
     pendingSheetSync: preservePendingEdits ? pending : 0,
     pendingFields: preservePendingEdits ? remainingPendingFields : [],
+    closedOn: mergedClosedOn(local, remoteTicket, preservePendingEdits, remainingPendingFields),
     notesOmitted: undefined
   });
 }
@@ -2577,6 +2583,10 @@ function buildTicketSheetPayload(ticket, options = {}) {
     lastUpdated: cleanText(ticket.lastUpdated) || undefined,
     expectedStatus: cleanText(ticket.expectedStatus || ticket.lastKnownStatus) || undefined
   };
+
+  if (completionTimestampHasTime(ticket.closedOn)) {
+    payload.closedOn = cleanText(ticket.closedOn);
+  }
 
   // Edits must always send updateTicket + sheetRow. Never omit action — Apps Script
   // used to append when action was missing, which duplicated rows on Task renames.
@@ -4778,7 +4788,7 @@ function setActiveTab(tabName, options = {}) {
   if (options.skipRender) return;
 
   // Paint only the newly visible panel from cache — avoid rebuilding every table.
-  if (tabName === "dashboard" || tabName === "tickets" || tabName === "projects") {
+  if (tabName === "dashboard" || tabName === "tickets" || tabName === "projects" || tabName === "today") {
     renderTickets({ activeOnly: true, forcePanel: tabName });
   } else if (tabName === "presentation") {
     renderPresentationView();
@@ -5317,7 +5327,74 @@ function isMilestoneToday(ticket) {
 }
 
 function isTicketCompleted(ticket) {
-  return statusClass(ticket.Status) === "status-completed";
+  return statusClass(ticket?.Status) === "status-completed";
+}
+
+const OFFICE_START_MINUTES = 8 * 60;
+const OFFICE_END_MINUTES = 17 * 60 + 30;
+let todayShowOutsideHours = false;
+let todayOwnerDefaultApplied = false;
+
+function completionTimestampHasTime(value) {
+  const match = cleanText(value).match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2}))?/);
+  if (!match) return false;
+  const hh = Number(match[2]);
+  const mm = Number(match[3]);
+  const ss = Number(match[4] || 0);
+  return !(hh === 0 && mm === 0 && ss === 0);
+}
+
+function completionClockMinutes(value) {
+  const match = cleanText(value).match(/[T ](\d{2}):(\d{2})/);
+  if (!match) return null;
+  return Number(match[1]) * 60 + Number(match[2]);
+}
+
+function localIsoDateTime(date = new Date()) {
+  const pad = (value) => String(value).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+}
+
+function formatCompletionStamp(value) {
+  const match = cleanText(value).match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})/);
+  if (!match) return cleanText(value);
+  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  return `${Number(match[3])} ${months[Number(match[2]) - 1]} ${match[1]}, ${match[4]}:${match[5]}`;
+}
+
+/** Keep an existing completion time. Stamp local time only when status becomes Completed. */
+function stampTicketCompletion(ticket, previousTicket = null) {
+  const next = { ...ticket };
+  if (!isTicketCompleted(next)) {
+    next.closedOn = "";
+    return next;
+  }
+  if (previousTicket && isTicketCompleted(previousTicket) && completionTimestampHasTime(previousTicket.closedOn)) {
+    next.closedOn = previousTicket.closedOn;
+    return next;
+  }
+  if (completionTimestampHasTime(next.closedOn)) return next;
+  next.closedOn = localIsoDateTime();
+  return next;
+}
+
+function mergedClosedOn(local, remote, preservePendingEdits, pendingFields) {
+  const pendingStatus = Boolean(preservePendingEdits && pendingFields?.includes("Status") && local?.Status);
+  const status = pendingStatus ? local.Status : (remote?.Status || local?.Status || "");
+  if (!isTicketCompleted({ Status: status })) return "";
+  const remoteStamp = completionTimestampHasTime(remote?.closedOn) ? cleanText(remote.closedOn) : "";
+  const localStamp = completionTimestampHasTime(local?.closedOn) ? cleanText(local.closedOn) : "";
+  if (pendingStatus && localStamp) return localStamp;
+  return remoteStamp || localStamp;
+}
+
+function completionOutsideOffice(ticket) {
+  if (!isTicketCompleted(ticket) || !completionTimestampHasTime(ticket?.closedOn)) return "";
+  const minutes = completionClockMinutes(ticket.closedOn);
+  if (minutes == null) return "";
+  if (minutes < OFFICE_START_MINUTES) return "before";
+  if (minutes >= OFFICE_END_MINUTES) return "after";
+  return "";
 }
 
 function ticketHasEndDate(ticket) {
@@ -6784,7 +6861,14 @@ function applyTicketSyncResult(sheetRow, result = {}, expected = {}) {
     NotesHtml: notesHtml,
     ticketId: cleanText(result.ticketId) || ticketStableId(ticket) || ticketStableId(expected),
     sheetRow: Number(result.sheetRow) || Number(sheetRow) || ticket.sheetRow,
-    lastUpdated: serverLastUpdated
+    lastUpdated: serverLastUpdated,
+    closedOn: isTicketCompleted({ Status: syncedStatus })
+      ? (completionTimestampHasTime(result.closedOn)
+        ? cleanText(result.closedOn)
+        : (completionTimestampHasTime(expected.closedOn)
+          ? cleanText(expected.closedOn)
+          : (completionTimestampHasTime(ticket.closedOn) ? cleanText(ticket.closedOn) : "")))
+      : ""
   });
 
   // If Drive returned links, fold them into local notes without dropping pending edits.
@@ -8170,14 +8254,14 @@ async function movePresentationTicketToColumn(sheetRow, columnId) {
   if (priorStatus.toLowerCase() === nextStatus.toLowerCase()) return;
   if (kanbanColumnId(ticket.Status) === columnId) return;
 
-  const updated = {
+  const updated = stampTicketCompletion({
     ...ticket,
     Status: nextStatus,
     expectedStatus: priorStatus || nextStatus,
     lastKnownStatus: priorStatus || nextStatus,
     lastUpdated: new Date().toISOString(),
     ticketId: ticketStableId(ticket) || createTicketId()
-  };
+  }, ticket);
   if (/^completed$/i.test(nextStatus) && !cleanText(updated["End date"])) {
     updated["End date"] = getTodayDateValue();
   }
@@ -8186,7 +8270,10 @@ async function movePresentationTicketToColumn(sheetRow, columnId) {
     ...updated,
     ...rowIdentityFields(updated, ticket)
   };
-  const localTicket = applyTicketApprovalPreview(normalizeTicket(updated), ticket);
+  const localTicket = stampTicketCompletion(
+    applyTicketApprovalPreview(normalizeTicket(updated), ticket),
+    ticket
+  );
   const pendingFields = ["Status"];
   if (cleanText(localTicket["End date"]) !== cleanText(ticket["End date"])) {
     pendingFields.push("End date");
@@ -8870,6 +8957,197 @@ function scheduleSecondaryTicketPanels(tickets) {
   }, 1800);
 }
 
+function compareTodayPriority(a, b) {
+  const priorityA = normalizePriority(a.Priority) === "80" ? 0 : 1;
+  const priorityB = normalizePriority(b.Priority) === "80" ? 0 : 1;
+  if (priorityA !== priorityB) return priorityA - priorityB;
+  return String(a.Task || "").localeCompare(String(b.Task || ""));
+}
+
+function todayMilestoneDay(ticket) {
+  const milestone = parseTicketDate(getEffectiveMilestone(ticket));
+  if (!milestone) return null;
+  const day = new Date(milestone);
+  day.setHours(0, 0, 0, 0);
+  return day;
+}
+
+function ensureTodayOwnerFilter(tickets) {
+  if (!todayOwnerFilter) return;
+  const names = new Set([
+    ...getVisibleOwnerNames().filter(isSelectableTicketOwner),
+    ...tickets.map((ticket) => cleanText(ticket.Owner)).filter(isSelectableTicketOwner)
+  ]);
+  const owners = [...names].sort((a, b) => a.localeCompare(b));
+  const current = todayOwnerFilter.value || "all";
+  todayOwnerFilter.innerHTML = [
+    `<option value="all">All owners</option>`,
+    ...owners.map((owner) => `<option value="${escapeHtml(owner)}">${escapeHtml(owner)}</option>`)
+  ].join("");
+
+  if (!todayOwnerDefaultApplied) {
+    const sessionName = cleanText(Auth.currentUser()?.name).toLowerCase();
+    const match = owners.find((owner) => owner.toLowerCase() === sessionName);
+    todayOwnerFilter.value = match || "all";
+    todayOwnerDefaultApplied = true;
+    return;
+  }
+
+  const stillThere = [...todayOwnerFilter.options].some((option) => option.value === current);
+  todayOwnerFilter.value = stillThere ? current : "all";
+}
+
+function todayOwnerMatches(ticket) {
+  const selected = cleanText(todayOwnerFilter?.value) || "all";
+  if (!selected || selected === "all") return true;
+  return cleanText(ticket.Owner).toLowerCase() === selected.toLowerCase();
+}
+
+function todayTaskCell(ticket) {
+  const task = escapeHtml(ticket.Task);
+  if (!isSubtaskTicket(ticket)) return task;
+  return `<span class="subtask-indicator" title="Sub-task">↳</span> ${task}`;
+}
+
+function todayPlannerRow(ticket) {
+  return `
+    <tr data-sheet-row="${ticket.sheetRow || ""}">
+      <td class="task-col">${todayTaskCell(ticket)}</td>
+      <td class="ticket-col-compact ticket-col-priority"><span class="priority-pill priority-${normalizePriority(ticket.Priority) === "80" ? "high" : "low"}">${escapeHtml(formatPriorityLabel(ticket.Priority))}</span></td>
+      <td class="ticket-col-compact ticket-col-owner">${escapeHtml(ticket.Owner)}</td>
+      <td class="ticket-col-compact ticket-col-status"><span class="status-pill ${statusClass(ticket.Status)}">${escapeHtml(ticket.Status || "Blank")}</span></td>
+      <td class="ticket-col-compact ticket-col-date">${formatDate(ticket.Milestone) ? escapeHtml(formatDate(ticket.Milestone)) : "—"}</td>
+      <td class="ticket-col-compact ticket-col-type">${escapeHtml(ticket.Type)}</td>
+    </tr>`;
+}
+
+function todayOutsideRow(ticket, when) {
+  const label = when === "before" ? "Before 8:00" : "After 5:30";
+  const whenClass = when === "before" ? "today-when-before" : "today-when-after";
+  return `
+    <tr data-sheet-row="${ticket.sheetRow || ""}">
+      <td class="task-col">${todayTaskCell(ticket)}</td>
+      <td class="ticket-col-compact ticket-col-owner">${escapeHtml(ticket.Owner)}</td>
+      <td class="ticket-col-compact ticket-col-date">${escapeHtml(formatCompletionStamp(ticket.closedOn))}</td>
+      <td class="ticket-col-compact"><span class="status-pill ${whenClass}">${label}</span></td>
+    </tr>`;
+}
+
+function todaySectionHtml(title, tickets, emptyNote) {
+  const rows = tickets.map(todayPlannerRow).join("");
+  const body = tickets.length
+    ? rows
+    : `<tr class="empty-row"><td colspan="6">${escapeHtml(emptyNote)}</td></tr>`;
+  return `
+    <section class="today-section">
+      <div class="today-section-head">
+        <h3>${escapeHtml(title)}</h3>
+        <span class="today-section-count">${tickets.length}</span>
+      </div>
+      <div class="table-wrap ticket-table-wrap">
+        <table class="ticket-table today-table">
+          <thead>
+            <tr>
+              <th class="task-col">Task</th>
+              <th class="ticket-col-compact ticket-col-priority">Priority</th>
+              <th class="ticket-col-compact ticket-col-owner">Owner</th>
+              <th class="ticket-col-compact ticket-col-status">Status</th>
+              <th class="ticket-col-compact ticket-col-date">Milestone</th>
+              <th class="ticket-col-compact ticket-col-type">Type</th>
+            </tr>
+          </thead>
+          <tbody>${body}</tbody>
+        </table>
+      </div>
+    </section>`;
+}
+
+function bindTodayRowClicks(root) {
+  root?.querySelectorAll("tr[data-sheet-row]").forEach((row) => {
+    row.addEventListener("click", () => {
+      if (!row.dataset.sheetRow) return;
+      openTicketEditor(row.dataset.sheetRow);
+    });
+  });
+}
+
+function renderTodayView(tickets = getValidTickets()) {
+  if (!todayPlanner) return;
+  const list = Array.isArray(tickets) ? tickets : [];
+  ensureTodayOwnerFilter(list);
+  const scoped = list.filter(todayOwnerMatches);
+
+  if (todayShowOutsideHours) {
+    const outside = scoped
+      .map((ticket) => ({ ticket, when: completionOutsideOffice(ticket) }))
+      .filter((entry) => entry.when)
+      .sort((a, b) => String(b.ticket.closedOn || "").localeCompare(String(a.ticket.closedOn || ""))
+        || compareTodayPriority(a.ticket, b.ticket));
+    if (todaySummary) {
+      todaySummary.textContent = outside.length
+        ? `${outside.length} completed outside office hours (before 8:00 or at/after 5:30)`
+        : "No tasks completed outside office hours";
+    }
+    if (!outside.length) {
+      todayPlanner.innerHTML = `<div class="breakdown-empty today-empty">No tasks completed outside office hours</div>`;
+      return;
+    }
+    const rows = outside.map((entry) => todayOutsideRow(entry.ticket, entry.when)).join("");
+    todayPlanner.innerHTML = `
+      <section class="today-section">
+        <div class="today-section-head">
+          <h3>Completed outside office hours</h3>
+          <span class="today-section-count">${outside.length}</span>
+        </div>
+        <div class="table-wrap ticket-table-wrap">
+          <table class="ticket-table today-table">
+            <thead>
+              <tr>
+                <th class="task-col">Task</th>
+                <th class="ticket-col-compact ticket-col-owner">Owner</th>
+                <th class="ticket-col-compact ticket-col-date">Completed</th>
+                <th class="ticket-col-compact">When</th>
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+      </section>`;
+    bindTodayRowClicks(todayPlanner);
+    return;
+  }
+
+  const todayStart = startOfTodayDate().getTime();
+  const openTickets = scoped.filter((ticket) => isOpenTicket(ticket));
+  const overdue = openTickets
+    .filter((ticket) => {
+      const day = todayMilestoneDay(ticket);
+      return day && day.getTime() < todayStart;
+    })
+    .sort(compareTodayPriority);
+  const dueToday = openTickets
+    .filter((ticket) => {
+      const day = todayMilestoneDay(ticket);
+      return day && day.getTime() === todayStart;
+    })
+    .sort(compareTodayPriority);
+
+  if (todaySummary) {
+    todaySummary.textContent = `${overdue.length} overdue · ${dueToday.length} due today`;
+  }
+
+  if (!overdue.length && !dueToday.length) {
+    todayPlanner.innerHTML = `<div class="breakdown-empty today-empty">Nothing due today</div>`;
+    return;
+  }
+
+  todayPlanner.innerHTML = [
+    todaySectionHtml("Overdue", overdue, "None"),
+    todaySectionHtml("Today", dueToday, "None")
+  ].join("");
+  bindTodayRowClicks(todayPlanner);
+}
+
 function renderTickets(options = {}) {
   const tickets = getValidTickets();
   const dataSignature = computeTicketsDataSignature(tickets);
@@ -8929,6 +9207,7 @@ function renderTickets(options = {}) {
   const paintTickets = !activeOnly || activeTab === "tickets";
   const paintProjects = !activeOnly || activeTab === "projects";
   const paintPresentation = !activeOnly || activeTab === "presentation";
+  const paintToday = !activeOnly || activeTab === "today";
   const paintSecondaryNow = activeTab === "performance" || activeTab === "kanban";
 
   if (paintDashboard) {
@@ -9006,6 +9285,10 @@ function renderTickets(options = {}) {
     renderPresentationView(tickets);
   }
 
+  if (paintToday) {
+    renderTodayView(tickets);
+  }
+
   if (paintSecondaryNow) {
     secondaryPanelsRenderToken += 1;
     renderSecondaryTicketPanels(tickets);
@@ -9054,7 +9337,10 @@ function applyCreatedTicketSyncResult(localTicket, result = {}) {
       Milestone: coalesceSyncValue(ticket.Milestone, result.milestone),
       "Start date": coalesceSyncValue(ticket["Start date"], result.startDate),
       "End date": coalesceSyncValue(ticket["End date"], result.endDate),
-      lastUpdated: cleanText(result.lastUpdated) || ticket.lastUpdated
+      lastUpdated: cleanText(result.lastUpdated) || ticket.lastUpdated,
+      closedOn: isTicketCompleted({ Status: reconcileSyncedTicketStatus(ticket, result, ticket) })
+        ? (completionTimestampHasTime(result.closedOn) ? cleanText(result.closedOn) : (ticket.closedOn || ""))
+        : ""
     });
 
     // Keep pending until mergeTicketFromSheet sees the new row on GET.
@@ -9723,11 +10009,11 @@ form?.addEventListener("submit", async (event) => {
     }));
   } else {
     ticketsToCreate = formIntentTickets.map((ticket) =>
-      normalizeTicket(applyTicketApprovalPreview({
+      normalizeTicket(stampTicketCompletion(applyTicketApprovalPreview({
         ...ticket,
         pendingSheetSync: Date.now(),
         pendingFields: PENDING_SYNC_FIELD_KEYS.slice()
-      }))
+      }), null))
     );
   }
 
@@ -9737,7 +10023,13 @@ form?.addEventListener("submit", async (event) => {
       cleanText(entry.Owner).toLowerCase() === cleanText(local.Owner).toLowerCase()
     ) || local;
     const kind = getRequiredApprovalKind(intent, null);
-    if (kind === "completion") return { ...local, Type: intent.Type || local.Type, Status: "Completed" };
+    if (kind === "completion") {
+      return stampTicketCompletion({
+        ...local,
+        Type: intent.Type || local.Type,
+        Status: "Completed"
+      }, null);
+    }
     if (kind === "project-type") {
       return { ...local, Type: intent.Type || local.Type, Status: intent.Status || "Not started" };
     }
@@ -9900,20 +10192,18 @@ ticketEditForm?.addEventListener("submit", async (event) => {
     ticketEditSheetRow.value = String(updatedTicket.sheetRow);
   }
 
-  const sheetTicket = {
+  const sheetTicket = stampTicketCompletion({
     ...updatedTicket,
     ...rowIdentityFields(updatedTicket, activeEditTicket),
     ticketId: ticketStableId(updatedTicket) || ticketStableId(activeEditTicket) || "",
     expectedStatus: priorStatus || nextStatus,
     lastKnownStatus: priorStatus || nextStatus,
     lastUpdated: cleanText(activeEditTicket?.lastUpdated) || cleanText(updatedTicket.lastUpdated) || new Date().toISOString()
-  };
-  const localTicket = applyTicketApprovalPreview({
-    ...updatedTicket,
-    ...rowIdentityFields(updatedTicket, activeEditTicket),
-    ticketId: sheetTicket.ticketId,
-    lastUpdated: new Date().toISOString()
   }, activeEditTicket);
+  const localTicket = stampTicketCompletion(applyTicketApprovalPreview({
+    ...sheetTicket,
+    lastUpdated: new Date().toISOString()
+  }, activeEditTicket), activeEditTicket);
 
   ticketEditSubmitInFlight = true;
   ticketEditForm.classList.add("ticket-form-submitting");
@@ -10078,6 +10368,16 @@ function onPresentationTypeFilterChange() {
 }
 presentationTypeFilter?.addEventListener("change", onPresentationTypeFilterChange);
 presentationTypeFilter?.addEventListener("input", onPresentationTypeFilterChange);
+todayOwnerFilter?.addEventListener("change", () => {
+  renderTodayView();
+});
+todayOutsideHoursButton?.addEventListener("click", () => {
+  todayShowOutsideHours = !todayShowOutsideHours;
+  todayOutsideHoursButton.setAttribute("aria-pressed", todayShowOutsideHours ? "true" : "false");
+  todayOutsideHoursButton.classList.toggle("is-active", todayShowOutsideHours);
+  renderTodayView();
+});
+
 presentationOwnerFilter?.addEventListener("change", () => {
   selectedPresentationOwner = cleanText(presentationOwnerFilter.value) || "all";
   schedulePresentationViewRender();
