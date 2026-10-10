@@ -116,6 +116,8 @@ const ticketPriorityFilterTrigger = document.querySelector("#ticketPriorityFilte
 const ticketBhanuFilterPanel = document.querySelector("#ticketBhanuFilterPanel");
 const ticketBhanuFilterTrigger = document.querySelector("#ticketBhanuFilterTrigger");
 const ticketSortFilter = document.querySelector("#ticketSortFilter");
+const ticketOutsideHoursButton = document.querySelector("#ticketOutsideHoursButton");
+const ticketCompletedAtHeader = document.querySelector("#ticketCompletedAtHeader");
 const clearTicketFilters = document.querySelector("#clearTicketFilters");
 const ticketFilterSummary = document.querySelector("#ticketFilterSummary");
 const projectSearchFilter = document.querySelector("#projectSearchFilter");
@@ -171,10 +173,6 @@ const activeTabLabel = document.querySelector("#activeTabLabel");
 const topbarPageTitle = document.querySelector("#topbarPageTitle");
 const topbarExpandPageTitle = document.querySelector("#topbarExpandPageTitle");
 const ticketTable = document.querySelector("#ticketTable");
-const todayOwnerFilter = document.querySelector("#todayOwnerFilter");
-const todayOutsideHoursButton = document.querySelector("#todayOutsideHoursButton");
-const todaySummary = document.querySelector("#todaySummary");
-const todayPlanner = document.querySelector("#todayPlanner");
 const ticketActionsHeader = document.querySelector("#ticketActionsHeader");
 const ticketEditModal = document.querySelector("#ticketEditModal");
 const ticketCreateModal = document.querySelector("#ticketCreateModal");
@@ -229,7 +227,6 @@ const TAB_LABELS = {
   dashboard: "Dashboard",
   performance: "Performance",
   tickets: "Tickets",
-  today: "Today",
   projects: "Projects",
   presentation: "Presentation",
   procurement: "Procurement",
@@ -1790,6 +1787,7 @@ function getFilterUiSignature() {
   return [
     ticketSearchFilter?.value || "",
     ticketSortFilter?.value || "",
+    ticketOutsideHoursButton?.getAttribute("aria-pressed") || "",
     ticketStatusFilterPanel ? getMultiFilterValues(ticketStatusFilterPanel).join(",") : "",
     ticketOwnerFilterPanel ? getMultiFilterValues(ticketOwnerFilterPanel).join(",") : "",
     ticketTypeFilterPanel ? getMultiFilterValues(ticketTypeFilterPanel).join(",") : "",
@@ -4459,7 +4457,9 @@ function applyTicketFilters(tickets) {
   const priorityValues = getMultiFilterValues(ticketPriorityFilterPanel);
   const bhanuValues = getMultiFilterValues(ticketBhanuFilterPanel);
 
+  const outsideHoursOnly = isTicketOutsideHoursFilterOn();
   const filtered = tickets.filter((ticket) => {
+    if (outsideHoursOnly && !completionOutsideOffice(ticket)) return false;
     if (statusValues.length && !statusValues.includes(ticket.Status)) return false;
     if (ownerValues.length && !ownerValues.includes(ticket.Owner)) return false;
     if (typeValues.length && !typeValues.includes(ticket.Type)) return false;
@@ -4469,6 +4469,9 @@ function applyTicketFilters(tickets) {
     return ticketSearchHaystack(ticket).includes(search);
   });
 
+  // Outside-hours mode stays strictly on completed clock times. Do not pull in
+  // open parents or in-hours siblings just to keep a family together.
+  if (outsideHoursOnly) return filtered;
   // Always keep parent↔subtask families together across type/status/owner filters.
   return expandFilteredTicketsWithSubtaskFamily(filtered, tickets);
 }
@@ -4542,6 +4545,7 @@ function resetTicketFilters() {
     updateMultiFilterLabel(trigger, panel, defaultLabel, labelFormatter || null);
   });
   setTicketSortFilter(CLEARED_TICKET_SORT);
+  setTicketOutsideHoursFilter(false);
   closeMultiFilterPanels();
 }
 
@@ -4788,7 +4792,7 @@ function setActiveTab(tabName, options = {}) {
   if (options.skipRender) return;
 
   // Paint only the newly visible panel from cache — avoid rebuilding every table.
-  if (tabName === "dashboard" || tabName === "tickets" || tabName === "projects" || tabName === "today") {
+  if (tabName === "dashboard" || tabName === "tickets" || tabName === "projects") {
     renderTickets({ activeOnly: true, forcePanel: tabName });
   } else if (tabName === "presentation") {
     renderPresentationView();
@@ -5332,8 +5336,6 @@ function isTicketCompleted(ticket) {
 
 const OFFICE_START_MINUTES = 8 * 60;
 const OFFICE_END_MINUTES = 17 * 60 + 30;
-let todayShowOutsideHours = false;
-let todayOwnerDefaultApplied = false;
 
 function completionTimestampHasTime(value) {
   const match = cleanText(value).match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2}))?/);
@@ -5395,6 +5397,17 @@ function completionOutsideOffice(ticket) {
   if (minutes < OFFICE_START_MINUTES) return "before";
   if (minutes >= OFFICE_END_MINUTES) return "after";
   return "";
+}
+
+function isTicketOutsideHoursFilterOn() {
+  return ticketOutsideHoursButton?.getAttribute("aria-pressed") === "true";
+}
+
+function setTicketOutsideHoursFilter(on) {
+  if (!ticketOutsideHoursButton) return;
+  const active = Boolean(on);
+  ticketOutsideHoursButton.setAttribute("aria-pressed", active ? "true" : "false");
+  ticketOutsideHoursButton.classList.toggle("is-active", active);
 }
 
 function ticketHasEndDate(ticket) {
@@ -8706,14 +8719,19 @@ function renderTicketTable(tickets, options = {}) {
 
   const canEdit = canEditTickets();
   const showActions = canEdit;
+  const showCompletedAt = Boolean(options.showCompletedAt);
+  const keepAllRows = Boolean(options.keepAllRows);
   if (tableEl) {
     tableEl.classList.toggle("ticket-table-can-edit", showActions);
   }
   if (actionsHeaderEl) {
     actionsHeaderEl.hidden = !showActions;
   }
+  if (bodyEl === rows && ticketCompletedAtHeader) {
+    ticketCompletedAtHeader.hidden = !showCompletedAt;
+  }
 
-  const columnCount = showActions ? 10 : 9;
+  const columnCount = (showActions ? 10 : 9) + (showCompletedAt ? 1 : 0);
   const pageLimit = Number(options.pageLimit) > 0 ? Number(options.pageLimit) : 0;
   const loadMoreKind = options.loadMoreKind || "";
 
@@ -8751,7 +8769,10 @@ function renderTicketTable(tickets, options = {}) {
   };
 
   // Open children stay visible while expanded; completed kids need show-completed.
-  const displayTickets = tickets.filter((ticket) => !isChildHiddenByCollapse(ticket));
+  // The outside-hours filter already narrowed to completed rows, so keep every match visible.
+  const displayTickets = keepAllRows
+    ? tickets
+    : tickets.filter((ticket) => !isChildHiddenByCollapse(ticket));
   const visibleTickets = pageLimit && displayTickets.length > pageLimit
     ? displayTickets.slice(0, pageLimit)
     : displayTickets;
@@ -8767,7 +8788,7 @@ function renderTicketTable(tickets, options = {}) {
       const hasCompletedChild = hasChildren && parentsWithCompletedChildren.has(parentRow);
       const collapsed = hasChildren && isSubtaskParentCollapsed(parentRow, collapsePanel);
       const showingCompleted = hasChildren && isSessionShowingCompletedSubtasks(parentRow, collapsePanel);
-      const parentCollapsed = subtask && isSubtaskParentCollapsed(
+      const parentCollapsed = !keepAllRows && subtask && isSubtaskParentCollapsed(
         Number(ticket.parentSheetRow),
         collapsePanel
       );
@@ -8838,6 +8859,7 @@ function renderTicketTable(tickets, options = {}) {
         <td class="ticket-col-compact ticket-col-status"><span class="status-pill ${statusClass(ticket.Status)}">${escapeHtml(ticket.Status || "Blank")}</span></td>
         <td class="ticket-col-compact ticket-col-date">${formatDate(ticket.Milestone) ? escapeHtml(formatDate(ticket.Milestone)) : "—"}</td>
         <td class="ticket-col-compact ticket-col-date">${escapeHtml(formatDate(ticket["End date"]))}</td>
+        ${showCompletedAt ? `<td class="ticket-col-compact ticket-col-date ticket-col-completed-at">${escapeHtml(formatCompletionStamp(ticket.closedOn))}</td>` : ""}
         <td class="ticket-col-compact ticket-col-type">${escapeHtml(ticket.Type)}</td>
         <td class="remarks-col">${renderTicketRemarksCell(ticket)}</td>
         ${canEdit ? `
@@ -8957,197 +8979,6 @@ function scheduleSecondaryTicketPanels(tickets) {
   }, 1800);
 }
 
-function compareTodayPriority(a, b) {
-  const priorityA = normalizePriority(a.Priority) === "80" ? 0 : 1;
-  const priorityB = normalizePriority(b.Priority) === "80" ? 0 : 1;
-  if (priorityA !== priorityB) return priorityA - priorityB;
-  return String(a.Task || "").localeCompare(String(b.Task || ""));
-}
-
-function todayMilestoneDay(ticket) {
-  const milestone = parseTicketDate(getEffectiveMilestone(ticket));
-  if (!milestone) return null;
-  const day = new Date(milestone);
-  day.setHours(0, 0, 0, 0);
-  return day;
-}
-
-function ensureTodayOwnerFilter(tickets) {
-  if (!todayOwnerFilter) return;
-  const names = new Set([
-    ...getVisibleOwnerNames().filter(isSelectableTicketOwner),
-    ...tickets.map((ticket) => cleanText(ticket.Owner)).filter(isSelectableTicketOwner)
-  ]);
-  const owners = [...names].sort((a, b) => a.localeCompare(b));
-  const current = todayOwnerFilter.value || "all";
-  todayOwnerFilter.innerHTML = [
-    `<option value="all">All owners</option>`,
-    ...owners.map((owner) => `<option value="${escapeHtml(owner)}">${escapeHtml(owner)}</option>`)
-  ].join("");
-
-  if (!todayOwnerDefaultApplied) {
-    const sessionName = cleanText(Auth.currentUser()?.name).toLowerCase();
-    const match = owners.find((owner) => owner.toLowerCase() === sessionName);
-    todayOwnerFilter.value = match || "all";
-    todayOwnerDefaultApplied = true;
-    return;
-  }
-
-  const stillThere = [...todayOwnerFilter.options].some((option) => option.value === current);
-  todayOwnerFilter.value = stillThere ? current : "all";
-}
-
-function todayOwnerMatches(ticket) {
-  const selected = cleanText(todayOwnerFilter?.value) || "all";
-  if (!selected || selected === "all") return true;
-  return cleanText(ticket.Owner).toLowerCase() === selected.toLowerCase();
-}
-
-function todayTaskCell(ticket) {
-  const task = escapeHtml(ticket.Task);
-  if (!isSubtaskTicket(ticket)) return task;
-  return `<span class="subtask-indicator" title="Sub-task">↳</span> ${task}`;
-}
-
-function todayPlannerRow(ticket) {
-  return `
-    <tr data-sheet-row="${ticket.sheetRow || ""}">
-      <td class="task-col">${todayTaskCell(ticket)}</td>
-      <td class="ticket-col-compact ticket-col-priority"><span class="priority-pill priority-${normalizePriority(ticket.Priority) === "80" ? "high" : "low"}">${escapeHtml(formatPriorityLabel(ticket.Priority))}</span></td>
-      <td class="ticket-col-compact ticket-col-owner">${escapeHtml(ticket.Owner)}</td>
-      <td class="ticket-col-compact ticket-col-status"><span class="status-pill ${statusClass(ticket.Status)}">${escapeHtml(ticket.Status || "Blank")}</span></td>
-      <td class="ticket-col-compact ticket-col-date">${formatDate(ticket.Milestone) ? escapeHtml(formatDate(ticket.Milestone)) : "—"}</td>
-      <td class="ticket-col-compact ticket-col-type">${escapeHtml(ticket.Type)}</td>
-    </tr>`;
-}
-
-function todayOutsideRow(ticket, when) {
-  const label = when === "before" ? "Before 8:00" : "After 5:30";
-  const whenClass = when === "before" ? "today-when-before" : "today-when-after";
-  return `
-    <tr data-sheet-row="${ticket.sheetRow || ""}">
-      <td class="task-col">${todayTaskCell(ticket)}</td>
-      <td class="ticket-col-compact ticket-col-owner">${escapeHtml(ticket.Owner)}</td>
-      <td class="ticket-col-compact ticket-col-date">${escapeHtml(formatCompletionStamp(ticket.closedOn))}</td>
-      <td class="ticket-col-compact"><span class="status-pill ${whenClass}">${label}</span></td>
-    </tr>`;
-}
-
-function todaySectionHtml(title, tickets, emptyNote) {
-  const rows = tickets.map(todayPlannerRow).join("");
-  const body = tickets.length
-    ? rows
-    : `<tr class="empty-row"><td colspan="6">${escapeHtml(emptyNote)}</td></tr>`;
-  return `
-    <section class="today-section">
-      <div class="today-section-head">
-        <h3>${escapeHtml(title)}</h3>
-        <span class="today-section-count">${tickets.length}</span>
-      </div>
-      <div class="table-wrap ticket-table-wrap">
-        <table class="ticket-table today-table">
-          <thead>
-            <tr>
-              <th class="task-col">Task</th>
-              <th class="ticket-col-compact ticket-col-priority">Priority</th>
-              <th class="ticket-col-compact ticket-col-owner">Owner</th>
-              <th class="ticket-col-compact ticket-col-status">Status</th>
-              <th class="ticket-col-compact ticket-col-date">Milestone</th>
-              <th class="ticket-col-compact ticket-col-type">Type</th>
-            </tr>
-          </thead>
-          <tbody>${body}</tbody>
-        </table>
-      </div>
-    </section>`;
-}
-
-function bindTodayRowClicks(root) {
-  root?.querySelectorAll("tr[data-sheet-row]").forEach((row) => {
-    row.addEventListener("click", () => {
-      if (!row.dataset.sheetRow) return;
-      openTicketEditor(row.dataset.sheetRow);
-    });
-  });
-}
-
-function renderTodayView(tickets = getValidTickets()) {
-  if (!todayPlanner) return;
-  const list = Array.isArray(tickets) ? tickets : [];
-  ensureTodayOwnerFilter(list);
-  const scoped = list.filter(todayOwnerMatches);
-
-  if (todayShowOutsideHours) {
-    const outside = scoped
-      .map((ticket) => ({ ticket, when: completionOutsideOffice(ticket) }))
-      .filter((entry) => entry.when)
-      .sort((a, b) => String(b.ticket.closedOn || "").localeCompare(String(a.ticket.closedOn || ""))
-        || compareTodayPriority(a.ticket, b.ticket));
-    if (todaySummary) {
-      todaySummary.textContent = outside.length
-        ? `${outside.length} completed outside office hours (before 8:00 or at/after 5:30)`
-        : "No tasks completed outside office hours";
-    }
-    if (!outside.length) {
-      todayPlanner.innerHTML = `<div class="breakdown-empty today-empty">No tasks completed outside office hours</div>`;
-      return;
-    }
-    const rows = outside.map((entry) => todayOutsideRow(entry.ticket, entry.when)).join("");
-    todayPlanner.innerHTML = `
-      <section class="today-section">
-        <div class="today-section-head">
-          <h3>Completed outside office hours</h3>
-          <span class="today-section-count">${outside.length}</span>
-        </div>
-        <div class="table-wrap ticket-table-wrap">
-          <table class="ticket-table today-table">
-            <thead>
-              <tr>
-                <th class="task-col">Task</th>
-                <th class="ticket-col-compact ticket-col-owner">Owner</th>
-                <th class="ticket-col-compact ticket-col-date">Completed</th>
-                <th class="ticket-col-compact">When</th>
-              </tr>
-            </thead>
-            <tbody>${rows}</tbody>
-          </table>
-        </div>
-      </section>`;
-    bindTodayRowClicks(todayPlanner);
-    return;
-  }
-
-  const todayStart = startOfTodayDate().getTime();
-  const openTickets = scoped.filter((ticket) => isOpenTicket(ticket));
-  const overdue = openTickets
-    .filter((ticket) => {
-      const day = todayMilestoneDay(ticket);
-      return day && day.getTime() < todayStart;
-    })
-    .sort(compareTodayPriority);
-  const dueToday = openTickets
-    .filter((ticket) => {
-      const day = todayMilestoneDay(ticket);
-      return day && day.getTime() === todayStart;
-    })
-    .sort(compareTodayPriority);
-
-  if (todaySummary) {
-    todaySummary.textContent = `${overdue.length} overdue · ${dueToday.length} due today`;
-  }
-
-  if (!overdue.length && !dueToday.length) {
-    todayPlanner.innerHTML = `<div class="breakdown-empty today-empty">Nothing due today</div>`;
-    return;
-  }
-
-  todayPlanner.innerHTML = [
-    todaySectionHtml("Overdue", overdue, "None"),
-    todaySectionHtml("Today", dueToday, "None")
-  ].join("");
-  bindTodayRowClicks(todayPlanner);
-}
-
 function renderTickets(options = {}) {
   const tickets = getValidTickets();
   const dataSignature = computeTicketsDataSignature(tickets);
@@ -9207,7 +9038,6 @@ function renderTickets(options = {}) {
   const paintTickets = !activeOnly || activeTab === "tickets";
   const paintProjects = !activeOnly || activeTab === "projects";
   const paintPresentation = !activeOnly || activeTab === "presentation";
-  const paintToday = !activeOnly || activeTab === "today";
   const paintSecondaryNow = activeTab === "performance" || activeTab === "kanban";
 
   if (paintDashboard) {
@@ -9232,6 +9062,7 @@ function renderTickets(options = {}) {
 
   if (paintTickets) {
     const filteredTickets = getFilteredDisplayedTickets();
+    const outsideHoursOnly = isTicketOutsideHoursFilterOn();
     if (ticketFilterSummary) {
       const ticketOpenWord = statusFilterIncludesCompleted(ticketStatusFilterPanel) ? "" : "open ";
       const sortLabels = {
@@ -9242,13 +9073,21 @@ function renderTickets(options = {}) {
       const defaultLabel = filteredTickets.length === tickets.length
         ? `Showing ${tickets.length} ticket${tickets.length === 1 ? "" : "s"} sorted by date`
         : `Showing ${filteredTickets.length} of ${tickets.length} tickets`;
+      const outsideLabel = filteredTickets.length
+        ? `Showing ${filteredTickets.length} completed outside office hours (before 8:00 or at/after 5:30)`
+        : "No tickets completed outside office hours";
 
-      ticketFilterSummary.textContent = sortLabels[sortKey] || defaultLabel;
+      ticketFilterSummary.textContent = outsideHoursOnly
+        ? outsideLabel
+        : (sortLabels[sortKey] || defaultLabel);
     }
     renderTicketTable(filteredTickets, {
       pageLimit: ticketTableLimit,
       loadMoreKind: "tickets",
-      collapsePanel: "tickets"
+      collapsePanel: "tickets",
+      showCompletedAt: outsideHoursOnly,
+      keepAllRows: outsideHoursOnly,
+      emptyMessage: outsideHoursOnly ? "No completed tickets outside office hours." : ""
     });
   }
 
@@ -9283,10 +9122,6 @@ function renderTickets(options = {}) {
 
   if (paintPresentation) {
     renderPresentationView(tickets);
-  }
-
-  if (paintToday) {
-    renderTodayView(tickets);
   }
 
   if (paintSecondaryNow) {
@@ -9895,7 +9730,13 @@ function statusFilterIncludesCompleted(panel) {
 
 function getFilteredDisplayedTickets() {
   const search = cleanText(ticketSearchFilter?.value);
+  const outsideHoursOnly = isTicketOutsideHoursFilterOn();
   const filtered = applyTicketFilters(getValidTickets());
+  if (outsideHoursOnly) {
+    return filtered
+      .filter((ticket) => completionOutsideOffice(ticket))
+      .sort((a, b) => String(b.closedOn || "").localeCompare(String(a.closedOn || "")));
+  }
   let displayed = sortTickets(
     filtered,
     ticketSortFilter?.value || DEFAULT_TICKET_SORT,
@@ -10368,15 +10209,6 @@ function onPresentationTypeFilterChange() {
 }
 presentationTypeFilter?.addEventListener("change", onPresentationTypeFilterChange);
 presentationTypeFilter?.addEventListener("input", onPresentationTypeFilterChange);
-todayOwnerFilter?.addEventListener("change", () => {
-  renderTodayView();
-});
-todayOutsideHoursButton?.addEventListener("click", () => {
-  todayShowOutsideHours = !todayShowOutsideHours;
-  todayOutsideHoursButton.setAttribute("aria-pressed", todayShowOutsideHours ? "true" : "false");
-  todayOutsideHoursButton.classList.toggle("is-active", todayShowOutsideHours);
-  renderTodayView();
-});
 
 presentationOwnerFilter?.addEventListener("change", () => {
   selectedPresentationOwner = cleanText(presentationOwnerFilter.value) || "all";
@@ -10489,6 +10321,10 @@ setSelectedPerformancePeriod(selectedPerformancePeriod);
 
 ticketSearchFilter?.addEventListener("input", () => scheduleRenderTickets());
 ticketSortFilter?.addEventListener("change", () => scheduleRenderTickets({ immediate: true }));
+ticketOutsideHoursButton?.addEventListener("click", () => {
+  setTicketOutsideHoursFilter(!isTicketOutsideHoursFilterOn());
+  scheduleRenderTickets({ immediate: true });
+});
 projectSearchFilter?.addEventListener("input", () => scheduleRenderTickets());
 projectSortFilter?.addEventListener("change", () => scheduleRenderTickets({ immediate: true }));
 
