@@ -4129,7 +4129,7 @@ tbody tr.milestone-today:hover {
   grid-template-columns: minmax(220px, 1.5fr) repeat(2, minmax(140px, 1fr));
 }
 
-.filter-field span {
+.filter-field > span {
   color: var(--muted);
   font-size: 11px;
   font-weight: 600;
@@ -4195,10 +4195,14 @@ tbody tr.milestone-today:hover {
   position: absolute;
   top: calc(100% + 6px);
   left: 0;
-  right: 0;
-  z-index: 20;
-  max-height: 240px;
-  overflow: auto;
+  right: auto;
+  z-index: 30;
+  width: max-content;
+  min-width: max(100%, 188px);
+  max-width: min(320px, calc(100vw - 24px));
+  max-height: 280px;
+  overflow-x: hidden;
+  overflow-y: auto;
   padding: 8px;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -4229,7 +4233,14 @@ tbody tr.milestone-today:hover {
 
 .multi-select-option span {
   min-width: 0;
-  overflow-wrap: anywhere;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+  white-space: nowrap;
+  overflow-wrap: normal;
+  word-break: normal;
 }
 
 .original-owner-option {
