@@ -4208,11 +4208,24 @@ tbody tr.milestone-today:hover {
   font-size: 13px;
 }
 
+.filter-field select {
+  -webkit-appearance: none;
+  appearance: none;
+  padding-right: 28px;
+  background-color: #fff;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6' fill='none'%3E%3Cpath d='M1 1.15 L5 4.85 L9 1.15' stroke='%2364748b' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  background-size: 10px 6px;
+  cursor: pointer;
+}
+
 .ticket-filters[aria-label="Ticket filters"] .filter-field select {
   width: auto;
   min-width: max-content;
   max-width: none;
   field-sizing: content;
+  padding: 0 28px 0 10px;
 }
 
 .ticket-filters[aria-label="Ticket filters"] .filter-search input {
@@ -4226,44 +4239,46 @@ tbody tr.milestone-today:hover {
   width: auto;
   min-width: max-content;
   max-width: none;
-  padding: 0 22px 0 8px;
+  padding: 0 28px 0 10px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   line-height: 30px;
 }
 
-.ticket-filters .multi-select-trigger::after {
-  position: absolute;
-  top: 50%;
-  right: 12px;
-  margin-left: 0;
-  transform: translateY(-70%) rotate(45deg);
-}
-
 .multi-select {
   position: relative;
+  overflow: visible;
 }
 
 .multi-select-trigger {
+  position: relative;
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
   text-align: left;
   cursor: pointer;
   color: var(--ink);
   font-weight: 600;
+  padding-right: 28px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .multi-select-trigger::after {
   content: "";
-  width: 8px;
-  height: 8px;
-  margin-left: 8px;
+  position: absolute;
+  top: 50%;
+  right: 10px;
+  width: 7px;
+  height: 7px;
+  margin: 0;
   border-right: 2px solid #64748b;
   border-bottom: 2px solid #64748b;
-  transform: rotate(45deg) translateY(-2px);
-  flex: 0 0 auto;
+  transform: translateY(calc(-50% - 1px)) rotate(45deg);
+  pointer-events: none;
+  flex: none;
 }
 
 .multi-select-panel[hidden] {
