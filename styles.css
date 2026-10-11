@@ -3882,7 +3882,7 @@ body.modal-open {
 
 #ticketTable.ticket-table-can-edit .remarks-col {
   width: 26%;
-  min-width: 0;
+  min-width: 9.5rem;
 }
 
 table {
@@ -4605,10 +4605,13 @@ tbody tr.milestone-today:hover {
 #ticketTable .remarks-col,
 #projectTable .remarks-col {
   width: 32%;
-  min-width: 0;
+  min-width: 9.5rem;
   max-width: none;
+  overflow: hidden;
+  text-align: left;
   white-space: pre-wrap;
   word-break: break-word;
+  overflow-wrap: anywhere;
   line-height: 1.4;
   vertical-align: top;
 }
@@ -4677,7 +4680,42 @@ tbody tr.milestone-today:hover {
 
 #ticketTable .ticket-col-type,
 #projectTable .ticket-col-type {
-  width: 6%;
+  width: 7.75rem;
+  min-width: 7.75rem;
+  max-width: 7.75rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#ticketTable td.ticket-col-type,
+#projectTable td.ticket-col-type {
+  min-width: 0;
+  max-width: 7.75rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#ticketTable .ticket-type-label,
+#projectTable .ticket-type-label {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#ticketTable .remarks-col .remarks-content,
+#projectTable .remarks-col .remarks-content,
+#ticketTable .remarks-col .remarks-text,
+#projectTable .remarks-col .remarks-text,
+#ticketTable .remarks-col .ticket-remarks-html,
+#projectTable .remarks-col .ticket-remarks-html {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 
 #ticketTable .ticket-col-priority .priority-pill,
@@ -7590,11 +7628,9 @@ body.view-focus .dashboard-layout {
   #ticketTable tbody tr.milestone-today .ticket-edit-button,
   #ticketTable tbody tr.milestone-today .ticket-duplicate-button,
   #ticketTable tbody tr.milestone-today .ticket-subtask-toggle,
-  #ticketTable tbody tr.milestone-today .ticket-presentation-pin-button,
   #projectTable tbody tr.milestone-today .ticket-edit-button,
   #projectTable tbody tr.milestone-today .ticket-duplicate-button,
-  #projectTable tbody tr.milestone-today .ticket-subtask-toggle,
-  #projectTable tbody tr.milestone-today .ticket-presentation-pin-button {
+  #projectTable tbody tr.milestone-today .ticket-subtask-toggle {
     background: var(--panel);
     border-color: var(--line-strong);
     color: var(--ink-secondary);
@@ -7633,12 +7669,6 @@ body.view-focus .dashboard-layout {
     background: var(--soft);
     border-color: var(--line);
     color: var(--ink-secondary);
-  }
-
-  #ticketTable tbody tr.milestone-today .ticket-presentation-pin-button,
-  #projectTable tbody tr.milestone-today .ticket-presentation-pin-button {
-    color: var(--muted);
-    border-color: var(--line);
   }
 
   #ticketTable tbody tr.milestone-today .screenshot-preview-btn,
@@ -8972,25 +9002,6 @@ body.presentation-card-dragging .presentation-kanban-column-body {
   opacity: 0.85;
   -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%23000' d='M16.5 6.5v9.25a4.25 4.25 0 1 1-8.5 0V6.75a2.75 2.75 0 1 1 5.5 0v8.5a1.25 1.25 0 1 1-2.5 0V7.5h-1.5v7.75a2.75 2.75 0 1 0 5.5 0v-8.5a4.25 4.25 0 1 0-8.5 0v9.25a5.75 5.75 0 1 0 11.5 0V6.5h-1.5z'/%3E%3C/svg%3E") center / contain no-repeat;
   mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%23000' d='M16.5 6.5v9.25a4.25 4.25 0 1 1-8.5 0V6.75a2.75 2.75 0 1 1 5.5 0v8.5a1.25 1.25 0 1 1-2.5 0V7.5h-1.5v7.75a2.75 2.75 0 1 0 5.5 0v-8.5a4.25 4.25 0 1 0-8.5 0v9.25a5.75 5.75 0 1 0 11.5 0V6.5h-1.5z'/%3E%3C/svg%3E") center / contain no-repeat;
-}
-
-.ticket-presentation-pin-button {
-  width: 28px;
-  height: 28px;
-  border-radius: 6px;
-  border: 1px solid var(--line);
-  background: var(--panel);
-  color: var(--muted-light);
-  font-size: 0.95rem;
-  line-height: 1;
-  cursor: pointer;
-  flex-shrink: 0;
-}
-
-.ticket-presentation-pin-button:hover {
-  color: var(--blue);
-  border-color: #93c5fd;
-  background: var(--blue-soft);
 }
 
 /* Fill remaining viewport in app chrome without cropping the board */

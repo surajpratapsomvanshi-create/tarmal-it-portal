@@ -6322,7 +6322,7 @@ function closeTicketCreateModal() {
   }
 }
 
-function openTicketEditor(sheetRow, options = {}) {
+function openTicketEditor(sheetRow) {
   if (!canEditTickets()) {
     alert("You do not have permission to edit tickets.");
     return;
@@ -6350,11 +6350,7 @@ function openTicketEditor(sheetRow, options = {}) {
     ticketEditRaisedByTouched = true;
   }
   populateTicketEditStatusSelect(ticket);
-  let typeValue = ticket.Type || "Daily - Infra";
-  if (options.preferSapType && !isProjectTypeTicket(ticket)) {
-    typeValue = "SAP";
-  }
-  ticketEditForm.elements.Type.value = typeValue;
+  ticketEditForm.elements.Type.value = ticket.Type || "Daily - Infra";
   const originalOwnerCheckbox = ticketEditForm.querySelector("[name='originalOwnerBhanu']");
   if (originalOwnerCheckbox) {
     originalOwnerCheckbox.checked = isTicketOriginalOwnerBhanu(ticket);
@@ -6369,11 +6365,7 @@ function openTicketEditor(sheetRow, options = {}) {
 
   ticketEditModal.hidden = false;
   document.body.classList.add("modal-open");
-  if (options.preferSapType && !isProjectTypeTicket(ticket)) {
-    ticketEditForm.elements.Type?.focus();
-  } else {
-    ticketEditForm.elements.Task.focus();
-  }
+  ticketEditForm.elements.Task.focus();
   maybeAutofillRaisedByFromTask("edit");
 }
 
@@ -8062,16 +8054,6 @@ function duplicateTicket(sheetRow) {
   setStatus("", "Review the duplicated ticket, then Submit to create it.");
 }
 
-function bindTicketTypePromoteButtons(root) {
-  if (!root) return;
-  root.querySelectorAll(".ticket-presentation-pin-button").forEach((button) => {
-    button.addEventListener("click", (event) => {
-      event.stopPropagation();
-      openTicketEditor(button.dataset.sheetRow, { preferSapType: true });
-    });
-  });
-}
-
 function syncPresentationCustomRangeVisibility() {
   if (!presentationCustomRange) return;
   const showCustom = selectedPresentationPeriod === "custom";
@@ -8607,7 +8589,7 @@ function renderPresentationView(tickets = getValidTickets()) {
       <div class="presentation-empty">
         <p class="eyebrow">Presentation</p>
         <h3>No matching SAP, Infra, or MOM projects</h3>
-        <p>Set a ticket’s <strong>Type</strong> to SAP, Infra, or MOM (use ★ on Tickets/Projects to open Edit), or widen the filters above.</p>
+        <p>Set a ticket’s <strong>Type</strong> to SAP, Infra, or MOM (use Edit on Tickets/Projects), or widen the filters above.</p>
         <div class="presentation-empty-actions">
           <button class="primary-button" type="button" data-goto-tab="tickets">Go to Tickets</button>
           <button class="secondary-button" type="button" data-goto-tab="projects">Go to Projects</button>
@@ -8841,15 +8823,6 @@ function renderTicketTable(tickets, options = {}) {
         parentCollapsed ? "subtask-hidden" : ""
       ].filter(Boolean).join(" ");
 
-      const typePromoteButton = canEdit ? `
-            <button
-              class="ticket-presentation-pin-button"
-              type="button"
-              data-sheet-row="${ticket.sheetRow}"
-              aria-label="Edit ticket type"
-              title="Edit ticket (defaults Type to SAP)"
-            >★</button>` : "";
-
       return `
       <tr class="${rowClasses}" ${parentCollapsed ? "hidden" : ""}>
         <td class="task-col">${taskCell}</td>
@@ -8860,12 +8833,11 @@ function renderTicketTable(tickets, options = {}) {
         <td class="ticket-col-compact ticket-col-date">${formatDate(ticket.Milestone) ? escapeHtml(formatDate(ticket.Milestone)) : "—"}</td>
         <td class="ticket-col-compact ticket-col-date">${escapeHtml(formatDate(ticket["End date"]))}</td>
         ${showCompletedAt ? `<td class="ticket-col-compact ticket-col-date ticket-col-completed-at">${escapeHtml(formatCompletionStamp(ticket.closedOn))}</td>` : ""}
-        <td class="ticket-col-compact ticket-col-type">${escapeHtml(ticket.Type)}</td>
+        <td class="ticket-col-compact ticket-col-type"><span class="ticket-type-label">${escapeHtml(ticket.Type)}</span></td>
         <td class="remarks-col">${renderTicketRemarksCell(ticket)}</td>
         ${canEdit ? `
         <td class="actions-col">
           <div class="ticket-row-actions">
-            ${typePromoteButton}
             ${!subtask ? `
             <button
               class="ticket-subtask-button"
@@ -8918,7 +8890,6 @@ function renderTicketTable(tickets, options = {}) {
   bodyEl.innerHTML = rowsHtml + loadMoreHtml;
 
   bindTicketEditButtons(bodyEl);
-  bindTicketTypePromoteButtons(bodyEl);
   bindScreenshotPreviewButtons(bodyEl);
   bodyEl.querySelectorAll("[data-load-more]").forEach((button) => {
     button.addEventListener("click", () => {
