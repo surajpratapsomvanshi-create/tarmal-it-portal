@@ -14,6 +14,13 @@
      Spreadsheet menu: Tarmal IT -> Setup recurring tasks trigger.
    - Handler: processRecurringTickets (also runnable manually from the menu).
    - MUST redeploy the web app after pasting this file or recurrence will not run.
+
+   EXTERNAL SIGN-IN:
+   - verifyExternalLogin checks a Google or Microsoft ID token, then reads UserMaster.
+   - It does not insert, update, or delete anything.
+   - Paste the real client IDs into EXTERNAL_LOGIN_GOOGLE_CLIENT_ID and
+     EXTERNAL_LOGIN_MICROSOFT_CLIENT_ID (same values as auth.js), then
+     Deploy -> Manage deployments -> Edit -> New version.
 ===================================================== */
 
 const TASKS_SHEET = "Tasks";
@@ -22,6 +29,13 @@ const ASSETS_SHEET = "ITAssets";
 const DOCUMENTS_SHEET = "Documents";
 const PROCUREMENT_SHEET = "Procurement";
 const USER_MASTER_SHEET = "UserMaster";
+
+// Same OAuth client IDs as Auth.GOOGLE_CLIENT_ID / Auth.MICROSOFT_CLIENT_ID in auth.js.
+// Leave blank until the Google Cloud and Azure app registrations exist.
+// Google authorized JavaScript origin: https://surajpratapsomvanshi-create.github.io
+// Microsoft SPA redirect URI: https://surajpratapsomvanshi-create.github.io/tarmal-it-portal/login.html
+const EXTERNAL_LOGIN_GOOGLE_CLIENT_ID = "";
+const EXTERNAL_LOGIN_MICROSOFT_CLIENT_ID = "";
 
 const USER_HEADERS = [
   "Id", "Name", "Username", "Email", "Password", "Active",
@@ -790,6 +804,10 @@ function processDeferredPostSaveWork() {
 }
 
 function doPost(e) {
+  // Read-only sign-in must not take the sheet write lock or wait behind ticket saves.
+  var externalLoginResponse = routeVerifyExternalLogin_(e);
+  if (externalLoginResponse) return externalLoginResponse;
+
   const lock = LockService.getScriptLock();
   var lockAcquired = false;
   try {
@@ -5874,6 +5892,370 @@ function restoreMilestonesFromRestoreSheet() {
   } finally {
     releaseWriteLock_(lock, lockAcquired);
   }
+}
+
+/**
+ * Read-only external sign-in. Returns a response only for verifyExternalLogin
+ * so every other POST keeps the existing parser and write lock.
+ */
+function routeVerifyExternalLogin_(e) {
+  var raw = (e && e.postData && e.postData.contents != null)
+    ? String(e.postData.contents).replace(/^\uFEFF/, "")
+    : "";
+  if (!raw || raw.indexOf("verifyExternalLogin") === -1) return null;
+
+  var data;
+  try {
+    data = JSON.parse(raw);
+  } catch (error) {
+    return null;
+  }
+  if (!data || data.action !== "verifyExternalLogin") return null;
+
+  try {
+    return buildResponse_(verifyExternalLogin_(data), e);
+  } catch (error) {
+    Logger.log(error);
+    return buildResponse_({ ok: false, error: "Sign-in could not be verified." }, e);
+  }
+}
+
+/**
+ * Validate a Google or Microsoft ID token, then match its email to UserMaster.
+ * Reads the sheet only. Does not insert, update, or delete.
+ * Returns { ok, user, email, manager } or { ok: false }.
+ */
+function verifyExternalLogin_(data) {
+  var provider = String(data && data.provider || "").trim().toLowerCase();
+  var idToken = String(data && data.idToken || "").trim();
+  if (provider !== "google" && provider !== "microsoft") {
+    return { ok: false, error: "Unsupported sign-in provider." };
+  }
+  if (!idToken || idToken.length > 8000 || idToken.split(".").length !== 3) {
+    return { ok: false, error: "Sign-in token was missing or invalid." };
+  }
+
+  var clientId = provider === "google"
+    ? String(EXTERNAL_LOGIN_GOOGLE_CLIENT_ID || "").trim()
+    : String(EXTERNAL_LOGIN_MICROSOFT_CLIENT_ID || "").trim();
+  if (!clientId) {
+    return {
+      ok: false,
+      error: provider === "google"
+        ? "Google sign-in is not configured on the server yet."
+        : "Microsoft sign-in is not configured on the server yet."
+    };
+  }
+
+  var email = "";
+  try {
+    var payload = provider === "google"
+      ? verifyGoogleIdToken_(idToken, clientId)
+      : verifyMicrosoftIdToken_(idToken, clientId);
+    email = provider === "google"
+      ? emailFromGooglePayload_(payload)
+      : emailFromMicrosoftPayload_(payload);
+  } catch (error) {
+    Logger.log("verifyExternalLogin " + provider + " failed");
+    return {
+      ok: false,
+      error: provider === "google"
+        ? "Google sign-in could not be verified."
+        : "Microsoft sign-in could not be verified."
+    };
+  }
+
+  var entry = findUserMasterByEmail_(email);
+  if (!entry) {
+    return { ok: false, error: "This email is not on the UserMaster list." };
+  }
+
+  return {
+    ok: true,
+    user: entry.user,
+    email: entry.email,
+    manager: entry.manager || ""
+  };
+}
+
+function findUserMasterByEmail_(email) {
+  var needle = String(email || "").trim().toLowerCase();
+  if (!needle) return null;
+  var rows = readUserMaster_();
+  for (var i = 0; i < rows.length; i++) {
+    if (String(rows[i].email || "").trim().toLowerCase() === needle) return rows[i];
+  }
+  return null;
+}
+
+function verifyGoogleIdToken_(idToken, clientId) {
+  var payload = verifyRs256IdToken_(idToken, [
+    "https://www.googleapis.com/oauth2/v3/certs"
+  ]);
+  var iss = String(payload.iss || "");
+  if (iss !== "accounts.google.com" && iss !== "https://accounts.google.com") {
+    throw new Error("Unexpected Google issuer");
+  }
+  if (!audienceMatches_(payload.aud, clientId)) throw new Error("Unexpected Google audience");
+  if (!tokenTimeValid_(payload)) throw new Error("Google token is expired");
+  return payload;
+}
+
+function verifyMicrosoftIdToken_(idToken, clientId) {
+  var payload = verifyRs256IdToken_(idToken, [
+    "https://login.microsoftonline.com/common/discovery/v2.0/keys",
+    "https://login.microsoftonline.com/organizations/discovery/v2.0/keys",
+    "https://login.microsoftonline.com/consumers/discovery/v2.0/keys"
+  ]);
+  if (!/^https:\/\/login\.microsoftonline\.com\/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\/v2\.0$/.test(String(payload.iss || ""))) {
+    throw new Error("Unexpected Microsoft issuer");
+  }
+  if (!audienceMatches_(payload.aud, clientId)) throw new Error("Unexpected Microsoft audience");
+  if (!tokenTimeValid_(payload)) throw new Error("Microsoft token is expired");
+  return payload;
+}
+
+function emailFromGooglePayload_(payload) {
+  var verified = payload && payload.email_verified;
+  if (verified !== true && String(verified).toLowerCase() !== "true") {
+    throw new Error("Google email is not verified");
+  }
+  var email = String(payload.email || "").trim();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error("Google token has no email");
+  return email;
+}
+
+function emailFromMicrosoftPayload_(payload) {
+  // email is preferred. Microsoft omits it on some accounts and puts the
+  // address in preferred_username or upn instead.
+  var candidates = [
+    payload && payload.email,
+    payload && payload.preferred_username,
+    payload && payload.upn
+  ];
+  for (var i = 0; i < candidates.length; i++) {
+    var value = String(candidates[i] || "").trim();
+    if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) return value;
+  }
+  throw new Error("Microsoft token has no email");
+}
+
+function audienceMatches_(aud, clientId) {
+  var expected = String(clientId || "");
+  if (!expected) return false;
+  if (Array.isArray(aud)) {
+    for (var i = 0; i < aud.length; i++) {
+      if (String(aud[i]) === expected) return true;
+    }
+    return false;
+  }
+  return String(aud || "") === expected;
+}
+
+function tokenTimeValid_(payload) {
+  var now = Math.floor(Date.now() / 1000);
+  var exp = Number(payload && payload.exp);
+  if (!exp || exp < now - 120) return false;
+  if (payload && payload.nbf != null && payload.nbf !== "") {
+    var nbf = Number(payload.nbf);
+    if (nbf && nbf > now + 120) return false;
+  }
+  return true;
+}
+
+function verifyRs256IdToken_(idToken, jwksUrls) {
+  var parts = String(idToken || "").split(".");
+  if (parts.length !== 3 || !parts[0] || !parts[1] || !parts[2]) {
+    throw new Error("Malformed token");
+  }
+  var header = decodeJwtSegment_(parts[0]);
+  if (!header || header.alg !== "RS256" || !header.kid) {
+    throw new Error("Unexpected token algorithm");
+  }
+  var payload = decodeJwtSegment_(parts[1]);
+  if (!payload || typeof payload !== "object") throw new Error("Malformed token payload");
+  var jwk = findJwkFromUrls_(jwksUrls, String(header.kid));
+  if (!jwk || !jwk.n || !jwk.e) throw new Error("Signing key was not found");
+  var digest = sha256Bytes_(parts[0] + "." + parts[1]);
+  var signature = base64UrlToBytes_(parts[2]);
+  if (!verifyPkcs1Sha256_(signature, jwk.n, jwk.e, digest)) {
+    throw new Error("Token signature was rejected");
+  }
+  return payload;
+}
+
+function findJwkFromUrls_(urls, kid) {
+  var list = Array.isArray(urls) ? urls : [];
+  var i;
+  var key;
+  for (i = 0; i < list.length; i++) {
+    key = findJwk_(fetchJsonCached_(list[i], false), kid);
+    if (key) return key;
+  }
+  for (i = 0; i < list.length; i++) {
+    key = findJwk_(fetchJsonCached_(list[i], true), kid);
+    if (key) return key;
+  }
+  return null;
+}
+
+function findJwk_(jwks, kid) {
+  var keys = jwks && jwks.keys ? jwks.keys : [];
+  for (var i = 0; i < keys.length; i++) {
+    var key = keys[i];
+    if (!key || key.kid !== kid) continue;
+    if (key.kty && key.kty !== "RSA") continue;
+    if (key.alg && key.alg !== "RS256") continue;
+    return key;
+  }
+  return null;
+}
+
+function fetchJsonCached_(url, bypassCache) {
+  var allowed = {
+    "https://www.googleapis.com/oauth2/v3/certs": true,
+    "https://login.microsoftonline.com/common/discovery/v2.0/keys": true,
+    "https://login.microsoftonline.com/organizations/discovery/v2.0/keys": true,
+    "https://login.microsoftonline.com/consumers/discovery/v2.0/keys": true
+  };
+  if (!allowed[url]) throw new Error("Unexpected signing-key URL");
+
+  var cache = CacheService.getScriptCache();
+  var cacheKey = "ext-jwks-" + url;
+  if (!bypassCache) {
+    try {
+      var cached = cache.get(cacheKey);
+      if (cached) return JSON.parse(cached);
+    } catch (error) {
+      Logger.log(error);
+    }
+  }
+
+  var response = UrlFetchApp.fetch(url, {
+    muteHttpExceptions: true,
+    followRedirects: true
+  });
+  var code = response.getResponseCode();
+  var text = response.getContentText() || "";
+  if (code !== 200 || !text) throw new Error("Signing keys request failed");
+  var parsed = JSON.parse(text);
+  try {
+    if (text.length < 90000) cache.put(cacheKey, text, 3600);
+  } catch (putError) {
+    Logger.log(putError);
+  }
+  return parsed;
+}
+
+function decodeJwtSegment_(segment) {
+  var bytes = base64UrlToBytes_(segment);
+  return JSON.parse(Utilities.newBlob(bytes).getDataAsString("UTF-8"));
+}
+
+function sha256Bytes_(text) {
+  var digest = Utilities.computeDigest(
+    Utilities.DigestAlgorithm.SHA_256,
+    String(text),
+    Utilities.Charset.UTF_8
+  );
+  var out = [];
+  for (var i = 0; i < digest.length; i++) out.push(digest[i] & 255);
+  return out;
+}
+
+function base64UrlToBytes_(input) {
+  var s = String(input || "").replace(/-/g, "+").replace(/_/g, "/").replace(/\s/g, "");
+  if (!s || /[^A-Za-z0-9+/=]/.test(s)) throw new Error("Invalid token encoding");
+  var pad = s.length % 4;
+  if (pad === 1) throw new Error("Invalid token encoding");
+  if (pad) s += "====".slice(pad);
+  var decoded = Utilities.base64Decode(s);
+  var out = [];
+  for (var i = 0; i < decoded.length; i++) out.push(decoded[i] & 255);
+  return out;
+}
+
+function bytesToBigInt_(bytes) {
+  var parts = [];
+  var started = false;
+  for (var i = 0; i < bytes.length; i++) {
+    var b = bytes[i] & 255;
+    if (!started && b === 0) continue;
+    started = true;
+    var hex = b.toString(16);
+    parts.push(hex.length === 1 ? "0" + hex : hex);
+  }
+  if (!parts.length) return 0n;
+  return BigInt("0x" + parts.join(""));
+}
+
+function bigIntToFixedBytes_(value, length) {
+  if (value < 0n) return null;
+  var hex = value.toString(16);
+  if (hex.length % 2) hex = "0" + hex;
+  if (hex.length / 2 > length) return null;
+  var bytes = [];
+  for (var i = 0; i < hex.length; i += 2) bytes.push(parseInt(hex.substr(i, 2), 16));
+  while (bytes.length < length) bytes.unshift(0);
+  return bytes;
+}
+
+function rsaModulusLength_(nBytes) {
+  var i = 0;
+  while (i < nBytes.length - 1 && (nBytes[i] & 255) === 0) i++;
+  return nBytes.length - i;
+}
+
+function modPow_(base, exponent, modulus) {
+  var result = 1n;
+  var b = base % modulus;
+  var e = exponent;
+  while (e > 0n) {
+    if ((e & 1n) === 1n) result = (result * b) % modulus;
+    e >>= 1n;
+    b = (b * b) % modulus;
+  }
+  return result;
+}
+
+function verifyPkcs1Sha256_(signatureBytes, nB64, eB64, digestBytes) {
+  var nBytes = base64UrlToBytes_(nB64);
+  var eBytes = base64UrlToBytes_(eB64);
+  var n = bytesToBigInt_(nBytes);
+  var e = bytesToBigInt_(eBytes);
+  var sig = bytesToBigInt_(signatureBytes);
+  if (n <= 0n || e <= 0n || sig < 0n || sig >= n) return false;
+  var k = rsaModulusLength_(nBytes);
+  if (!k || signatureBytes.length > k) return false;
+  var em = bigIntToFixedBytes_(modPow_(sig, e, n), k);
+  return pkcs1Sha256Matches_(em, digestBytes);
+}
+
+function pkcs1Sha256Matches_(em, digestBytes) {
+  var prefix = [
+    0x30, 0x31, 0x30, 0x0d, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01,
+    0x65, 0x03, 0x04, 0x02, 0x01, 0x05, 0x00, 0x04, 0x20
+  ];
+  if (!em || !digestBytes) return false;
+  if (em.length < prefix.length + digestBytes.length + 11) return false;
+  if (em[0] !== 0x00 || em[1] !== 0x01) return false;
+  var offset = 2;
+  var padding = 0;
+  while (offset < em.length && em[offset] === 0xff) {
+    padding++;
+    offset++;
+  }
+  if (padding < 8 || offset >= em.length || em[offset] !== 0x00) return false;
+  offset++;
+  if (em.length - offset !== prefix.length + digestBytes.length) return false;
+  var i;
+  for (i = 0; i < prefix.length; i++) {
+    if (em[offset + i] !== prefix[i]) return false;
+  }
+  for (i = 0; i < digestBytes.length; i++) {
+    if (em[offset + prefix.length + i] !== (digestBytes[i] & 255)) return false;
+  }
+  return true;
 }
 
 // END google-apps-script-full-merged.gs — if this line is missing in Apps Script Code.gs, the paste was truncated.

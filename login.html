@@ -7,6 +7,69 @@
     <link rel="icon" href="./assets/tarmal-mark.png?v=1" type="image/png">
     <link rel="apple-touch-icon" href="./assets/apple-touch-icon.png?v=1">
     <link rel="stylesheet" href="./styles.css?v=159">
+    <style>
+      .login-oauth {
+        display: grid;
+        gap: 10px;
+      }
+      .login-oauth-divider {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        color: #64748b;
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+      .login-oauth-divider::before,
+      .login-oauth-divider::after {
+        content: "";
+        height: 1px;
+        flex: 1;
+        background: #e2e8f0;
+      }
+      .login-oauth-btn {
+        width: 100%;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 10px;
+        padding: 12px 16px;
+        border-radius: 999px;
+        border: 1px solid #d0d7e2;
+        background: #fff;
+        color: #1e293b;
+        font: inherit;
+        font-size: 15px;
+        font-weight: 700;
+        cursor: pointer;
+      }
+      .login-oauth-btn:hover:not(:disabled) {
+        background: #f8fafc;
+      }
+      .login-oauth-btn:focus-visible {
+        outline: 2px solid #003d99;
+        outline-offset: 2px;
+      }
+      .login-oauth-btn:disabled {
+        opacity: 0.72;
+        cursor: wait;
+      }
+      .login-oauth-mark {
+        width: 18px;
+        height: 18px;
+        flex: 0 0 auto;
+      }
+      .login-google-official {
+        display: flex;
+        justify-content: center;
+        min-height: 44px;
+      }
+      .login-google-official[hidden] {
+        display: none;
+      }
+    </style>
   </head>
   <body class="login-page">
     <main class="login-shell">
@@ -18,7 +81,7 @@
             </div>
             <h1 class="login-brand-title">IT Portal</h1>
             <p class="login-brand-tagline">Unified Access Portal</p>
-            <p class="login-brand-lead">Sign in with your work email or username and password to access tickets, assets, and documents.</p>
+            <p class="login-brand-lead">Sign in with Google, Microsoft, or your username and password to access tickets, assets, and documents.</p>
             <div class="login-brand-bars" aria-hidden="true">
               <span></span>
               <span></span>
@@ -73,13 +136,36 @@
               <button class="login-submit" type="submit" id="loginSubmit">Log in</button>
             </form>
 
+            <div class="login-oauth" id="loginOauth">
+              <div class="login-oauth-divider" role="separator">or</div>
+              <button class="login-oauth-btn" type="button" id="loginGoogle">
+                <svg class="login-oauth-mark" viewBox="0 0 18 18" aria-hidden="true">
+                  <path fill="#4285F4" d="M17.64 9.2c0-.64-.06-1.25-.16-1.84H9v3.48h4.84a4.14 4.14 0 0 1-1.8 2.72v2.26h2.92c1.7-1.57 2.68-3.88 2.68-6.62z"/>
+                  <path fill="#34A853" d="M9 18c2.43 0 4.47-.8 5.96-2.18l-2.92-2.26c-.8.54-1.84.86-3.04.86-2.34 0-4.32-1.58-5.03-3.7H.96v2.33A9 9 0 0 0 9 18z"/>
+                  <path fill="#FBBC05" d="M3.97 10.72A5.4 5.4 0 0 1 3.68 9c0-.6.1-1.18.29-1.72V4.95H.96A9 9 0 0 0 0 9c0 1.45.35 2.82.96 4.05l3.01-2.33z"/>
+                  <path fill="#EA4335" d="M9 3.58c1.32 0 2.5.45 3.44 1.35l2.58-2.59C13.46.89 11.43 0 9 0A9 9 0 0 0 .96 4.95l3.01 2.33C4.68 5.16 6.66 3.58 9 3.58z"/>
+                </svg>
+                Sign in with Google
+              </button>
+              <div id="loginGoogleButton" class="login-google-official" hidden></div>
+              <button class="login-oauth-btn" type="button" id="loginMicrosoft">
+                <svg class="login-oauth-mark" viewBox="0 0 18 18" aria-hidden="true">
+                  <path fill="#F25022" d="M1 1h7.5v7.5H1z"/>
+                  <path fill="#7FBA00" d="M9.5 1H17v7.5H9.5z"/>
+                  <path fill="#00A4EF" d="M1 9.5h7.5V17H1z"/>
+                  <path fill="#FFB900" d="M9.5 9.5H17V17H9.5z"/>
+                </svg>
+                Sign in with Microsoft
+              </button>
+            </div>
+
             <p class="login-footer-note">© Tarmal Industries · Authorized access only</p>
           </div>
         </section>
       </div>
     </main>
 
-    <script src="./auth.js?v=25"></script>
+    <script src="./auth.js?v=27"></script>
     <script>
       (function initLoginPage() {
       const REMEMBER_KEY = "tarmal-login-remember";
@@ -303,6 +389,62 @@
 
         storeRememberedIdentifier(identifier);
         finishLogin();
+      });
+
+      const loginGoogle = document.querySelector("#loginGoogle");
+      const loginMicrosoft = document.querySelector("#loginMicrosoft");
+      let externalBusy = false;
+
+      function showLoginError(message) {
+        loginError.hidden = false;
+        loginError.textContent = message;
+      }
+
+      function setOauthBusy(busy) {
+        externalBusy = busy;
+        loginSubmit.disabled = busy;
+        if (loginGoogle) loginGoogle.disabled = busy;
+        if (loginMicrosoft) loginMicrosoft.disabled = busy;
+      }
+
+      async function completeExternalLogin(provider, idToken) {
+        if (externalBusy) return;
+        loginError.hidden = true;
+        setOauthBusy(true);
+        try {
+          const verified = await Auth.verifyExternalLogin(provider, idToken);
+          if (!verified || verified.ok !== true) {
+            showLoginError(verified && verified.error || "This email is not on the UserMaster list.");
+            setOauthBusy(false);
+            return;
+          }
+          const established = Auth.establishExternalSession(verified);
+          if (!established.ok) {
+            showLoginError(established.error || "This email is not on the UserMaster list.");
+            setOauthBusy(false);
+            return;
+          }
+          const remembered = loginRemember.checked || sessionStorage.getItem("tarmal-oauth-remember") === "1";
+          loginRemember.checked = remembered;
+          sessionStorage.removeItem("tarmal-oauth-remember");
+          finishLogin();
+        } catch (error) {
+          showLoginError("Sign-in could not be completed. Try again.");
+          setOauthBusy(false);
+        }
+      }
+
+      Auth.mountGoogleSignIn({
+        button: loginGoogle,
+        container: document.querySelector("#loginGoogleButton"),
+        onCredential: (idToken) => completeExternalLogin("google", idToken),
+        onError: showLoginError
+      });
+      Auth.mountMicrosoftSignIn({
+        button: loginMicrosoft,
+        remember: () => loginRemember.checked,
+        onCredential: (idToken) => completeExternalLogin("microsoft", idToken),
+        onError: showLoginError
       });
       })();
     </script>

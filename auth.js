@@ -15,6 +15,16 @@ const Auth = {
   // Keep the session long enough for "remember me" to feel reliable.
   REMEMBER_TTL_MS: 1000 * 60 * 60 * 24 * 30,
   SHEET_WEB_APP_URL: "https://script.google.com/macros/s/AKfycbxHaOjHagv-HuDxMuNoIjXCSCwSlbabV1glYUBgNEdYfLvpQepmPdEzjuJIoHrSOrMW/exec",
+  // OAuth client IDs. Leave blank until the Google Cloud / Azure apps exist.
+  // Do not invent these. The login buttons explain when a value is still empty.
+  // Google authorized JavaScript origin:
+  //   https://surajpratapsomvanshi-create.github.io
+  // Microsoft SPA redirect URI:
+  //   https://surajpratapsomvanshi-create.github.io/tarmal-it-portal/login.html
+  // Paste the same values into EXTERNAL_LOGIN_GOOGLE_CLIENT_ID and
+  // EXTERNAL_LOGIN_MICROSOFT_CLIENT_ID in google-apps-script-full-merged.gs.
+  GOOGLE_CLIENT_ID: "",
+  MICROSOFT_CLIENT_ID: "",
   ADMIN_USER: {
     id: "user-admin",
     name: "Admin",
@@ -530,7 +540,7 @@ const Auth = {
       throw new Error("Empty response from Apps Script.");
     }
 
-    const head = raw.slice(0, 80).toLowerCase();
+    const head = raw.slice(0, 120).toLowerCase();
     const looksHtml = head.startsWith("<!doctype")
       || head.startsWith("<html")
       || head.startsWith("<head")
@@ -558,6 +568,9 @@ const Auth = {
       if (parsed.ok && parsed.value && typeof parsed.value === "object") return parsed.value;
     }
 
+    if (/accounts\.google\.com|sign in to continue|authorization needed/i.test(raw)) {
+      throw new Error("Apps Script authorization is required. Redeploy the web app and try again.");
+    }
     if (looksHtml) {
       throw new Error("Sheet sync returned an HTML error page instead of JSON.");
     }
@@ -809,13 +822,18 @@ const Auth = {
 
   setSession(user) {
     const normalized = this.normalizeUser(user);
-    sessionStorage.setItem(this.SESSION_KEY, JSON.stringify({
+    const payload = {
       id: normalized.id,
       name: normalized.name,
       username: normalized.username,
       email: normalized.email || "",
       rights: normalized.rights || {}
-    }));
+    };
+    if (user && user.externalLogin) payload.externalLogin = true;
+    if (user && Object.prototype.hasOwnProperty.call(user, "manager")) {
+      payload.manager = String(user.manager ?? "").trim();
+    }
+    sessionStorage.setItem(this.SESSION_KEY, JSON.stringify(payload));
   },
 
   clearSession() {
@@ -831,13 +849,7 @@ const Auth = {
       v: 1,
       savedAt: Date.now(),
       expiresAt,
-      session: {
-        id: session.id,
-        name: session.name,
-        username: session.username,
-        email: session.email || "",
-        rights: session.rights || {}
-      }
+      session: this.sessionSnapshot_(session)
     };
 
     localStorage.setItem(this.REMEMBER_SESSION_KEY, JSON.stringify(payload));
@@ -995,8 +1007,281 @@ const Auth = {
     );
 
     if (updated) {
-      this.setSession(updated);
+      const next = { ...updated };
+      if (session.externalLogin) {
+        next.externalLogin = true;
+        next.name = session.name;
+        next.username = session.username;
+        next.email = session.email;
+        if (Object.prototype.hasOwnProperty.call(session, "manager")) {
+          next.manager = session.manager;
+        }
+      }
+      this.setSession(next);
       this.applyAccessControl();
+    }
+  },
+
+  sessionSnapshot_(session) {
+    const snapshot = {
+      id: session.id,
+      name: session.name,
+      username: session.username,
+      email: session.email || "",
+      rights: session.rights || {}
+    };
+    if (session.externalLogin) snapshot.externalLogin = true;
+    if (Object.prototype.hasOwnProperty.call(session, "manager")) {
+      snapshot.manager = String(session.manager ?? "").trim();
+    }
+    return snapshot;
+  },
+
+  safeAuthError_(value, fallback) {
+    const text = String(value || "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+    if (!text || text.length > 240) return fallback;
+    return text;
+  },
+
+  loadExternalScript_(src) {
+    if (!this._externalScripts) this._externalScripts = {};
+    if (this._externalScripts[src]) return this._externalScripts[src];
+    this._externalScripts[src] = new Promise((resolve, reject) => {
+      const existing = document.querySelector(`script[src="${src}"]`);
+      if (existing && existing.dataset.loaded === "1") {
+        resolve();
+        return;
+      }
+      const script = existing || document.createElement("script");
+      script.addEventListener("load", () => {
+        script.dataset.loaded = "1";
+        resolve();
+      }, { once: true });
+      script.addEventListener("error", () => {
+        reject(new Error("Could not load sign-in."));
+      }, { once: true });
+      if (!existing) {
+        script.src = src;
+        script.async = true;
+        document.head.appendChild(script);
+      }
+    });
+    return this._externalScripts[src];
+  },
+
+  async verifyExternalLogin(provider, idToken) {
+    if (!this.SHEET_WEB_APP_URL) {
+      return { ok: false, error: "Sign-in is not configured." };
+    }
+    const controller = typeof AbortController === "function" ? new AbortController() : null;
+    const timer = window.setTimeout(() => {
+      try {
+        controller?.abort();
+      } catch {
+        // ignore
+      }
+    }, 40000);
+    try {
+      const response = await fetch(this.SHEET_WEB_APP_URL, {
+        method: "POST",
+        redirect: "follow",
+        credentials: "omit",
+        cache: "no-store",
+        signal: controller ? controller.signal : undefined,
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        body: JSON.stringify({
+          action: "verifyExternalLogin",
+          provider,
+          idToken
+        })
+      });
+      const payload = this.parseUsersResponse_(await response.text());
+      if (!payload || payload.ok !== true || !payload.user || !payload.email) {
+        return {
+          ok: false,
+          error: this.safeAuthError_(payload && payload.error, "This email is not on the UserMaster list.")
+        };
+      }
+      return {
+        ok: true,
+        user: String(payload.user).trim(),
+        email: String(payload.email).trim(),
+        manager: String(payload.manager || "").trim()
+      };
+    } catch (error) {
+      const message = String(error && error.message || "");
+      if (/abort|timed out/i.test(message)) {
+        return { ok: false, error: "Sign-in timed out. Try again." };
+      }
+      if (/authorization is required/i.test(message)) {
+        return { ok: false, error: message };
+      }
+      return { ok: false, error: "Could not reach the sign-in server. Try again." };
+    } finally {
+      window.clearTimeout(timer);
+    }
+  },
+
+  establishExternalSession(profile) {
+    const displayName = String(profile && profile.user || "").trim();
+    const email = String(profile && profile.email || "").trim();
+    const manager = String(profile && profile.manager || "").trim();
+    if (!displayName || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return { ok: false, error: "This email is not on the UserMaster list." };
+    }
+
+    const users = this.readUsers();
+    const emailKey = email.toLowerCase();
+    const byEmail = users.find((entry) => String(entry.email || "").trim().toLowerCase() === emailKey);
+    const byName = users.find((entry) => this.matchesIdentifier_(entry, displayName));
+    const matched = byEmail || byName || null;
+    if (matched && matched.active === false) {
+      return { ok: false, error: "This account is disabled." };
+    }
+
+    this.setSession({
+      id: matched && matched.id
+        ? matched.id
+        : `user-${emailKey.replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "")}`,
+      name: displayName,
+      username: displayName,
+      email,
+      password: matched ? matched.password : "",
+      active: true,
+      rights: matched && matched.rights ? matched.rights : { dashboard: true },
+      externalLogin: true,
+      manager
+    });
+    return { ok: true, user: this.currentUser() };
+  },
+
+  mountGoogleSignIn(options) {
+    const opts = options || {};
+    const button = opts.button;
+    const container = opts.container;
+    const onError = typeof opts.onError === "function" ? opts.onError : () => {};
+    const onCredential = typeof opts.onCredential === "function" ? opts.onCredential : () => {};
+    if (!button) return;
+
+    const clientId = String(this.GOOGLE_CLIENT_ID || "").trim();
+    if (!clientId) {
+      button.hidden = false;
+      button.addEventListener("click", () => {
+        onError("Google sign-in is not configured yet. Add GOOGLE_CLIENT_ID in auth.js.");
+      });
+      return;
+    }
+
+    this.loadExternalScript_("https://accounts.google.com/gsi/client").then(() => {
+      const gis = window.google && window.google.accounts && window.google.accounts.id;
+      if (!gis || !container) {
+        button.addEventListener("click", () => onError("Google sign-in failed to load. Try again."));
+        return;
+      }
+      gis.initialize({
+        client_id: clientId,
+        callback: (response) => {
+          const token = response && response.credential;
+          if (!token) {
+            onError("Google did not return an ID token.");
+            return;
+          }
+          onCredential(token);
+        },
+        auto_select: false,
+        cancel_on_tap_outside: true,
+        context: "signin",
+        itp_support: true
+      });
+      button.hidden = true;
+      container.hidden = false;
+      const parentWidth = container.parentElement ? container.parentElement.clientWidth : 320;
+      const width = Math.max(200, Math.min(360, Math.floor(parentWidth || 320)));
+      gis.renderButton(container, {
+        type: "standard",
+        theme: "outline",
+        size: "large",
+        text: "signin_with",
+        shape: "pill",
+        width,
+        logo_alignment: "left"
+      });
+    }).catch(() => {
+      button.addEventListener("click", () => onError("Google sign-in failed to load. Try again."));
+    });
+  },
+
+  hasMicrosoftRedirect_() {
+    const hash = String(window.location.hash || "");
+    const search = String(window.location.search || "");
+    return /(?:^|[?#&])(code|error|client_info)=/.test(hash)
+      || /(?:^|[?&])(code|error)=/.test(search);
+  },
+
+  microsoftApp_() {
+    if (this._microsoftAppPromise) return this._microsoftAppPromise;
+    const clientId = String(this.MICROSOFT_CLIENT_ID || "").trim();
+    this._microsoftAppPromise = this.loadExternalScript_("https://alcdn.msauth.net/browser/2.38.3/js/msal-browser.min.js").then(async () => {
+      if (!window.msal || !window.msal.PublicClientApplication) {
+        throw new Error("Microsoft sign-in failed to load.");
+      }
+      const app = new window.msal.PublicClientApplication({
+        auth: {
+          clientId,
+          authority: "https://login.microsoftonline.com/common",
+          redirectUri: window.location.origin + window.location.pathname
+        },
+        cache: {
+          cacheLocation: "sessionStorage",
+          storeAuthStateInCookie: false
+        }
+      });
+      await app.initialize();
+      return app;
+    });
+    return this._microsoftAppPromise;
+  },
+
+  mountMicrosoftSignIn(options) {
+    const opts = options || {};
+    const button = opts.button;
+    const onError = typeof opts.onError === "function" ? opts.onError : () => {};
+    const onCredential = typeof opts.onCredential === "function" ? opts.onCredential : () => {};
+    if (!button) return;
+
+    const clientId = String(this.MICROSOFT_CLIENT_ID || "").trim();
+    if (!clientId) {
+      button.addEventListener("click", () => {
+        onError("Microsoft sign-in is not configured yet. Add MICROSOFT_CLIENT_ID in auth.js.");
+      });
+      return;
+    }
+
+    const remember = typeof opts.remember === "function" ? opts.remember : () => false;
+    button.addEventListener("click", async () => {
+      button.disabled = true;
+      try {
+        sessionStorage.setItem("tarmal-oauth-remember", remember() ? "1" : "0");
+        const app = await this.microsoftApp_();
+        await app.loginRedirect({
+          scopes: ["openid", "profile", "email"],
+          prompt: "select_account"
+        });
+      } catch (error) {
+        button.disabled = false;
+        onError(this.safeAuthError_(error && error.message, "Microsoft sign-in could not be started."));
+      }
+    });
+
+    if (this.hasMicrosoftRedirect_()) {
+      this.microsoftApp_()
+        .then((app) => app.handleRedirectPromise())
+        .then((result) => {
+          if (result && result.idToken) onCredential(result.idToken);
+        })
+        .catch((error) => {
+          onError(this.safeAuthError_(error && error.message, "Microsoft sign-in could not be completed."));
+        });
     }
   }
 };
