@@ -6175,29 +6175,199 @@ function base64UrlToBytes_(input) {
   return out;
 }
 
-function bytesToBigInt_(bytes) {
-  var parts = [];
-  var started = false;
-  for (var i = 0; i < bytes.length; i++) {
-    var b = bytes[i] & 255;
-    if (!started && b === 0) continue;
-    started = true;
-    var hex = b.toString(16);
-    parts.push(hex.length === 1 ? "0" + hex : hex);
-  }
-  if (!parts.length) return 0n;
-  return BigInt("0x" + parts.join(""));
+// Apps Script rejects BigInt literals such as 0n. RS256 math uses 24-bit limbs
+// so every product stays inside a JavaScript safe integer.
+var RSA_LIMB_BASE_ = 16777216;
+
+function rsaTrim_(a) {
+  var end = a.length;
+  while (end > 1 && a[end - 1] === 0) end--;
+  if (end === a.length) return a;
+  var out = [];
+  for (var i = 0; i < end; i++) out.push(a[i]);
+  return out;
 }
 
-function bigIntToFixedBytes_(value, length) {
-  if (value < 0n) return null;
-  var hex = value.toString(16);
-  if (hex.length % 2) hex = "0" + hex;
-  if (hex.length / 2 > length) return null;
+function rsaIsZero_(a) {
+  var i;
+  for (i = 0; i < a.length; i++) {
+    if (a[i]) return false;
+  }
+  return true;
+}
+
+function rsaCompare_(a, b) {
+  var aa = rsaTrim_(a);
+  var bb = rsaTrim_(b);
+  if (aa.length !== bb.length) return aa.length > bb.length ? 1 : -1;
+  var i;
+  for (i = aa.length - 1; i >= 0; i--) {
+    if (aa[i] !== bb[i]) return aa[i] > bb[i] ? 1 : -1;
+  }
+  return 0;
+}
+
+function rsaBitLength_(a) {
+  a = rsaTrim_(a);
+  if (rsaIsZero_(a)) return 0;
+  var top = a[a.length - 1];
+  var bits = (a.length - 1) * 24;
+  while (top > 0) {
+    bits++;
+    top = Math.floor(top / 2);
+  }
+  return bits;
+}
+
+function bytesToRsa_(bytes) {
+  var limbs = [];
+  var acc = 0;
+  var bits = 0;
+  var i;
+  for (i = bytes.length - 1; i >= 0; i--) {
+    acc += (bytes[i] & 255) * (bits === 0 ? 1 : bits === 8 ? 256 : 65536);
+    bits += 8;
+    if (bits === 24) {
+      limbs.push(acc);
+      acc = 0;
+      bits = 0;
+    }
+  }
+  if (bits) limbs.push(acc);
+  if (!limbs.length) limbs.push(0);
+  return rsaTrim_(limbs);
+}
+
+function rsaToFixedBytes_(value, length) {
+  if (!length || length < 1) return null;
+  var limbs = rsaTrim_(value);
   var bytes = [];
-  for (var i = 0; i < hex.length; i += 2) bytes.push(parseInt(hex.substr(i, 2), 16));
-  while (bytes.length < length) bytes.unshift(0);
+  var i;
+  for (i = 0; i < limbs.length; i++) {
+    var limb = limbs[i];
+    bytes.push(limb % 256);
+    bytes.push(Math.floor(limb / 256) % 256);
+    bytes.push(Math.floor(limb / 65536) % 256);
+  }
+  while (bytes.length > 1 && bytes[bytes.length - 1] === 0) bytes.pop();
+  if (bytes.length > length) return null;
+  while (bytes.length < length) bytes.push(0);
+  bytes.reverse();
   return bytes;
+}
+
+function rsaSub_(a, b) {
+  var out = [];
+  var borrow = 0;
+  var i;
+  for (i = 0; i < a.length; i++) {
+    var bv = i < b.length ? b[i] : 0;
+    var v = a[i] - bv - borrow;
+    if (v < 0) {
+      v += RSA_LIMB_BASE_;
+      borrow = 1;
+    } else {
+      borrow = 0;
+    }
+    out.push(v);
+  }
+  return rsaTrim_(out);
+}
+
+function rsaMul_(a, b) {
+  a = rsaTrim_(a);
+  b = rsaTrim_(b);
+  if (rsaIsZero_(a) || rsaIsZero_(b)) return [0];
+  var out = [];
+  var i;
+  var j;
+  for (i = 0; i < a.length + b.length; i++) out.push(0);
+  for (i = 0; i < a.length; i++) {
+    var carry = 0;
+    for (j = 0; j < b.length; j++) {
+      var v = out[i + j] + a[i] * b[j] + carry;
+      out[i + j] = v % RSA_LIMB_BASE_;
+      carry = Math.floor(v / RSA_LIMB_BASE_);
+    }
+    var k = i + b.length;
+    while (carry) {
+      if (k >= out.length) out.push(0);
+      var summed = out[k] + carry;
+      out[k] = summed % RSA_LIMB_BASE_;
+      carry = Math.floor(summed / RSA_LIMB_BASE_);
+      k++;
+    }
+  }
+  return rsaTrim_(out);
+}
+
+function rsaShlBits_(a, bits) {
+  if (!bits) return rsaTrim_(a.slice());
+  var limbShift = Math.floor(bits / 24);
+  var bitShift = bits % 24;
+  var out = [];
+  var i;
+  for (i = 0; i < limbShift; i++) out.push(0);
+  var carry = 0;
+  var factor = 1;
+  for (i = 0; i < bitShift; i++) factor *= 2;
+  for (i = 0; i < a.length; i++) {
+    var v = a[i] * factor + carry;
+    out.push(v % RSA_LIMB_BASE_);
+    carry = Math.floor(v / RSA_LIMB_BASE_);
+  }
+  if (carry) out.push(carry);
+  return rsaTrim_(out);
+}
+
+function rsaShr1_(a) {
+  var out = [];
+  var carry = 0;
+  var i;
+  for (i = a.length - 1; i >= 0; i--) {
+    var cur = carry * RSA_LIMB_BASE_ + a[i];
+    out[i] = Math.floor(cur / 2);
+    carry = cur % 2;
+  }
+  return rsaTrim_(out);
+}
+
+function rsaMod_(a, m) {
+  a = rsaTrim_(a.slice());
+  m = rsaTrim_(m);
+  if (rsaIsZero_(m)) throw new Error("Division by zero");
+  if (rsaCompare_(a, m) < 0) return a;
+  var shift = rsaBitLength_(a) - rsaBitLength_(m);
+  var shifted = rsaShlBits_(m, shift);
+  var s;
+  for (s = 0; s <= shift; s++) {
+    if (rsaCompare_(a, shifted) >= 0) a = rsaSub_(a, shifted);
+    if (rsaIsZero_(a)) return [0];
+    if (s !== shift) shifted = rsaShr1_(shifted);
+  }
+  return rsaTrim_(a);
+}
+
+function rsaModPow_(base, exponentBytes, modulus) {
+  var result = [1];
+  var b = rsaMod_(base, modulus);
+  var started = false;
+  var i;
+  var bit;
+  for (i = 0; i < exponentBytes.length; i++) {
+    var byte = exponentBytes[i] & 255;
+    for (bit = 7; bit >= 0; bit--) {
+      if (!started) {
+        if (((byte >> bit) & 1) === 0) continue;
+        started = true;
+        result = b.slice();
+        continue;
+      }
+      result = rsaMod_(rsaMul_(result, result), modulus);
+      if (((byte >> bit) & 1) === 1) result = rsaMod_(rsaMul_(result, b), modulus);
+    }
+  }
+  return started ? result : [1];
 }
 
 function rsaModulusLength_(nBytes) {
@@ -6206,28 +6376,17 @@ function rsaModulusLength_(nBytes) {
   return nBytes.length - i;
 }
 
-function modPow_(base, exponent, modulus) {
-  var result = 1n;
-  var b = base % modulus;
-  var e = exponent;
-  while (e > 0n) {
-    if ((e & 1n) === 1n) result = (result * b) % modulus;
-    e >>= 1n;
-    b = (b * b) % modulus;
-  }
-  return result;
-}
-
 function verifyPkcs1Sha256_(signatureBytes, nB64, eB64, digestBytes) {
   var nBytes = base64UrlToBytes_(nB64);
   var eBytes = base64UrlToBytes_(eB64);
-  var n = bytesToBigInt_(nBytes);
-  var e = bytesToBigInt_(eBytes);
-  var sig = bytesToBigInt_(signatureBytes);
-  if (n <= 0n || e <= 0n || sig < 0n || sig >= n) return false;
+  if (!nBytes.length || !eBytes.length || !signatureBytes || !signatureBytes.length) return false;
+  var n = bytesToRsa_(nBytes);
+  var exponent = bytesToRsa_(eBytes);
+  var sig = bytesToRsa_(signatureBytes);
+  if (rsaIsZero_(n) || rsaIsZero_(exponent) || rsaCompare_(sig, n) >= 0) return false;
   var k = rsaModulusLength_(nBytes);
   if (!k || signatureBytes.length > k) return false;
-  var em = bigIntToFixedBytes_(modPow_(sig, e, n), k);
+  var em = rsaToFixedBytes_(rsaModPow_(sig, eBytes, n), k);
   return pkcs1Sha256Matches_(em, digestBytes);
 }
 
