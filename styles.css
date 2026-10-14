@@ -2826,6 +2826,116 @@ body.sidebar-collapsed .sidebar-expand-bar {
   white-space: pre-wrap;
 }
 
+.remarks-content-compact {
+  flex-wrap: nowrap;
+  align-items: center;
+  min-width: 0;
+  max-width: 100%;
+  width: 100%;
+}
+
+.remarks-line-trigger {
+  display: inline-grid;
+  grid-template-columns: minmax(0, max-content) max-content;
+  align-items: center;
+  column-gap: 8px;
+  flex: 0 1 auto;
+  width: max-content;
+  min-width: 0;
+  max-width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  line-height: 1.35;
+  text-align: left;
+  cursor: pointer;
+}
+
+.remarks-line-trigger:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.remarks-line-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  word-break: normal;
+  overflow-wrap: normal;
+  line-height: 1.35;
+}
+
+.remarks-view-cue {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  line-height: 1;
+}
+
+.remarks-line-trigger:hover .remarks-view-cue,
+.remarks-line-trigger.is-open .remarks-view-cue {
+  color: var(--blue);
+}
+
+.remarks-content-compact .remarks-screenshots,
+.remarks-content-compact .local-screenshot-badge {
+  flex: 0 0 auto;
+  margin-top: 0;
+}
+
+.remarks-popover {
+  position: fixed;
+  z-index: 80;
+  width: max-content;
+  min-width: min(220px, calc(100vw - 16px));
+  max-width: min(420px, calc(100vw - 16px));
+  max-height: min(280px, calc(100vh - 16px));
+  overflow: auto;
+  padding: 10px 12px;
+  background: #fff;
+  color: var(--ink);
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  box-shadow: 0 12px 32px rgba(15, 39, 72, 0.16);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.remarks-popover[hidden] {
+  display: none !important;
+}
+
+.remarks-popover-label {
+  margin: 0 0 6px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+.remarks-popover-body {
+  white-space: normal;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  color: var(--ink);
+  user-select: text;
+}
+
+.remarks-popover-body a {
+  color: var(--blue);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
 .remarks-screenshots {
   display: flex;
   flex-wrap: wrap;
@@ -3967,10 +4077,19 @@ tbody tr.milestone-today:not(.status-blocked) .task-col,
 tbody tr.milestone-today:not(.status-blocked) .ticket-col-compact,
 tbody tr.milestone-today:not(.status-blocked) .remarks-content,
 tbody tr.milestone-today:not(.status-blocked) .remarks-text,
+tbody tr.milestone-today:not(.status-blocked) .remarks-line-trigger,
 tbody tr.milestone-today:not(.status-blocked) .ticket-remarks-html,
+tbody tr.milestone-today:not(.status-blocked) .remarks-view-cue,
 tbody tr.milestone-today:not(.status-blocked) .remarks-col s,
 tbody tr.milestone-today:not(.status-blocked) .subtask-indicator {
   color: #ffffff;
+}
+
+tbody tr.milestone-today:not(.status-blocked) .remarks-line-trigger:hover .remarks-view-cue,
+tbody tr.milestone-today:not(.status-blocked) .remarks-line-trigger.is-open .remarks-view-cue {
+  color: #ffffff;
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 tbody tr.milestone-today:not(.status-blocked) .muted-text {
@@ -4630,11 +4749,11 @@ tbody tr.milestone-today:not(.status-blocked):hover {
   overflow: hidden;
   position: static;
   text-align: left;
-  white-space: pre-wrap;
-  word-break: break-word;
-  overflow-wrap: anywhere;
-  line-height: 1.4;
-  vertical-align: top;
+  white-space: nowrap;
+  word-break: normal;
+  overflow-wrap: normal;
+  line-height: 1.35;
+  vertical-align: middle;
 }
 
 #ticketTable.ticket-table-can-edit .task-col,
@@ -4754,10 +4873,15 @@ tbody tr.milestone-today:not(.status-blocked):hover {
 #ticketTable .remarks-col .remarks-text,
 #projectTable .remarks-col .remarks-text,
 #ticketTable .remarks-col .ticket-remarks-html,
-#projectTable .remarks-col .ticket-remarks-html {
+#projectTable .remarks-col .ticket-remarks-html,
+#ticketTable .remarks-col .remarks-line-trigger,
+#projectTable .remarks-col .remarks-line-trigger,
+#ticketTable .remarks-col .remarks-line-text,
+#projectTable .remarks-col .remarks-line-text {
   min-width: 0;
   max-width: 100%;
-  overflow-wrap: anywhere;
+  overflow-wrap: normal;
+  word-break: normal;
 }
 
 #ticketTable .ticket-col-priority .priority-pill,
@@ -4780,8 +4904,9 @@ tbody tr.milestone-today:not(.status-blocked):hover {
 }
 
 .ticket-table .remarks-col {
-  white-space: pre-wrap;
-  word-break: break-word;
+  white-space: nowrap;
+  word-break: normal;
+  overflow-wrap: normal;
   line-height: 1.35;
 }
 
@@ -7607,6 +7732,7 @@ body.view-focus .dashboard-layout {
   #ticketTable tbody tr.milestone-today .ticket-parent-task,
   #ticketTable tbody tr.milestone-today .remarks-content,
   #ticketTable tbody tr.milestone-today .remarks-text,
+  #ticketTable tbody tr.milestone-today .remarks-line-trigger,
   #ticketTable tbody tr.milestone-today .ticket-remarks-html,
   #ticketTable tbody tr.milestone-today .subtask-indicator,
   #projectTable tbody tr.milestone-today td,
@@ -7614,9 +7740,20 @@ body.view-focus .dashboard-layout {
   #projectTable tbody tr.milestone-today .ticket-parent-task,
   #projectTable tbody tr.milestone-today .remarks-content,
   #projectTable tbody tr.milestone-today .remarks-text,
+  #projectTable tbody tr.milestone-today .remarks-line-trigger,
   #projectTable tbody tr.milestone-today .ticket-remarks-html,
   #projectTable tbody tr.milestone-today .subtask-indicator {
     color: var(--ink);
+  }
+
+  #ticketTable tbody tr.milestone-today .remarks-view-cue,
+  #projectTable tbody tr.milestone-today .remarks-view-cue,
+  #ticketTable tbody tr.milestone-today .remarks-line-trigger:hover .remarks-view-cue,
+  #projectTable tbody tr.milestone-today .remarks-line-trigger:hover .remarks-view-cue,
+  #ticketTable tbody tr.milestone-today .remarks-line-trigger.is-open .remarks-view-cue,
+  #projectTable tbody tr.milestone-today .remarks-line-trigger.is-open .remarks-view-cue {
+    color: var(--blue);
+    text-decoration: none;
   }
 
   #ticketTable tbody tr.milestone-today .ticket-col-compact,
@@ -7830,9 +7967,9 @@ body.view-focus .dashboard-layout {
     width: 100% !important;
     font-size: 13px;
     color: var(--ink-secondary);
-    white-space: pre-wrap !important;
+    white-space: nowrap !important;
     word-break: normal !important;
-    overflow-wrap: break-word !important;
+    overflow-wrap: normal !important;
   }
 
   #ticketTable .actions-col,

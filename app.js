@@ -2282,6 +2282,150 @@ function hasImportantRemarks(ticket) {
   return getTicketRemarksText(ticket).toLowerCase().includes("important");
 }
 
+function remarksPreviewLineHtml(richHtml) {
+  const source = String(richHtml || "");
+  if (!source) return "";
+  const doc = new DOMParser().parseFromString(`<div>${source}</div>`, "text/html");
+  const walk = (node) => {
+    if (!node) return "";
+    if (node.nodeType === Node.TEXT_NODE) {
+      return escapeHtml(String(node.nodeValue || "").replace(/\u00a0/g, " "));
+    }
+    if (node.nodeType !== Node.ELEMENT_NODE) return "";
+    const tag = String(node.tagName || "").toLowerCase();
+    if (tag === "br") return " ";
+    if (tag === "script" || tag === "style" || tag === "img") return "";
+    const inner = [...node.childNodes].map(walk).join("");
+    if (tag === "s" || tag === "strike" || tag === "del") return inner ? `<s>${inner}</s>` : "";
+    return inner;
+  };
+  return walk(doc.body.firstChild).replace(/\s+/g, " ").trim();
+}
+
+function linkifyRemarksHtml(html) {
+  return String(html || "").replace(/(<[^>]+>)|(https?:\/\/[^\s<]+)/gi, (match, tag, url) => {
+    if (tag) return tag;
+    const trimmed = url.replace(/[),.;:!?]+$/g, "");
+    const trailing = url.slice(trimmed.length);
+    if (!/^https?:\/\//i.test(trimmed)) return match;
+    return `<a href="${trimmed}" target="_blank" rel="noopener noreferrer">${trimmed}</a>${trailing}`;
+  });
+}
+
+let remarksPopoverEl = null;
+let remarksPopoverAnchor = null;
+
+function isRemarksPopoverOpen() {
+  return Boolean(remarksPopoverEl && !remarksPopoverEl.hidden);
+}
+
+function ensureRemarksPopover() {
+  if (remarksPopoverEl) return remarksPopoverEl;
+  const el = document.createElement("div");
+  el.className = "remarks-popover";
+  el.hidden = true;
+  el.setAttribute("role", "dialog");
+  el.setAttribute("aria-labelledby", "remarksPopoverLabel");
+  el.innerHTML = `
+    <p class="remarks-popover-label" id="remarksPopoverLabel">Remarks</p>
+    <div class="remarks-popover-body ticket-remarks-html"></div>
+  `;
+  document.body.appendChild(el);
+  remarksPopoverEl = el;
+  return el;
+}
+
+function closeRemarksPopover(options = {}) {
+  const anchor = remarksPopoverAnchor;
+  if (anchor) {
+    anchor.classList.remove("is-open");
+    anchor.setAttribute("aria-expanded", "false");
+  }
+  remarksPopoverAnchor = null;
+  if (remarksPopoverEl) {
+    remarksPopoverEl.hidden = true;
+    const body = remarksPopoverEl.querySelector(".remarks-popover-body");
+    if (body) body.innerHTML = "";
+  }
+  if (options.restoreFocus && anchor?.isConnected) anchor.focus();
+}
+
+function remarksAnchorInView(anchor) {
+  if (!anchor?.isConnected) return false;
+  const rect = anchor.getBoundingClientRect();
+  if (rect.width <= 0 && rect.height <= 0) return false;
+  const wrap = anchor.closest(".table-wrap");
+  if (!wrap) return rect.bottom > 0 && rect.top < window.innerHeight;
+  const bounds = wrap.getBoundingClientRect();
+  return rect.bottom > bounds.top + 4 && rect.top < bounds.bottom - 4;
+}
+
+function positionRemarksPopover(anchor) {
+  const pop = remarksPopoverEl;
+  if (!pop || !anchor) return;
+  const margin = 8;
+  const rect = anchor.getBoundingClientRect();
+  const popRect = pop.getBoundingClientRect();
+  const width = popRect.width;
+  const height = popRect.height;
+  let left = rect.left;
+  let top = rect.bottom + 6;
+  if (left + width > window.innerWidth - margin) {
+    left = Math.max(margin, window.innerWidth - margin - width);
+  }
+  if (left < margin) left = margin;
+  if (top + height > window.innerHeight - margin && rect.top - 6 - height >= margin) {
+    top = rect.top - 6 - height;
+  } else if (top + height > window.innerHeight - margin) {
+    top = Math.max(margin, window.innerHeight - margin - height);
+  }
+  pop.style.left = `${Math.round(left)}px`;
+  pop.style.top = `${Math.round(top)}px`;
+}
+
+function openRemarksPopover(anchor) {
+  const ticket = findTicketBySheetRow(anchor?.dataset?.sheetRow);
+  const text = ticket ? getTicketRemarksText(ticket) : "";
+  const richHtml = ticket ? getTicketRemarksRichHtml(ticket) : "";
+  if (!ticket || !text) {
+    closeRemarksPopover();
+    return;
+  }
+  const pop = ensureRemarksPopover();
+  if (remarksPopoverAnchor && remarksPopoverAnchor !== anchor) {
+    remarksPopoverAnchor.classList.remove("is-open");
+    remarksPopoverAnchor.setAttribute("aria-expanded", "false");
+  }
+  const body = pop.querySelector(".remarks-popover-body");
+  const fullHtml = richHtml || escapeHtml(text).replace(/\n/g, "<br>");
+  if (body) body.innerHTML = linkifyRemarksHtml(fullHtml);
+  remarksPopoverAnchor = anchor;
+  anchor.classList.add("is-open");
+  anchor.setAttribute("aria-expanded", "true");
+  pop.hidden = false;
+  pop.style.visibility = "hidden";
+  positionRemarksPopover(anchor);
+  pop.style.visibility = "";
+}
+
+function toggleRemarksPopover(anchor) {
+  if (!anchor) return;
+  if (isRemarksPopoverOpen() && remarksPopoverAnchor === anchor) {
+    closeRemarksPopover();
+    return;
+  }
+  openRemarksPopover(anchor);
+}
+
+function syncRemarksPopoverPosition() {
+  if (!isRemarksPopoverOpen()) return;
+  if (!remarksAnchorInView(remarksPopoverAnchor)) {
+    closeRemarksPopover();
+    return;
+  }
+  positionRemarksPopover(remarksPopoverAnchor);
+}
+
 function renderTicketRemarksCell(ticket) {
   const screenshots = getTicketScreenshots(ticket);
   const text = getTicketRemarksText(ticket);
@@ -2295,8 +2439,21 @@ function renderTicketRemarksCell(ticket) {
   }
 
   const parts = [];
-  if (richHtml) {
-    parts.push(`<div class="remarks-text ticket-remarks-html">${richHtml}</div>`);
+  const lineHtml = remarksPreviewLineHtml(richHtml) || (text ? escapeHtml(text) : "");
+  if (text && lineHtml) {
+    parts.push(`
+      <button
+        class="remarks-line-trigger"
+        type="button"
+        data-sheet-row="${escapeHtml(ticket.sheetRow)}"
+        aria-haspopup="dialog"
+        aria-expanded="false"
+        aria-label="View remarks"
+      >
+        <span class="remarks-line-text ticket-remarks-html">${lineHtml}</span>
+        <span class="remarks-view-cue">View</span>
+      </button>
+    `);
   }
 
   if (localOnly) {
@@ -2320,7 +2477,7 @@ function renderTicketRemarksCell(ticket) {
     `);
   }
 
-  return `<div class="remarks-content">${parts.join("")}</div>`;
+  return `<div class="remarks-content remarks-content-compact">${parts.join("")}</div>`;
 }
 
 function renderScreenshotPreviewButton(ticket) {
@@ -8892,10 +9049,23 @@ function renderTicketTable(tickets, options = {}) {
       </td></tr>`
     : "";
 
+  const remarksPopoverRestoreRow = (
+    isRemarksPopoverOpen()
+    && remarksPopoverAnchor
+    && bodyEl.contains(remarksPopoverAnchor)
+  ) ? Number(remarksPopoverAnchor.dataset.sheetRow) : 0;
+
   bodyEl.innerHTML = rowsHtml + loadMoreHtml;
 
   bindTicketEditButtons(bodyEl);
   bindScreenshotPreviewButtons(bodyEl);
+  if (remarksPopoverRestoreRow) {
+    const nextTrigger = bodyEl.querySelector(
+      `.remarks-line-trigger[data-sheet-row="${remarksPopoverRestoreRow}"]`
+    );
+    if (nextTrigger) openRemarksPopover(nextTrigger);
+    else closeRemarksPopover();
+  }
   bodyEl.querySelectorAll("[data-load-more]").forEach((button) => {
     button.addEventListener("click", () => {
       const kind = button.dataset.loadMore;
@@ -10117,6 +10287,11 @@ document.addEventListener("keydown", (event) => {
     closeTicketEditor();
     return;
   }
+  if (event.key === "Escape" && isRemarksPopoverOpen()) {
+    event.preventDefault();
+    closeRemarksPopover({ restoreFocus: true });
+    return;
+  }
   if (!screenshotPreviewModal?.hidden) {
     if (event.key === "ArrowLeft") {
       screenshotPreviewPrev?.click();
@@ -10126,6 +10301,22 @@ document.addEventListener("keydown", (event) => {
     }
   }
 });
+
+document.addEventListener("click", (event) => {
+  const trigger = event.target.closest?.(".remarks-line-trigger");
+  if (trigger) {
+    event.preventDefault();
+    event.stopPropagation();
+    toggleRemarksPopover(trigger);
+    return;
+  }
+  if (!isRemarksPopoverOpen()) return;
+  if (remarksPopoverEl?.contains(event.target)) return;
+  closeRemarksPopover();
+}, true);
+
+document.addEventListener("scroll", syncRemarksPopoverPosition, true);
+window.addEventListener("resize", syncRemarksPopoverPosition);
 
 closeScreenshotPreviewButton?.addEventListener("click", closeScreenshotPreview);
 screenshotPreviewPrev?.addEventListener("click", () => {
