@@ -5328,6 +5328,10 @@ function isMilestoneToday(ticket) {
   return isSameCalendarDay(getEffectiveMilestone(ticket));
 }
 
+function showsMilestoneTodayHighlight(ticket) {
+  return isMilestoneToday(ticket) && isOpenTicket(ticket) && statusClass(ticket?.Status) !== "status-blocked";
+}
+
 function isTicketCompleted(ticket) {
   return statusClass(ticket?.Status) === "status-completed";
 }
@@ -5912,7 +5916,7 @@ function renderDashboardRecent(tickets) {
     .map((ticket) => {
       const activityLabel = formatTodayActivityLabel(ticket);
       return `
-      <article class="dashboard-recent-item ${statusClass(ticket.Status)}${isMilestoneToday(ticket) && isOpenTicket(ticket) ? " milestone-today-item" : ""}">
+      <article class="dashboard-recent-item ${statusClass(ticket.Status)}${showsMilestoneTodayHighlight(ticket) ? " milestone-today-item" : ""}">
         <div class="dashboard-recent-head">
           <strong>${escapeHtml(ticket.Task)}</strong>
           <span class="status-pill ${statusClass(ticket.Status)}">${escapeHtml(ticket.Status || "Blank")}</span>
@@ -5942,7 +5946,7 @@ function renderLatestTickets(tickets) {
 
   latestTicketList.innerHTML = todayTickets
     .map((ticket) => `
-      <div class="latest-item ${statusClass(ticket.Status)}${isMilestoneToday(ticket) && isOpenTicket(ticket) ? " milestone-today-item" : ""}">
+      <div class="latest-item ${statusClass(ticket.Status)}${showsMilestoneTodayHighlight(ticket) ? " milestone-today-item" : ""}">
         <strong>${escapeHtml(ticket.Task)}</strong>
         <div class="latest-meta">
           <span>${escapeHtml(ticket.Status || "Blank")}</span>
@@ -8705,6 +8709,7 @@ function renderTicketTable(tickets, options = {}) {
   const keepAllRows = Boolean(options.keepAllRows);
   if (tableEl) {
     tableEl.classList.toggle("ticket-table-can-edit", showActions);
+    tableEl.classList.toggle("ticket-table-show-completed", showCompletedAt);
   }
   if (actionsHeaderEl) {
     actionsHeaderEl.hidden = !showActions;
@@ -8815,7 +8820,7 @@ function renderTicketTable(tickets, options = {}) {
 
       const rowClasses = [
         statusClass(ticket.Status),
-        isMilestoneToday(ticket) && isOpenTicket(ticket) ? "milestone-today" : "",
+        showsMilestoneTodayHighlight(ticket) ? "milestone-today" : "",
         options.highlightImportantRemarks && hasImportantRemarks(ticket) ? "remarks-important" : "",
         subtask ? "subtask-row" : "",
         hasChildren ? "has-subtasks" : "",
@@ -8832,7 +8837,7 @@ function renderTicketTable(tickets, options = {}) {
         <td class="ticket-col-compact ticket-col-status"><span class="status-pill ${statusClass(ticket.Status)}">${escapeHtml(ticket.Status || "Blank")}</span></td>
         <td class="ticket-col-compact ticket-col-date">${formatDate(ticket.Milestone) ? escapeHtml(formatDate(ticket.Milestone)) : "—"}</td>
         <td class="ticket-col-compact ticket-col-date">${escapeHtml(formatDate(ticket["End date"]))}</td>
-        ${showCompletedAt ? `<td class="ticket-col-compact ticket-col-date ticket-col-completed-at">${escapeHtml(formatCompletionStamp(ticket.closedOn))}</td>` : ""}
+        ${showCompletedAt ? `<td class="ticket-col-compact ticket-col-date ticket-col-completed-at"><span class="ticket-completed-label">${escapeHtml(formatCompletionStamp(ticket.closedOn))}</span></td>` : ""}
         <td class="ticket-col-compact ticket-col-type"><span class="ticket-type-label">${escapeHtml(ticket.Type)}</span></td>
         <td class="remarks-col">${renderTicketRemarksCell(ticket)}</td>
         ${canEdit ? `

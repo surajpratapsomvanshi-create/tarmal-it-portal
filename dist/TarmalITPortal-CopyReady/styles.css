@@ -1858,6 +1858,17 @@ body.sidebar-collapsed .sidebar-expand-bar {
   background: #fef2f2;
 }
 
+.dashboard-recent-item.status-blocked.milestone-today-item {
+  border-color: var(--line);
+  border-left-color: #dc2626;
+  background: #fff;
+}
+
+.latest-item.status-blocked.milestone-today-item {
+  border-left-color: #c62b38;
+  background: #fff;
+}
+
 .dashboard-recent-head {
   display: flex;
   align-items: flex-start;
@@ -3881,8 +3892,8 @@ body.modal-open {
 }
 
 #ticketTable.ticket-table-can-edit .remarks-col {
-  width: 26%;
-  min-width: 9.5rem;
+  width: auto;
+  min-width: 12.5rem;
 }
 
 table {
@@ -3946,78 +3957,78 @@ tbody tr.status-other {
   box-shadow: inset 4px 0 0 #f59e0b;
 }
 
-tbody tr.milestone-today {
+tbody tr.milestone-today:not(.status-blocked) {
   background: #7f1d1d;
   color: #ffffff;
 }
 
-tbody tr.milestone-today td,
-tbody tr.milestone-today .task-col,
-tbody tr.milestone-today .ticket-col-compact,
-tbody tr.milestone-today .remarks-content,
-tbody tr.milestone-today .remarks-text,
-tbody tr.milestone-today .ticket-remarks-html,
-tbody tr.milestone-today .remarks-col s,
-tbody tr.milestone-today .subtask-indicator {
+tbody tr.milestone-today:not(.status-blocked) td,
+tbody tr.milestone-today:not(.status-blocked) .task-col,
+tbody tr.milestone-today:not(.status-blocked) .ticket-col-compact,
+tbody tr.milestone-today:not(.status-blocked) .remarks-content,
+tbody tr.milestone-today:not(.status-blocked) .remarks-text,
+tbody tr.milestone-today:not(.status-blocked) .ticket-remarks-html,
+tbody tr.milestone-today:not(.status-blocked) .remarks-col s,
+tbody tr.milestone-today:not(.status-blocked) .subtask-indicator {
   color: #ffffff;
 }
 
-tbody tr.milestone-today .muted-text {
+tbody tr.milestone-today:not(.status-blocked) .muted-text {
   color: #e2e8f0;
 }
 
-tbody tr.milestone-today .priority-pill,
-tbody tr.milestone-today .status-pill,
-tbody tr.milestone-today .priority-pill.priority-high,
-tbody tr.milestone-today .priority-pill.priority-low,
-tbody tr.milestone-today .status-pill.status-completed,
-tbody tr.milestone-today .status-pill.status-progress,
-tbody tr.milestone-today .status-pill.status-pending,
-tbody tr.milestone-today .status-pill.status-approval,
-tbody tr.milestone-today .status-pill.status-blocked {
+tbody tr.milestone-today:not(.status-blocked) .priority-pill,
+tbody tr.milestone-today:not(.status-blocked) .status-pill,
+tbody tr.milestone-today:not(.status-blocked) .priority-pill.priority-high,
+tbody tr.milestone-today:not(.status-blocked) .priority-pill.priority-low,
+tbody tr.milestone-today:not(.status-blocked) .status-pill.status-completed,
+tbody tr.milestone-today:not(.status-blocked) .status-pill.status-progress,
+tbody tr.milestone-today:not(.status-blocked) .status-pill.status-pending,
+tbody tr.milestone-today:not(.status-blocked) .status-pill.status-approval,
+tbody tr.milestone-today:not(.status-blocked) .status-pill.status-blocked {
   background: rgba(255, 255, 255, 0.18);
   border-color: rgba(255, 255, 255, 0.35);
   color: #ffffff;
 }
 
-tbody tr.milestone-today .screenshot-preview-btn {
+tbody tr.milestone-today:not(.status-blocked) .screenshot-preview-btn {
   background: rgba(255, 255, 255, 0.12);
   border-color: rgba(255, 255, 255, 0.35);
   color: #fff;
 }
 
-tbody tr.milestone-today .ticket-subtask-button,
-tbody tr.milestone-today .ticket-edit-button,
-tbody tr.milestone-today .ticket-duplicate-button,
-tbody tr.milestone-today .ticket-subtask-toggle,
-tbody tr.milestone-today .ticket-milestone-today-button {
+tbody tr.milestone-today:not(.status-blocked) .ticket-subtask-button,
+tbody tr.milestone-today:not(.status-blocked) .ticket-edit-button,
+tbody tr.milestone-today:not(.status-blocked) .ticket-duplicate-button,
+tbody tr.milestone-today:not(.status-blocked) .ticket-subtask-toggle,
+tbody tr.milestone-today:not(.status-blocked) .ticket-milestone-today-button {
   background: rgba(255, 255, 255, 0.14);
   border-color: rgba(255, 255, 255, 0.45);
   color: #ffffff;
 }
 
-tbody tr.milestone-today .ticket-subtask-button:hover,
-tbody tr.milestone-today .ticket-edit-button:hover,
-tbody tr.milestone-today .ticket-duplicate-button:hover,
-tbody tr.milestone-today .ticket-subtask-toggle:hover,
-tbody tr.milestone-today .ticket-milestone-today-button:hover {
+tbody tr.milestone-today:not(.status-blocked) .ticket-subtask-button:hover,
+tbody tr.milestone-today:not(.status-blocked) .ticket-edit-button:hover,
+tbody tr.milestone-today:not(.status-blocked) .ticket-duplicate-button:hover,
+tbody tr.milestone-today:not(.status-blocked) .ticket-subtask-toggle:hover,
+tbody tr.milestone-today:not(.status-blocked) .ticket-milestone-today-button:hover {
   background: rgba(255, 255, 255, 0.26);
   border-color: rgba(255, 255, 255, 0.65);
   color: #ffffff;
 }
 
-tbody tr.milestone-today .duplicate-icon::after {
+tbody tr.milestone-today:not(.status-blocked) .duplicate-icon::after {
   background: transparent;
 }
 
-tbody tr.milestone-today .ticket-subtask-count {
+tbody tr.milestone-today:not(.status-blocked) .ticket-subtask-count {
   background: rgba(255, 255, 255, 0.16);
   border-color: rgba(255, 255, 255, 0.35);
   color: #ffffff;
 }
 
-tbody tr.milestone-today .local-screenshot-badge,
-tbody tr.milestone-today .screenshot-upload-btn {
+tbody tr.milestone-today:not(.status-blocked) .local-screenshot-badge,
+tbody tr.milestone-today:not(.status-blocked) .screenshot-upload-btn {
   background: rgba(255, 255, 255, 0.16);
   border-color: rgba(255, 255, 255, 0.35);
   color: #fff;
@@ -4027,7 +4038,7 @@ tbody tr:hover {
   background: var(--soft);
 }
 
-tbody tr.milestone-today:hover {
+tbody tr.milestone-today:not(.status-blocked):hover {
   background: #991b1b;
 }
 
@@ -4590,13 +4601,22 @@ tbody tr.milestone-today:hover {
 #projectTable {
   table-layout: fixed;
   width: 100%;
-  max-width: 100%;
+  max-width: none;
+  /* Sum of the fixed columns below, plus remarks. A percentage budget that
+     already filled the table collapsed the outside-hours Completed column
+     to 0, and overflow:visible painted its stamp across Type and Remarks. */
+  min-width: 84.5rem;
+}
+
+#ticketTable.ticket-table-show-completed {
+  min-width: 95.5rem;
 }
 
 #ticketTable .task-col,
 #projectTable .task-col {
-  width: 22%;
-  min-width: 0;
+  width: 18rem;
+  min-width: 18rem;
+  max-width: 28rem;
   white-space: normal;
   line-height: 1.4;
   vertical-align: top;
@@ -4604,10 +4624,11 @@ tbody tr.milestone-today:hover {
 
 #ticketTable .remarks-col,
 #projectTable .remarks-col {
-  width: 32%;
-  min-width: 9.5rem;
+  width: auto;
+  min-width: 12.5rem;
   max-width: none;
   overflow: hidden;
+  position: static;
   text-align: left;
   white-space: pre-wrap;
   word-break: break-word;
@@ -4617,23 +4638,18 @@ tbody tr.milestone-today:hover {
 }
 
 #ticketTable.ticket-table-can-edit .task-col,
-#projectTable.ticket-table-can-edit .task-col {
-  width: 21%;
+#projectTable.ticket-table-can-edit .task-col,
+#ticketTable:not(.ticket-table-can-edit) .task-col,
+#projectTable:not(.ticket-table-can-edit) .task-col {
+  width: 18rem;
 }
 
 #ticketTable.ticket-table-can-edit .remarks-col,
-#projectTable.ticket-table-can-edit .remarks-col {
-  width: 26%;
-}
-
-#ticketTable:not(.ticket-table-can-edit) .task-col,
-#projectTable:not(.ticket-table-can-edit) .task-col {
-  width: 22%;
-}
-
+#projectTable.ticket-table-can-edit .remarks-col,
 #ticketTable:not(.ticket-table-can-edit) .remarks-col,
 #projectTable:not(.ticket-table-can-edit) .remarks-col {
-  width: 35%;
+  width: auto;
+  min-width: 12.5rem;
 }
 
 #ticketTable .ticket-col-compact,
@@ -4645,66 +4661,92 @@ tbody tr.milestone-today:hover {
   padding-left: 6px;
   padding-right: 6px;
   vertical-align: middle;
-  min-width: 0;
 }
 
 #ticketTable .ticket-col-priority,
 #projectTable .ticket-col-priority {
-  width: 5%;
+  width: 4.25rem;
+  min-width: 4.25rem;
+  max-width: 4.25rem;
   text-align: center;
 }
 
 #ticketTable .ticket-col-status,
 #projectTable .ticket-col-status {
-  width: 8%;
+  width: 6.75rem;
+  min-width: 6.75rem;
+  max-width: 6.75rem;
 }
 
 #ticketTable .ticket-col-date,
 #projectTable .ticket-col-date {
-  width: 6%;
+  width: 5.75rem;
+  min-width: 5.75rem;
+  max-width: 5.75rem;
 }
 
+/* Outside-hours inserts this column between End and Type. width:auto collapsed
+   it under table-layout:fixed, and overflow:visible painted the stamp across Type. */
 #ticketTable .ticket-col-completed-at {
-  width: auto;
-  min-width: 11rem;
-  overflow: visible;
-  text-overflow: clip;
+  width: 11.25rem;
+  min-width: 11.25rem;
+  max-width: 11.25rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  word-break: normal;
+  overflow-wrap: normal;
+}
+
+#ticketTable .ticket-completed-label {
+  display: block;
+  width: 0;
+  min-width: 100%;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 #ticketTable .ticket-col-owner,
 #ticketTable .ticket-col-raised,
 #projectTable .ticket-col-owner,
 #projectTable .ticket-col-raised {
-  width: 6%;
+  width: 6.5rem;
+  min-width: 6.5rem;
+  max-width: 6.5rem;
 }
 
 #ticketTable .ticket-col-type,
-#projectTable .ticket-col-type {
-  width: 7.75rem;
-  min-width: 7.75rem;
-  max-width: 7.75rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
+#projectTable .ticket-col-type,
+#ticketTable th.ticket-col-type,
+#projectTable th.ticket-col-type,
 #ticketTable td.ticket-col-type,
 #projectTable td.ticket-col-type {
-  min-width: 0;
-  max-width: 7.75rem;
+  width: 8.75rem;
+  min-width: 8.75rem;
+  max-width: 8.75rem;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  word-break: normal;
+  overflow-wrap: normal;
 }
 
 #ticketTable .ticket-type-label,
 #projectTable .ticket-type-label {
   display: block;
-  min-width: 0;
+  width: 0;
+  min-width: 100%;
   max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+#ticketTable td,
+#projectTable td {
+  background-color: inherit;
 }
 
 #ticketTable .remarks-col .remarks-content,
@@ -4898,27 +4940,35 @@ body.view-focus .ticket-board .table-wrap {
   max-height: none;
 }
 
+.ticket-board .table-wrap.ticket-table-wrap,
+body.view-focus .ticket-board .table-wrap.ticket-table-wrap {
+  overflow-x: auto;
+}
+
 body.view-focus .ticket-table th,
 body.view-focus .ticket-table td {
   padding: 8px 9px;
   font-size: 13px;
 }
 
-body.view-focus #ticketTable .task-col {
-  width: 22%;
+body.view-focus #ticketTable .task-col,
+body.view-focus #projectTable .task-col,
+body.view-focus #ticketTable.ticket-table-can-edit .task-col,
+body.view-focus #projectTable.ticket-table-can-edit .task-col {
+  width: 18rem;
+  min-width: 18rem;
+  max-width: 28rem;
 }
 
-body.view-focus #ticketTable .remarks-col {
-  width: 30%;
+body.view-focus #ticketTable .remarks-col,
+body.view-focus #projectTable .remarks-col,
+body.view-focus #ticketTable.ticket-table-can-edit .remarks-col,
+body.view-focus #projectTable.ticket-table-can-edit .remarks-col {
+  width: auto;
+  min-width: 12.5rem;
   max-width: none;
-}
-
-body.view-focus #ticketTable.ticket-table-can-edit .task-col {
-  width: 21%;
-}
-
-body.view-focus #ticketTable.ticket-table-can-edit .remarks-col {
-  width: 26%;
+  overflow: hidden;
+  position: static;
 }
 
 body.view-focus .kanban-columns {
@@ -7132,6 +7182,18 @@ body.view-focus .dashboard-layout {
     min-width: 152px;
   }
 
+  #ticketTable .ticket-type-label,
+  #projectTable .ticket-type-label,
+  #ticketTable .ticket-completed-label {
+    width: auto;
+    min-width: 0;
+    max-width: 8.75rem;
+  }
+
+  #ticketTable .ticket-completed-label {
+    max-width: 11.25rem;
+  }
+
   .ticket-board .table-wrap.ticket-table-wrap {
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
@@ -7534,8 +7596,8 @@ body.view-focus .dashboard-layout {
    * via #ticketTable specificity, but left white ink/pills/icons → invisible on pink.
    * Force dark readable colors + normal pills/actions on stacked cards.
    */
-  #ticketTable tbody tr.milestone-today,
-  #projectTable tbody tr.milestone-today {
+  #ticketTable tbody tr.milestone-today:not(.status-blocked),
+  #projectTable tbody tr.milestone-today:not(.status-blocked) {
     color: var(--ink);
     box-shadow: inset 4px 0 0 #7f1d1d, var(--shadow-sm, 0 1px 2px rgba(15, 23, 42, 0.04));
   }
@@ -7748,6 +7810,17 @@ body.view-focus .dashboard-layout {
     color: var(--muted);
     white-space: nowrap !important;
     overflow: visible !important;
+    text-overflow: clip;
+  }
+
+  #ticketTable .ticket-type-label,
+  #projectTable .ticket-type-label,
+  #ticketTable .ticket-completed-label {
+    display: inline;
+    width: auto;
+    min-width: 0;
+    max-width: none;
+    overflow: visible;
     text-overflow: clip;
   }
 
