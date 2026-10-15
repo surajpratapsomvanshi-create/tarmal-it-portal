@@ -4724,11 +4724,11 @@ tbody tr.milestone-today:not(.status-blocked):hover {
   /* Sum of the fixed columns below, plus remarks. A percentage budget that
      already filled the table collapsed the outside-hours Completed column
      to 0, and overflow:visible painted its stamp across Type and Remarks. */
-  min-width: 84.5rem;
+  min-width: 86rem;
 }
 
 #ticketTable.ticket-table-show-completed {
-  min-width: 95.5rem;
+  min-width: 98rem;
 }
 
 #ticketTable .task-col,
@@ -4746,14 +4746,39 @@ tbody tr.milestone-today:not(.status-blocked):hover {
   width: auto;
   min-width: 12.5rem;
   max-width: none;
-  overflow: hidden;
-  position: static;
   text-align: left;
   white-space: nowrap;
   word-break: normal;
   overflow-wrap: normal;
   line-height: 1.35;
   vertical-align: middle;
+}
+
+/* Header must stay sticky and unclipped. position:static on .remarks-col
+   let Type and Actions stick while Remarks scrolled away, so the red row
+   showed through. Ellipsis stays on the cell text, not this label. */
+#ticketTable th.remarks-col,
+#projectTable th.remarks-col,
+#ticketTable.ticket-table-show-completed th.remarks-col {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: nowrap;
+  word-break: normal;
+  overflow-wrap: normal;
+  min-width: 12.5rem;
+  background: var(--soft);
+  color: var(--muted);
+  line-height: 1.2;
+  vertical-align: middle;
+}
+
+#ticketTable td.remarks-col,
+#projectTable td.remarks-col {
+  overflow: hidden;
+  position: static;
 }
 
 #ticketTable.ticket-table-can-edit .task-col,
@@ -5092,6 +5117,23 @@ body.view-focus #projectTable.ticket-table-can-edit .remarks-col {
   width: auto;
   min-width: 12.5rem;
   max-width: none;
+}
+
+body.view-focus #ticketTable th.remarks-col,
+body.view-focus #projectTable th.remarks-col,
+body.view-focus #ticketTable.ticket-table-show-completed th.remarks-col {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: nowrap;
+  background: var(--soft);
+  color: var(--muted);
+}
+
+body.view-focus #ticketTable td.remarks-col,
+body.view-focus #projectTable td.remarks-col {
   overflow: hidden;
   position: static;
 }
