@@ -6,12 +6,12 @@
     <title>Tarmal IT Portal</title>
     <link rel="icon" href="./assets/tarmal-mark.png?v=1" type="image/png">
     <link rel="apple-touch-icon" href="./assets/apple-touch-icon.png?v=1">
-    <link rel="stylesheet" href="./styles.css?v=207">
+    <link rel="stylesheet" href="./styles.css?v=208">
     <!-- auth stays blocking so requireLogin runs before app chrome paints -->
     <script src="./auth.js?v=27"></script>
     <!-- Defer main bundles so HTML can parse while ~210KB+ app.js downloads -->
     <script src="./app.js?v=229" defer></script>
-    <script src="./assets.js?v=15" defer></script>
+    <script src="./assets.js?v=18" defer></script>
     <script src="./documents.js?v=12" defer></script>
     <script src="./procurement.js?v=6" defer></script>
   </head>
@@ -2005,7 +2005,7 @@
           <div class="field-row">
             <label class="field" for="consumableItemCode">
               <span>Item ID</span>
-              <input id="consumableItemCode" type="text" autocomplete="off" placeholder="Auto if blank (e.g. CNS-…)">
+              <input id="consumableItemCode" type="text" autocomplete="off" placeholder="Auto from category (e.g. CRT-001, PPR-001)">
             </label>
             <label class="field" for="consumableCategory">
               <span>Category</span>
@@ -2105,7 +2105,9 @@
             </label>
             <label class="field" for="consumableMoveIssuedBy">
               <span>Who issued / recorded</span>
-              <input id="consumableMoveIssuedBy" type="text" autocomplete="off" placeholder="Your name" required>
+              <select id="consumableMoveIssuedBy" required>
+                <option value="">Select user</option>
+              </select>
             </label>
           </div>
           <div class="field-row">

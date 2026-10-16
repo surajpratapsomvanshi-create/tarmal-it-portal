@@ -1646,6 +1646,13 @@ const Consumables = {
   LOCAL_KEY: "tarmal-it-consumables",
   CATEGORIES: ["Cartridge", "Paper", "Cable", "Other"],
   MOVE_TYPES: ["Receive", "Issue", "Adjust"],
+  // Category → Item ID prefix (seq CRT-001…): Cartridge→CRT, Paper→PPR, Cable→CBL, Other→OTH.
+  CATEGORY_PREFIXES: {
+    Cartridge: "CRT",
+    Paper: "PPR",
+    Cable: "CBL",
+    Other: "OTH"
+  },
 
   read() {
     const saved = localStorage.getItem(this.LOCAL_KEY);
@@ -1720,9 +1727,22 @@ const Consumables = {
     return `cns-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
   },
 
-  createItemCode() {
-    const stamp = new Date().toISOString().slice(0, 10).replaceAll("-", "");
-    return `CNS-${stamp}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
+  prefixForCategory(category) {
+    const key = String(category || "").trim();
+    return this.CATEGORY_PREFIXES[key] || this.CATEGORY_PREFIXES.Other;
+  },
+
+  createItemCode(category = "Other", items = null, excludeId = "") {
+    const prefix = this.prefixForCategory(category);
+    const list = items || this.read();
+    const pattern = new RegExp(`^${prefix}-(\\d+)$`, "i");
+    let max = 0;
+    list.forEach((item) => {
+      if (excludeId && item.id === excludeId) return;
+      const match = String(item.itemCode || "").trim().match(pattern);
+      if (match) max = Math.max(max, Number.parseInt(match[1], 10) || 0);
+    });
+    return `${prefix}-${String(max + 1).padStart(3, "0")}`;
   },
 
   signedDelta(type, quantity) {
@@ -1922,6 +1942,8 @@ let consumableMoveDepartment;
 let consumableMoveRelatedAsset;
 let consumableMoveNotes;
 let closeConsumableMoveButton;
+/** True while Item ID is still auto-managed (blank or last filled from category). */
+let consumableItemCodeAuto = true;
 
 function bindConsumableElements() {
   consumableRows = document.querySelector("#consumableRows");
@@ -1973,15 +1995,50 @@ function formatConsumableNumber(value, digits = 1) {
   return Number.isInteger(num) ? String(num) : num.toFixed(digits);
 }
 
-function populateConsumableIssuerFilter(items) {
+function getConsumableIssuerNames() {
+  if (typeof getAllHierarchyUsers === "function") {
+    return [...getAllHierarchyUsers()].sort((a, b) => String(a).localeCompare(String(b)));
+  }
+  if (typeof getVisibleOwnerNames === "function") {
+    return [...getVisibleOwnerNames()];
+  }
+  if (typeof DEFAULT_TICKET_OWNERS !== "undefined" && Array.isArray(DEFAULT_TICKET_OWNERS)) {
+    return [...DEFAULT_TICKET_OWNERS].filter(Boolean).sort((a, b) => String(a).localeCompare(String(b)));
+  }
+  return [];
+}
+
+function resolveConsumableIssuerDefault(names) {
+  const list = Array.isArray(names) ? names : [];
+  const current = currentPortalUserName();
+  if (!current || !list.length) return "";
+  if (typeof matchesHierarchyIdentity === "function") {
+    const match = list.find((name) => matchesHierarchyIdentity(current, name));
+    if (match) return match;
+  }
+  const lower = current.toLowerCase();
+  return list.find((name) => String(name).toLowerCase() === lower) || "";
+}
+
+function populateConsumableIssuerFilter() {
   if (!consumableIssuerFilter) return;
   const current = consumableIssuerFilter.value;
-  const issuers = [...new Set(
-    items.flatMap((item) => (item.movements || []).map((move) => move.issuedBy).filter(Boolean))
-  )].sort();
+  const issuers = getConsumableIssuerNames();
   consumableIssuerFilter.innerHTML = '<option value="">Anyone</option>'
     + issuers.map((name) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join("");
   consumableIssuerFilter.value = issuers.includes(current) ? current : "";
+}
+
+function populateConsumableMoveIssuedBy(selected = "") {
+  if (!consumableMoveIssuedBy) return;
+  const issuers = getConsumableIssuerNames();
+  const preferred = String(selected || "").trim();
+  const defaultName = preferred && issuers.includes(preferred)
+    ? preferred
+    : resolveConsumableIssuerDefault(issuers);
+  consumableMoveIssuedBy.innerHTML = '<option value="">Select user</option>'
+    + issuers.map((name) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join("");
+  consumableMoveIssuedBy.value = issuers.includes(defaultName) ? defaultName : "";
 }
 
 function filterConsumableMovements(movements) {
@@ -2045,7 +2102,7 @@ function renderConsumables() {
   }
 
   const allItems = Consumables.read().map((item) => Consumables.withBalances(item));
-  populateConsumableIssuerFilter(allItems);
+  populateConsumableIssuerFilter();
   updateConsumableLowStockBadge(allItems);
 
   const items = applyConsumableFilters(allItems);
@@ -2104,6 +2161,20 @@ function renderConsumables() {
   });
 }
 
+function isEditingConsumable() {
+  return Boolean(String(consumableEditId?.value || "").trim());
+}
+
+function applyAutoConsumableItemCode() {
+  if (!consumableItemCode || isEditingConsumable() || !consumableItemCodeAuto) return;
+  const category = String(consumableCategory?.value || "").trim();
+  if (!category) {
+    consumableItemCode.value = "";
+    return;
+  }
+  consumableItemCode.value = Consumables.createItemCode(category);
+}
+
 function openConsumableForm(itemId = "") {
   if (!canManageAssets()) {
     alert("You do not have permission to manage consumables.");
@@ -2115,7 +2186,11 @@ function openConsumableForm(itemId = "") {
     : null;
 
   if (consumableEditId) consumableEditId.value = existing?.id || "";
-  if (consumableItemCode) consumableItemCode.value = existing?.itemCode || "";
+  consumableItemCodeAuto = !existing;
+  if (consumableItemCode) {
+    consumableItemCode.value = existing?.itemCode || "";
+    consumableItemCode.placeholder = "Auto from category (e.g. CRT-001, PPR-001)";
+  }
   if (consumableCategory) consumableCategory.value = existing?.category || "";
   if (consumableName) consumableName.value = existing?.name || "";
   if (consumableUnit) consumableUnit.value = existing?.unit || "pcs";
@@ -2132,6 +2207,7 @@ function openConsumableForm(itemId = "") {
   if (consumableVendor) consumableVendor.value = existing?.vendor || "";
   if (consumableNotes) consumableNotes.value = existing?.notes || "";
   if (consumableFormTitle) consumableFormTitle.textContent = existing ? "Edit consumable" : "Add consumable";
+  if (!existing) applyAutoConsumableItemCode();
   if (consumableFormModal) consumableFormModal.hidden = false;
 }
 
@@ -2157,9 +2233,10 @@ async function saveConsumableFromForm(event) {
   }
 
   const openingInput = Number(consumableOpeningStock?.value);
+  const typedCode = String(consumableItemCode?.value || "").trim();
   let item = {
     id: existing?.id || Consumables.createId(),
-    itemCode: String(consumableItemCode?.value || "").trim() || existing?.itemCode || Consumables.createItemCode(),
+    itemCode: typedCode || existing?.itemCode || Consumables.createItemCode(category, items, existing?.id || ""),
     name,
     category,
     unit,
@@ -2307,9 +2384,7 @@ function openConsumableMoveModal(itemId) {
   if (consumableMoveType) consumableMoveType.value = "Issue";
   if (consumableMoveDate) consumableMoveDate.value = new Date().toISOString().slice(0, 10);
   if (consumableMoveQty) consumableMoveQty.value = "1";
-  if (consumableMoveIssuedBy) {
-    consumableMoveIssuedBy.value = currentPortalUserName();
-  }
+  populateConsumableMoveIssuedBy(currentPortalUserName());
   if (consumableMoveDepartment) consumableMoveDepartment.value = "";
   if (consumableMoveNotes) consumableMoveNotes.value = "";
   fillRelatedAssetOptions();
@@ -2426,6 +2501,20 @@ function initConsumablesModule() {
     if (event.target === consumableFormModal) closeConsumableForm();
   });
   consumableForm?.addEventListener("submit", saveConsumableFromForm);
+  consumableCategory?.addEventListener("change", () => {
+    if (isEditingConsumable()) return;
+    applyAutoConsumableItemCode();
+  });
+  consumableItemCode?.addEventListener("input", () => {
+    if (isEditingConsumable()) return;
+    const value = String(consumableItemCode.value || "").trim();
+    if (!value) {
+      consumableItemCodeAuto = true;
+      applyAutoConsumableItemCode();
+      return;
+    }
+    consumableItemCodeAuto = false;
+  });
 
   closeConsumableDetailButton?.addEventListener("click", closeConsumableDetail);
   consumableDetailModal?.addEventListener("click", (event) => {

@@ -8557,6 +8557,12 @@ body.view-focus .dashboard-layout {
   padding: 0;
 }
 
+/* Expanded hero must not clip the Types multi-select panel (absolute, below trigger). */
+.presentation-hero:not(.is-collapsed) {
+  overflow: visible;
+  z-index: 8;
+}
+
 .presentation-hero-toolbar {
   position: relative;
   z-index: 2;
@@ -8851,8 +8857,17 @@ body.view-focus .dashboard-layout {
   max-width: 6.5rem;
 }
 
+.presentation-filter-field--type {
+  position: relative;
+  z-index: 30;
+  overflow: visible;
+}
+
 .presentation-filter-field--type .multi-select {
+  position: relative;
+  z-index: 30;
   min-width: 0;
+  overflow: visible;
 }
 
 .presentation-filter-field--type .multi-select-trigger {
@@ -8880,7 +8895,7 @@ body.view-focus .dashboard-layout {
 }
 
 .presentation-filter-field--type .multi-select-panel {
-  z-index: 50;
+  z-index: 60;
 }
 
 .presentation-filter-field--owner select {
