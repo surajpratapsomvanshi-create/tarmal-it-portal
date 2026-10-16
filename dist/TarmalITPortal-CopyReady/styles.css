@@ -577,6 +577,11 @@ body.performance-filters-collapsed .filter-sidebar {
   cursor: pointer;
 }
 
+/* Author display:inline-flex overrides UA [hidden]{display:none}; keep empty pill gone. */
+.topbar-stock-warning[hidden] {
+  display: none !important;
+}
+
 .topbar-stock-warning:hover {
   background: linear-gradient(180deg, #ffedd5 0%, #fed7aa 100%);
   border-color: #d97706;

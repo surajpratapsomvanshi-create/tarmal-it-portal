@@ -2146,6 +2146,16 @@ function updateConsumableLowStockBadge(items) {
   consumableLowStockBadge.textContent = `${low} low stock`;
 }
 
+function hideGlobalConsumableLowStockWarning(targets) {
+  targets.forEach((el) => {
+    el.hidden = true;
+    el.style.display = "none";
+    el.textContent = "";
+    el.removeAttribute("title");
+    el.setAttribute("aria-hidden", "true");
+  });
+}
+
 function updateGlobalConsumableLowStockWarning(items = null) {
   const buttons = [consumableLowStockWarning, consumableLowStockWarningCompact].filter(Boolean);
   if (!buttons.length) {
@@ -2156,21 +2166,13 @@ function updateGlobalConsumableLowStockWarning(items = null) {
   if (!targets.length) return;
 
   if (!canViewConsumables()) {
-    targets.forEach((el) => {
-      el.hidden = true;
-      el.textContent = "";
-      el.removeAttribute("title");
-    });
+    hideGlobalConsumableLowStockWarning(targets);
     return;
   }
 
   const lowItems = Consumables.lowStockItems(items);
   if (!lowItems.length) {
-    targets.forEach((el) => {
-      el.hidden = true;
-      el.textContent = "";
-      el.removeAttribute("title");
-    });
+    hideGlobalConsumableLowStockWarning(targets);
     return;
   }
 
@@ -2188,6 +2190,8 @@ function updateGlobalConsumableLowStockWarning(items = null) {
 
   targets.forEach((el) => {
     el.hidden = false;
+    el.style.display = "";
+    el.removeAttribute("aria-hidden");
     el.textContent = label;
     el.title = title;
   });
