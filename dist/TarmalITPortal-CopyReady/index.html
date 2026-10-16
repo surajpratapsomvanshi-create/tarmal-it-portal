@@ -6,12 +6,12 @@
     <title>Tarmal IT Portal</title>
     <link rel="icon" href="./assets/tarmal-mark.png?v=1" type="image/png">
     <link rel="apple-touch-icon" href="./assets/apple-touch-icon.png?v=1">
-    <link rel="stylesheet" href="./styles.css?v=206">
+    <link rel="stylesheet" href="./styles.css?v=207">
     <!-- auth stays blocking so requireLogin runs before app chrome paints -->
     <script src="./auth.js?v=27"></script>
     <!-- Defer main bundles so HTML can parse while ~210KB+ app.js downloads -->
-    <script src="./app.js?v=228" defer></script>
-    <script src="./assets.js?v=14" defer></script>
+    <script src="./app.js?v=229" defer></script>
+    <script src="./assets.js?v=15" defer></script>
     <script src="./documents.js?v=12" defer></script>
     <script src="./procurement.js?v=6" defer></script>
   </head>
@@ -59,6 +59,9 @@
           </button>
           <button class="tab-button" type="button" data-tab="asset-list" data-requires="viewAssets,manageAssets" data-short="IA">
             <span class="tab-button-label">IT Assets</span>
+          </button>
+          <button class="tab-button" type="button" data-tab="consumables" data-requires="viewAssets,manageAssets" data-short="CS">
+            <span class="tab-button-label">Consumables</span>
           </button>
           <button class="tab-button" type="button" data-tab="documents" data-requires="viewDocuments,manageDocuments" data-short="DM">
             <span class="tab-button-label">DMS</span>
@@ -1031,6 +1034,94 @@
           </section>
       </section>
 
+      <section class="tab-panel" data-panel="consumables" aria-label="IT consumables inventory" data-requires="viewAssets,manageAssets">
+        <section class="asset-board consumables-board" aria-label="Consumables inventory">
+          <div class="board-toolbar-panel" id="consumablesToolbarPanel" data-toolbar-key="consumables">
+            <div class="toolbar-restore-row panel-restore-bar">
+              <span class="panel-restore-label">Consumables — filters &amp; actions hidden</span>
+              <button class="panel-icon-btn toolbar-expand-btn" type="button" aria-label="Show filters" title="Show filters">
+                <span class="panel-icon-glyph panel-icon-glyph-filter" aria-hidden="true"></span>
+              </button>
+            </div>
+            <div class="board-toolbar-body">
+              <div class="board-header">
+                <div>
+                  <p class="eyebrow">Inventory</p>
+                  <h2>Consumables</h2>
+                  <p class="asset-expiry-badge consumable-lowstock-badge" id="consumableLowStockBadge" hidden></p>
+                </div>
+                <div class="board-actions">
+                  <button class="primary-button" id="openConsumableFormButton" type="button" data-requires="manageAssets">+ Add item</button>
+                  <button class="secondary-button" id="refreshConsumablesButton" type="button" data-requires="viewAssets,manageAssets">Refresh</button>
+                  <button class="secondary-button" id="exportConsumablesButton" type="button" data-requires="manageAssets">Export CSV</button>
+                  <button class="secondary-button toolbar-collapse-btn" type="button">Hide filters</button>
+                </div>
+              </div>
+
+              <div class="asset-filters" aria-label="Consumable filters">
+                <label class="field filter-field filter-search">
+                  <span>Search</span>
+                  <input id="consumableSearchFilter" type="search" placeholder="Item, vendor, notes...">
+                </label>
+                <label class="field filter-field">
+                  <span>Category</span>
+                  <select id="consumableCategoryFilter">
+                    <option value="">All categories</option>
+                    <option value="Cartridge">Cartridge</option>
+                    <option value="Paper">Paper</option>
+                    <option value="Cable">Cable</option>
+                    <option value="Other">Other</option>
+                  </select>
+                </label>
+                <label class="field filter-field">
+                  <span>Stock</span>
+                  <select id="consumableStockFilter">
+                    <option value="">All levels</option>
+                    <option value="low">Low stock (≤ reorder)</option>
+                  </select>
+                </label>
+                <label class="field filter-field">
+                  <span>Who issued</span>
+                  <select id="consumableIssuerFilter">
+                    <option value="">Anyone</option>
+                  </select>
+                </label>
+                <label class="field filter-field">
+                  <span>History from</span>
+                  <input id="consumableHistoryFrom" type="date">
+                </label>
+                <label class="field filter-field">
+                  <span>History to</span>
+                  <input id="consumableHistoryTo" type="date">
+                </label>
+              </div>
+              <p class="filter-summary" id="consumableFilterSummary"></p>
+              <p class="assets-readonly-note" id="consumablesReadonlyNote" hidden>View-only access. Ask an admin for Manage IT Assets rights to update stock.</p>
+            </div>
+          </div>
+
+          <div class="table-wrap asset-table-wrap">
+            <table class="asset-table consumable-table">
+              <thead>
+                <tr>
+                  <th>Item ID</th>
+                  <th>Name</th>
+                  <th>Category</th>
+                  <th>Unit</th>
+                  <th>Stock</th>
+                  <th>Reorder</th>
+                  <th>Avg / 30d</th>
+                  <th>Days cover</th>
+                  <th>Vendor</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="consumableRows"></tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+
       <section class="tab-panel" data-panel="documents" aria-label="Document management" data-requires="viewDocuments,manageDocuments">
         <section class="document-board" aria-label="IT document library">
           <div class="document-hero" id="documentHeroPanel">
@@ -1893,6 +1984,149 @@
           <div class="modal-actions">
             <button class="secondary-button" id="cancelAssetHistoryButton" type="button">Close</button>
             <button class="primary-button" type="submit">Add entry</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <div class="modal-overlay" id="consumableFormModal" hidden>
+      <div class="modal-card" role="dialog" aria-labelledby="consumableFormTitle" aria-modal="true">
+        <div class="modal-header">
+          <div>
+            <p class="eyebrow">Consumables</p>
+            <h2 id="consumableFormTitle">Add consumable</h2>
+          </div>
+          <button class="icon-button modal-close-btn" id="closeConsumableFormButton" type="button" aria-label="Close consumable form">
+            <span aria-hidden="true">×</span>
+          </button>
+        </div>
+        <form id="consumableForm" class="ticket-form modal-form">
+          <input type="hidden" id="consumableEditId" value="">
+          <div class="field-row">
+            <label class="field" for="consumableItemCode">
+              <span>Item ID</span>
+              <input id="consumableItemCode" type="text" autocomplete="off" placeholder="Auto if blank (e.g. CNS-…)">
+            </label>
+            <label class="field" for="consumableCategory">
+              <span>Category</span>
+              <select id="consumableCategory" required>
+                <option value="">Select</option>
+                <option value="Cartridge">Cartridge</option>
+                <option value="Paper">Paper</option>
+                <option value="Cable">Cable</option>
+                <option value="Other">Other</option>
+              </select>
+            </label>
+          </div>
+          <label class="field field-wide" for="consumableName">
+            <span>Name</span>
+            <input id="consumableName" type="text" autocomplete="off" placeholder="e.g. HP 85A black toner" required>
+          </label>
+          <div class="field-row">
+            <label class="field" for="consumableUnit">
+              <span>Unit</span>
+              <input id="consumableUnit" type="text" autocomplete="off" placeholder="pcs, box, ream..." required>
+            </label>
+            <label class="field" for="consumableReorderLevel">
+              <span>Reorder level</span>
+              <input id="consumableReorderLevel" type="number" min="0" step="1" value="0" required>
+            </label>
+          </div>
+          <div class="field-row">
+            <label class="field" for="consumableOpeningStock">
+              <span>Opening / current stock</span>
+              <input id="consumableOpeningStock" type="number" min="0" step="1" value="0">
+              <span class="field-hint" id="consumableOpeningStockHint">Used as starting stock for new items. Edits do not wipe movement history.</span>
+            </label>
+            <label class="field" for="consumableVendor">
+              <span>Vendor (optional)</span>
+              <input id="consumableVendor" type="text" autocomplete="off" placeholder="Supplier">
+            </label>
+          </div>
+          <label class="field field-wide" for="consumableNotes">
+            <span>Notes</span>
+            <textarea id="consumableNotes" rows="2" placeholder="Printer models, storage location..."></textarea>
+          </label>
+          <div class="modal-actions">
+            <button class="secondary-button" id="cancelConsumableFormButton" type="button">Cancel</button>
+            <button class="primary-button" type="submit">Save item</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <div class="modal-overlay" id="consumableDetailModal" hidden>
+      <div class="modal-card modal-card-wide" role="dialog" aria-labelledby="consumableDetailTitle" aria-modal="true">
+        <div class="modal-header">
+          <div>
+            <p class="eyebrow">Consumable</p>
+            <h2 id="consumableDetailTitle">Item detail</h2>
+          </div>
+          <button class="icon-button modal-close-btn" id="closeConsumableDetailButton" type="button" aria-label="Close consumable detail">
+            <span aria-hidden="true">×</span>
+          </button>
+        </div>
+        <div id="consumableDetailBody" class="asset-detail-body"></div>
+      </div>
+    </div>
+
+    <div class="modal-overlay" id="consumableMoveModal" hidden>
+      <div class="modal-card" role="dialog" aria-labelledby="consumableMoveTitle" aria-modal="true">
+        <div class="modal-header">
+          <div>
+            <p class="eyebrow">Stock movement</p>
+            <h2 id="consumableMoveTitle">Receive / Issue / Adjust</h2>
+          </div>
+          <button class="icon-button modal-close-btn" id="closeConsumableMoveButton" type="button" aria-label="Close stock movement form">
+            <span aria-hidden="true">×</span>
+          </button>
+        </div>
+        <form id="consumableMoveForm" class="ticket-form modal-form">
+          <input type="hidden" id="consumableMoveItemId" value="">
+          <div class="field-row">
+            <label class="field" for="consumableMoveType">
+              <span>Type</span>
+              <select id="consumableMoveType" required>
+                <option value="Receive">Receive</option>
+                <option value="Issue">Issue</option>
+                <option value="Adjust">Adjust</option>
+              </select>
+            </label>
+            <label class="field" for="consumableMoveDate">
+              <span>Date</span>
+              <input id="consumableMoveDate" type="date" required>
+            </label>
+          </div>
+          <div class="field-row">
+            <label class="field" for="consumableMoveQty">
+              <span>Quantity</span>
+              <input id="consumableMoveQty" type="number" step="1" required>
+              <span class="field-hint" id="consumableMoveQtyHint">Receive/Issue: positive. Adjust: signed delta (+/-).</span>
+            </label>
+            <label class="field" for="consumableMoveIssuedBy">
+              <span>Who issued / recorded</span>
+              <input id="consumableMoveIssuedBy" type="text" autocomplete="off" placeholder="Your name" required>
+            </label>
+          </div>
+          <div class="field-row">
+            <label class="field" for="consumableMoveDepartment">
+              <span>Department / recipient</span>
+              <input id="consumableMoveDepartment" type="text" autocomplete="off" placeholder="Optional">
+            </label>
+            <label class="field" for="consumableMoveRelatedAsset">
+              <span>Related asset</span>
+              <select id="consumableMoveRelatedAsset">
+                <option value="">None</option>
+              </select>
+            </label>
+          </div>
+          <label class="field field-wide" for="consumableMoveNotes">
+            <span>Notes</span>
+            <textarea id="consumableMoveNotes" rows="2" placeholder="Optional notes"></textarea>
+          </label>
+          <div class="modal-actions">
+            <button class="secondary-button" id="cancelConsumableMoveButton" type="button">Cancel</button>
+            <button class="primary-button" type="submit">Save movement</button>
           </div>
         </form>
       </div>

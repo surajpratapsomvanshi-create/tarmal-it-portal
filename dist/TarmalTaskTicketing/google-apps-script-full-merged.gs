@@ -26,6 +26,7 @@
 const TASKS_SHEET = "Tasks";
 const USERS_SHEET = "AppUsers";
 const ASSETS_SHEET = "ITAssets";
+const CONSUMABLES_SHEET = "ITConsumables";
 const DOCUMENTS_SHEET = "Documents";
 const PROCUREMENT_SHEET = "Procurement";
 const USER_MASTER_SHEET = "UserMaster";
@@ -95,6 +96,19 @@ const ASSET_HEADERS = [
   "License Key Last4",
   "History JSON",
   "Handovers JSON"
+];
+
+const CONSUMABLE_HEADERS = [
+  "Id",
+  "Item ID",
+  "Name",
+  "Category",
+  "Unit",
+  "Reorder Level",
+  "Current Stock",
+  "Vendor",
+  "Notes",
+  "Movements JSON"
 ];
 
 const COLUMN_ALIASES = {
@@ -533,6 +547,10 @@ function doGet(e) {
       return buildResponse_({ ok: true, assets: readAssets_() }, e);
     }
 
+    if (resource === "consumables") {
+      return buildResponse_({ ok: true, consumables: readConsumables_() }, e);
+    }
+
     if (resource === "documents") {
       return buildResponse_({ ok: true, documents: readDocuments_() }, e);
     }
@@ -864,6 +882,11 @@ function doPost(e) {
 
     if (data.action === "syncAssets") {
       writeAssets_(data.assets || []);
+      return buildResponse_({ ok: true }, e);
+    }
+
+    if (data.action === "syncConsumables") {
+      writeConsumables_(data.consumables || []);
       return buildResponse_({ ok: true }, e);
     }
 
@@ -2474,6 +2497,73 @@ function rowToAsset_(row) {
     licenseKeyLast4: String(row[19] || ""),
     history: String(row[20] || "[]"),
     handovers: String(row[21] || "[]")
+  };
+}
+
+function ensureConsumablesSheet_() {
+  const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = spreadsheet.getSheetByName(CONSUMABLES_SHEET);
+
+  if (!sheet) {
+    sheet = spreadsheet.insertSheet(CONSUMABLES_SHEET);
+  }
+
+  if (sheet.getLastRow() === 0) {
+    sheet.appendRow(CONSUMABLE_HEADERS);
+  }
+
+  return sheet;
+}
+
+function readConsumables_() {
+  const sheet = ensureConsumablesSheet_();
+  const values = sheet.getDataRange().getValues();
+  if (values.length <= 1) return [];
+
+  return values.slice(1)
+    .filter((row) => String(row[0] || "").trim())
+    .map((row) => rowToConsumable_(row));
+}
+
+function writeConsumables_(items) {
+  const sheet = ensureConsumablesSheet_();
+  const rows = items.map((item) => consumableToRow_(item));
+  const output = [CONSUMABLE_HEADERS].concat(rows);
+
+  sheet.clearContents();
+
+  if (output.length) {
+    sheet.getRange(1, 1, output.length, CONSUMABLE_HEADERS.length).setValues(output);
+  }
+}
+
+function consumableToRow_(item) {
+  return [
+    item.id || "",
+    item.itemCode || "",
+    item.name || "",
+    item.category || "",
+    item.unit || "",
+    item.reorderLevel === 0 || item.reorderLevel ? String(item.reorderLevel) : "",
+    item.currentStock === 0 || item.currentStock ? String(item.currentStock) : "",
+    item.vendor || "",
+    item.notes || "",
+    assetJsonCell_(item.movements)
+  ];
+}
+
+function rowToConsumable_(row) {
+  return {
+    id: String(row[0] || ""),
+    itemCode: String(row[1] || ""),
+    name: String(row[2] || ""),
+    category: String(row[3] || ""),
+    unit: String(row[4] || ""),
+    reorderLevel: String(row[5] || "0"),
+    currentStock: String(row[6] || "0"),
+    vendor: String(row[7] || ""),
+    notes: String(row[8] || ""),
+    movements: String(row[9] || "[]")
   };
 }
 

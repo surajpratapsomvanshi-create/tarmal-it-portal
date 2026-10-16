@@ -5193,7 +5193,8 @@ body.view-focus .tab-panel[data-panel="asset-register"].active > .asset-register
   margin: 0 auto;
 }
 
-body.view-focus .tab-panel[data-panel="asset-list"].active > .asset-board {
+body.view-focus .tab-panel[data-panel="asset-list"].active > .asset-board,
+body.view-focus .tab-panel[data-panel="consumables"].active > .asset-board {
   display: flex;
   flex: 1;
   flex-direction: column;
@@ -6216,6 +6217,27 @@ body.view-focus .dashboard-layout {
   margin-top: 8px;
   max-height: 180px;
   overflow: auto;
+}
+
+.consumable-low-stock,
+.consumable-low-stock strong {
+  color: #b45309;
+  font-weight: 700;
+}
+
+.consumable-lowstock-badge {
+  background: #fff7ed;
+  border-color: #fdba74;
+  color: #9a3412;
+}
+
+.consumable-history-wrap {
+  max-height: min(42vh, 360px);
+  overflow: auto;
+}
+
+.consumable-history-table {
+  min-width: 720px;
 }
 
 .document-board {

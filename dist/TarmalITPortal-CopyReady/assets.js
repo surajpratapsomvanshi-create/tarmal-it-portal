@@ -1636,6 +1636,842 @@ function initAssetsModule() {
   if (Auth.SHEET_WEB_APP_URL && canViewAssets()) {
     refreshAssetsFromSheet();
   }
+
+  initConsumablesModule();
+}
+
+/* ========== Consumables inventory (beside IT Assets) ========== */
+
+const Consumables = {
+  LOCAL_KEY: "tarmal-it-consumables",
+  CATEGORIES: ["Cartridge", "Paper", "Cable", "Other"],
+  MOVE_TYPES: ["Receive", "Issue", "Adjust"],
+
+  read() {
+    const saved = localStorage.getItem(this.LOCAL_KEY);
+    if (!saved) return [];
+    try {
+      return JSON.parse(saved).map((item) => this.normalize(item));
+    } catch {
+      return [];
+    }
+  },
+
+  save(items) {
+    const normalized = items.map((item) => this.normalize(item));
+    localStorage.setItem(this.LOCAL_KEY, JSON.stringify(normalized));
+    return normalized;
+  },
+
+  parseJsonArray(value) {
+    if (Array.isArray(value)) return value;
+    if (!value) return [];
+    if (typeof value === "string") {
+      try {
+        const parsed = JSON.parse(value);
+        return Array.isArray(parsed) ? parsed : [];
+      } catch {
+        return [];
+      }
+    }
+    return [];
+  },
+
+  normalizeMovement(entry) {
+    const type = String(entry?.type || "Issue").trim();
+    return {
+      id: String(entry?.id || `cmov-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`),
+      date: String(entry?.date || "").trim(),
+      type: this.MOVE_TYPES.includes(type) ? type : "Issue",
+      quantity: Number(entry?.quantity) || 0,
+      issuedBy: String(entry?.issuedBy || "").trim(),
+      department: String(entry?.department || "").trim(),
+      relatedAsset: String(entry?.relatedAsset || "").trim(),
+      notes: String(entry?.notes || "").trim(),
+      balanceAfter: entry?.balanceAfter === "" || entry?.balanceAfter === null || entry?.balanceAfter === undefined
+        ? null
+        : Number(entry.balanceAfter),
+      createdAt: String(entry?.createdAt || new Date().toISOString())
+    };
+  },
+
+  normalize(item) {
+    const category = String(item.category || "").trim();
+    const movements = this.parseJsonArray(item.movements).map((entry) => this.normalizeMovement(entry));
+    const currentStock = item.currentStock === "" || item.currentStock === null || item.currentStock === undefined
+      ? this.recomputeStock(0, movements)
+      : Number(item.currentStock) || 0;
+
+    return {
+      id: String(item.id || ""),
+      itemCode: String(item.itemCode || "").trim(),
+      name: String(item.name || "").trim(),
+      category: this.CATEGORIES.includes(category) ? category : (category || "Other"),
+      unit: String(item.unit || "pcs").trim() || "pcs",
+      reorderLevel: Math.max(0, Number(item.reorderLevel) || 0),
+      currentStock,
+      vendor: String(item.vendor || "").trim(),
+      notes: String(item.notes || "").trim(),
+      movements
+    };
+  },
+
+  createId() {
+    return `cns-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+  },
+
+  createItemCode() {
+    const stamp = new Date().toISOString().slice(0, 10).replaceAll("-", "");
+    return `CNS-${stamp}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
+  },
+
+  signedDelta(type, quantity) {
+    const qty = Math.abs(Number(quantity) || 0);
+    if (type === "Receive") return qty;
+    if (type === "Issue") return -qty;
+    return Number(quantity) || 0;
+  },
+
+  recomputeStock(opening, movements) {
+    let stock = Number(opening) || 0;
+    const ordered = [...(movements || [])].sort((a, b) => {
+      const dateCmp = String(a.date).localeCompare(String(b.date));
+      if (dateCmp !== 0) return dateCmp;
+      return String(a.createdAt || "").localeCompare(String(b.createdAt || ""));
+    });
+    ordered.forEach((move) => {
+      stock += this.signedDelta(move.type, move.quantity);
+      move.balanceAfter = stock;
+    });
+    return stock;
+  },
+
+  withBalances(item) {
+    const normalized = this.normalize(item);
+    const opening = this.inferOpeningStock(normalized);
+    const movements = [...normalized.movements];
+    const stock = this.recomputeStock(opening, movements);
+    return this.normalize({ ...normalized, movements, currentStock: stock });
+  },
+
+  inferOpeningStock(item) {
+    // Opening = currentStock minus net of all recorded movements (so edits keep history).
+    const net = (item.movements || []).reduce(
+      (sum, move) => sum + this.signedDelta(move.type, move.quantity),
+      0
+    );
+    return (Number(item.currentStock) || 0) - net;
+  },
+
+  averageMonthlyIssue(item) {
+    const issues = (item.movements || []).filter((move) => move.type === "Issue" && move.quantity);
+    if (!issues.length) return 0;
+
+    const dates = issues
+      .map((move) => new Date(move.date))
+      .filter((date) => !Number.isNaN(date.getTime()))
+      .sort((a, b) => a - b);
+    if (!dates.length) return 0;
+
+    const first = dates[0];
+    const last = new Date();
+    last.setHours(0, 0, 0, 0);
+    first.setHours(0, 0, 0, 0);
+    const days = Math.max(1, Math.ceil((last - first) / 86400000) + 1);
+    const total = issues.reduce((sum, move) => sum + Math.abs(Number(move.quantity) || 0), 0);
+    return (total / days) * 30;
+  },
+
+  averageDailyIssue(item) {
+    return this.averageMonthlyIssue(item) / 30;
+  },
+
+  daysOfCover(item) {
+    const daily = this.averageDailyIssue(item);
+    if (!daily || daily <= 0) return null;
+    return (Number(item.currentStock) || 0) / daily;
+  },
+
+  isLowStock(item) {
+    return (Number(item.currentStock) || 0) <= (Number(item.reorderLevel) || 0);
+  },
+
+  loadFromSheet() {
+    return new Promise((resolve, reject) => {
+      const url = Auth.SHEET_WEB_APP_URL;
+      if (!url) {
+        reject(new Error("Sheet endpoint is not configured."));
+        return;
+      }
+
+      const localItems = this.read();
+      const callbackName = `handleSheetConsumables_${Date.now()}`;
+      const script = document.createElement("script");
+      const separator = url.includes("?") ? "&" : "?";
+      const cleanup = () => {
+        delete window[callbackName];
+        script.remove();
+      };
+
+      window[callbackName] = async (payload) => {
+        cleanup();
+        if (!payload || payload.ok === false) {
+          reject(new Error(payload?.error || "Could not load consumables."));
+          return;
+        }
+
+        const remote = (payload.consumables || []).map((item) => this.normalize(item));
+        const merged = this.merge(localItems, remote);
+        this.save(merged);
+
+        if (canManageAssets() && (!remote.length || merged.length > remote.length)) {
+          await this.syncToSheet(merged);
+        }
+
+        resolve(merged);
+      };
+
+      script.onerror = () => {
+        cleanup();
+        reject(new Error("Could not load consumables."));
+      };
+
+      script.src = `${url}${separator}resource=consumables&callback=${callbackName}`;
+      document.body.appendChild(script);
+    });
+  },
+
+  merge(localItems, remoteItems) {
+    const merged = new Map();
+    remoteItems.forEach((item) => merged.set(item.id, this.normalize(item)));
+    localItems.forEach((item) => {
+      const local = this.normalize(item);
+      if (!merged.has(local.id)) merged.set(local.id, local);
+    });
+    return [...merged.values()].map((item) => this.withBalances(item));
+  },
+
+  async syncToSheet(items) {
+    const url = Auth.SHEET_WEB_APP_URL;
+    if (!url || !canManageAssets()) return { synced: false };
+
+    await fetch(url, {
+      method: "POST",
+      mode: "no-cors",
+      headers: {
+        "Content-Type": "text/plain;charset=utf-8"
+      },
+      body: JSON.stringify({
+        action: "syncConsumables",
+        consumables: items.map((item) => this.normalize(item))
+      })
+    });
+
+    return { synced: true };
+  },
+
+  async write(items) {
+    const normalized = this.save(items.map((item) => this.withBalances(item)));
+    try {
+      await this.syncToSheet(normalized);
+    } catch (error) {
+      console.error("Consumables sync failed", error);
+    }
+    return normalized;
+  }
+};
+
+let consumableRows;
+let consumableSearchFilter;
+let consumableCategoryFilter;
+let consumableStockFilter;
+let consumableIssuerFilter;
+let consumableHistoryFrom;
+let consumableHistoryTo;
+let consumableFilterSummary;
+let consumableLowStockBadge;
+let refreshConsumablesButton;
+let exportConsumablesButton;
+let openConsumableFormButton;
+let consumableFormModal;
+let consumableForm;
+let consumableFormTitle;
+let consumableEditId;
+let consumableItemCode;
+let consumableCategory;
+let consumableName;
+let consumableUnit;
+let consumableReorderLevel;
+let consumableOpeningStock;
+let consumableOpeningStockHint;
+let consumableVendor;
+let consumableNotes;
+let closeConsumableFormButton;
+let consumableDetailModal;
+let consumableDetailTitle;
+let consumableDetailBody;
+let closeConsumableDetailButton;
+let consumableMoveModal;
+let consumableMoveForm;
+let consumableMoveItemId;
+let consumableMoveType;
+let consumableMoveDate;
+let consumableMoveQty;
+let consumableMoveIssuedBy;
+let consumableMoveDepartment;
+let consumableMoveRelatedAsset;
+let consumableMoveNotes;
+let closeConsumableMoveButton;
+
+function bindConsumableElements() {
+  consumableRows = document.querySelector("#consumableRows");
+  consumableSearchFilter = document.querySelector("#consumableSearchFilter");
+  consumableCategoryFilter = document.querySelector("#consumableCategoryFilter");
+  consumableStockFilter = document.querySelector("#consumableStockFilter");
+  consumableIssuerFilter = document.querySelector("#consumableIssuerFilter");
+  consumableHistoryFrom = document.querySelector("#consumableHistoryFrom");
+  consumableHistoryTo = document.querySelector("#consumableHistoryTo");
+  consumableFilterSummary = document.querySelector("#consumableFilterSummary");
+  consumableLowStockBadge = document.querySelector("#consumableLowStockBadge");
+  refreshConsumablesButton = document.querySelector("#refreshConsumablesButton");
+  exportConsumablesButton = document.querySelector("#exportConsumablesButton");
+  openConsumableFormButton = document.querySelector("#openConsumableFormButton");
+  consumableFormModal = document.querySelector("#consumableFormModal");
+  consumableForm = document.querySelector("#consumableForm");
+  consumableFormTitle = document.querySelector("#consumableFormTitle");
+  consumableEditId = document.querySelector("#consumableEditId");
+  consumableItemCode = document.querySelector("#consumableItemCode");
+  consumableCategory = document.querySelector("#consumableCategory");
+  consumableName = document.querySelector("#consumableName");
+  consumableUnit = document.querySelector("#consumableUnit");
+  consumableReorderLevel = document.querySelector("#consumableReorderLevel");
+  consumableOpeningStock = document.querySelector("#consumableOpeningStock");
+  consumableOpeningStockHint = document.querySelector("#consumableOpeningStockHint");
+  consumableVendor = document.querySelector("#consumableVendor");
+  consumableNotes = document.querySelector("#consumableNotes");
+  closeConsumableFormButton = document.querySelector("#closeConsumableFormButton");
+  consumableDetailModal = document.querySelector("#consumableDetailModal");
+  consumableDetailTitle = document.querySelector("#consumableDetailTitle");
+  consumableDetailBody = document.querySelector("#consumableDetailBody");
+  closeConsumableDetailButton = document.querySelector("#closeConsumableDetailButton");
+  consumableMoveModal = document.querySelector("#consumableMoveModal");
+  consumableMoveForm = document.querySelector("#consumableMoveForm");
+  consumableMoveItemId = document.querySelector("#consumableMoveItemId");
+  consumableMoveType = document.querySelector("#consumableMoveType");
+  consumableMoveDate = document.querySelector("#consumableMoveDate");
+  consumableMoveQty = document.querySelector("#consumableMoveQty");
+  consumableMoveIssuedBy = document.querySelector("#consumableMoveIssuedBy");
+  consumableMoveDepartment = document.querySelector("#consumableMoveDepartment");
+  consumableMoveRelatedAsset = document.querySelector("#consumableMoveRelatedAsset");
+  consumableMoveNotes = document.querySelector("#consumableMoveNotes");
+  closeConsumableMoveButton = document.querySelector("#closeConsumableMoveButton");
+}
+
+function formatConsumableNumber(value, digits = 1) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return "—";
+  return Number.isInteger(num) ? String(num) : num.toFixed(digits);
+}
+
+function populateConsumableIssuerFilter(items) {
+  if (!consumableIssuerFilter) return;
+  const current = consumableIssuerFilter.value;
+  const issuers = [...new Set(
+    items.flatMap((item) => (item.movements || []).map((move) => move.issuedBy).filter(Boolean))
+  )].sort();
+  consumableIssuerFilter.innerHTML = '<option value="">Anyone</option>'
+    + issuers.map((name) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join("");
+  consumableIssuerFilter.value = issuers.includes(current) ? current : "";
+}
+
+function filterConsumableMovements(movements) {
+  const issuer = String(consumableIssuerFilter?.value || "").trim();
+  const from = String(consumableHistoryFrom?.value || "").trim();
+  const to = String(consumableHistoryTo?.value || "").trim();
+
+  return (movements || []).filter((move) => {
+    if (issuer && move.issuedBy !== issuer) return false;
+    if (from && String(move.date) < from) return false;
+    if (to && String(move.date) > to) return false;
+    return true;
+  });
+}
+
+function applyConsumableFilters(items) {
+  const search = String(consumableSearchFilter?.value || "").trim().toLowerCase();
+  const category = String(consumableCategoryFilter?.value || "").trim();
+  const stock = String(consumableStockFilter?.value || "").trim();
+  const issuer = String(consumableIssuerFilter?.value || "").trim();
+  const from = String(consumableHistoryFrom?.value || "").trim();
+  const to = String(consumableHistoryTo?.value || "").trim();
+
+  return items.filter((item) => {
+    if (category && item.category !== category) return false;
+    if (stock === "low" && !Consumables.isLowStock(item)) return false;
+    if (issuer || from || to) {
+      if (!filterConsumableMovements(item.movements).length) return false;
+    }
+    if (!search) return true;
+    const haystack = [
+      item.itemCode,
+      item.name,
+      item.category,
+      item.unit,
+      item.vendor,
+      item.notes
+    ].join(" ").toLowerCase();
+    return haystack.includes(search);
+  });
+}
+
+function updateConsumableLowStockBadge(items) {
+  if (!consumableLowStockBadge) return;
+  const low = items.filter((item) => Consumables.isLowStock(item)).length;
+  if (!low) {
+    consumableLowStockBadge.hidden = true;
+    consumableLowStockBadge.textContent = "";
+    return;
+  }
+  consumableLowStockBadge.hidden = false;
+  consumableLowStockBadge.textContent = `${low} low stock`;
+}
+
+function renderConsumables() {
+  if (!consumableRows) return;
+
+  if (!canViewAssets()) {
+    consumableRows.innerHTML = '<tr class="empty-row"><td colspan="10">You do not have permission to view consumables.</td></tr>';
+    return;
+  }
+
+  const allItems = Consumables.read().map((item) => Consumables.withBalances(item));
+  populateConsumableIssuerFilter(allItems);
+  updateConsumableLowStockBadge(allItems);
+
+  const items = applyConsumableFilters(allItems);
+  const manage = canManageAssets();
+  const readonlyNote = document.querySelector("#consumablesReadonlyNote");
+  if (readonlyNote) readonlyNote.hidden = manage;
+
+  if (consumableFilterSummary) {
+    consumableFilterSummary.textContent = `${items.length} item${items.length === 1 ? "" : "s"} listed`;
+  }
+
+  if (!items.length) {
+    consumableRows.innerHTML = '<tr class="empty-row"><td colspan="10">No consumables match the current filters.</td></tr>';
+    return;
+  }
+
+  consumableRows.innerHTML = items.map((item) => {
+    const avg = Consumables.averageMonthlyIssue(item);
+    const cover = Consumables.daysOfCover(item);
+    const lowClass = Consumables.isLowStock(item) ? "consumable-low-stock" : "";
+
+    return `
+      <tr class="asset-row ${lowClass}">
+        <td>${escapeHtml(item.itemCode || "—")}</td>
+        <td>${escapeHtml(item.name || "—")}</td>
+        <td><span class="asset-type-pill">${escapeHtml(item.category || "—")}</span></td>
+        <td>${escapeHtml(item.unit || "—")}</td>
+        <td class="${lowClass}"><strong>${escapeHtml(formatConsumableNumber(item.currentStock, 0))}</strong></td>
+        <td>${escapeHtml(formatConsumableNumber(item.reorderLevel, 0))}</td>
+        <td>${escapeHtml(formatConsumableNumber(avg, 1))}</td>
+        <td>${cover === null ? "—" : escapeHtml(formatConsumableNumber(cover, 0))}</td>
+        <td>${escapeHtml(item.vendor || "—")}</td>
+        <td class="asset-actions">
+          <button class="text-button consumable-view-button" type="button" data-item-id="${escapeHtml(item.id)}">View</button>
+          ${manage ? `
+            <button class="text-button consumable-move-button" type="button" data-item-id="${escapeHtml(item.id)}">Stock</button>
+            <button class="text-button consumable-edit-button" type="button" data-item-id="${escapeHtml(item.id)}">Edit</button>
+            <button class="text-button consumable-delete-button" type="button" data-item-id="${escapeHtml(item.id)}">Delete</button>
+          ` : ""}
+        </td>
+      </tr>
+    `;
+  }).join("");
+
+  consumableRows.querySelectorAll(".consumable-view-button").forEach((button) => {
+    button.addEventListener("click", () => openConsumableDetail(button.dataset.itemId));
+  });
+  consumableRows.querySelectorAll(".consumable-move-button").forEach((button) => {
+    button.addEventListener("click", () => openConsumableMoveModal(button.dataset.itemId));
+  });
+  consumableRows.querySelectorAll(".consumable-edit-button").forEach((button) => {
+    button.addEventListener("click", () => openConsumableForm(button.dataset.itemId));
+  });
+  consumableRows.querySelectorAll(".consumable-delete-button").forEach((button) => {
+    button.addEventListener("click", () => deleteConsumable(button.dataset.itemId));
+  });
+}
+
+function openConsumableForm(itemId = "") {
+  if (!canManageAssets()) {
+    alert("You do not have permission to manage consumables.");
+    return;
+  }
+
+  const existing = itemId
+    ? Consumables.read().find((entry) => entry.id === itemId)
+    : null;
+
+  if (consumableEditId) consumableEditId.value = existing?.id || "";
+  if (consumableItemCode) consumableItemCode.value = existing?.itemCode || "";
+  if (consumableCategory) consumableCategory.value = existing?.category || "";
+  if (consumableName) consumableName.value = existing?.name || "";
+  if (consumableUnit) consumableUnit.value = existing?.unit || "pcs";
+  if (consumableReorderLevel) consumableReorderLevel.value = existing ? existing.reorderLevel : 0;
+  if (consumableOpeningStock) {
+    consumableOpeningStock.value = existing ? existing.currentStock : 0;
+    consumableOpeningStock.disabled = Boolean(existing && (existing.movements || []).length);
+  }
+  if (consumableOpeningStockHint) {
+    consumableOpeningStockHint.textContent = existing && (existing.movements || []).length
+      ? "Stock is driven by the movement log. Use Stock to receive/issue/adjust."
+      : "Used as starting stock for new items. Edits do not wipe movement history.";
+  }
+  if (consumableVendor) consumableVendor.value = existing?.vendor || "";
+  if (consumableNotes) consumableNotes.value = existing?.notes || "";
+  if (consumableFormTitle) consumableFormTitle.textContent = existing ? "Edit consumable" : "Add consumable";
+  if (consumableFormModal) consumableFormModal.hidden = false;
+}
+
+function closeConsumableForm() {
+  if (consumableFormModal) consumableFormModal.hidden = true;
+}
+
+async function saveConsumableFromForm(event) {
+  event.preventDefault();
+  if (!canManageAssets()) return;
+
+  const existingId = consumableEditId?.value || "";
+  const items = Consumables.read();
+  const index = items.findIndex((entry) => entry.id === existingId);
+  const existing = index >= 0 ? items[index] : null;
+
+  const category = String(consumableCategory?.value || "").trim();
+  const name = String(consumableName?.value || "").trim();
+  const unit = String(consumableUnit?.value || "").trim();
+  if (!category || !name || !unit) {
+    alert("Category, name, and unit are required.");
+    return;
+  }
+
+  const openingInput = Number(consumableOpeningStock?.value);
+  let item = {
+    id: existing?.id || Consumables.createId(),
+    itemCode: String(consumableItemCode?.value || "").trim() || existing?.itemCode || Consumables.createItemCode(),
+    name,
+    category,
+    unit,
+    reorderLevel: Math.max(0, Number(consumableReorderLevel?.value) || 0),
+    currentStock: existing
+      ? ((existing.movements || []).length ? existing.currentStock : (Number.isFinite(openingInput) ? openingInput : 0))
+      : (Number.isFinite(openingInput) ? openingInput : 0),
+    vendor: String(consumableVendor?.value || "").trim(),
+    notes: String(consumableNotes?.value || "").trim(),
+    movements: existing?.movements || []
+  };
+
+  // New item with opening stock > 0: seed an Adjust movement for history.
+  if (!existing && item.currentStock > 0 && !(item.movements || []).length) {
+    item.movements = [Consumables.normalizeMovement({
+      date: new Date().toISOString().slice(0, 10),
+      type: "Adjust",
+      quantity: item.currentStock,
+      issuedBy: currentPortalUserName() || "System",
+      notes: "Opening stock",
+      balanceAfter: item.currentStock
+    })];
+  }
+
+  item = Consumables.withBalances(item);
+
+  if (index >= 0) items[index] = item;
+  else items.push(item);
+
+  await Consumables.write(items);
+  closeConsumableForm();
+  renderConsumables();
+}
+
+async function deleteConsumable(itemId) {
+  if (!canManageAssets()) return;
+  if (!confirm("Delete this consumable and its movement history?")) return;
+  const remaining = Consumables.read().filter((item) => item.id !== itemId);
+  await Consumables.write(remaining);
+  closeConsumableDetail();
+  renderConsumables();
+}
+
+function openConsumableDetail(itemId) {
+  const item = Consumables.withBalances(
+    Consumables.read().find((entry) => entry.id === itemId) || null
+  );
+  if (!item || !consumableDetailModal || !consumableDetailBody) return;
+
+  if (consumableDetailTitle) {
+    consumableDetailTitle.textContent = `${item.itemCode || "Item"} — ${item.name}`;
+  }
+
+  const manage = canManageAssets();
+  const avg = Consumables.averageMonthlyIssue(item);
+  const cover = Consumables.daysOfCover(item);
+  const history = filterConsumableMovements(item.movements)
+    .slice()
+    .sort((a, b) => {
+      const dateCmp = String(b.date).localeCompare(String(a.date));
+      if (dateCmp !== 0) return dateCmp;
+      return String(b.createdAt || "").localeCompare(String(a.createdAt || ""));
+    });
+
+  consumableDetailBody.dataset.openItem = item.id;
+  consumableDetailBody.innerHTML = `
+    <div class="asset-detail-grid">
+      <div><span class="muted-text">Item ID</span><strong>${escapeHtml(item.itemCode || "—")}</strong></div>
+      <div><span class="muted-text">Category</span><strong>${escapeHtml(item.category || "—")}</strong></div>
+      <div><span class="muted-text">Unit</span><strong>${escapeHtml(item.unit || "—")}</strong></div>
+      <div><span class="muted-text">Current stock</span><strong class="${Consumables.isLowStock(item) ? "consumable-low-stock" : ""}">${escapeHtml(formatConsumableNumber(item.currentStock, 0))}</strong></div>
+      <div><span class="muted-text">Reorder level</span><strong>${escapeHtml(formatConsumableNumber(item.reorderLevel, 0))}</strong></div>
+      <div><span class="muted-text">Avg issue / 30 days</span><strong>${escapeHtml(formatConsumableNumber(avg, 1))}</strong></div>
+      <div><span class="muted-text">Days of cover</span><strong>${cover === null ? "—" : escapeHtml(formatConsumableNumber(cover, 0))}</strong></div>
+      <div><span class="muted-text">Vendor</span><strong>${escapeHtml(item.vendor || "—")}</strong></div>
+      <div class="asset-detail-notes"><span class="muted-text">Notes</span><p>${escapeHtml(item.notes || "—")}</p></div>
+    </div>
+
+    <div class="asset-detail-section">
+      <div class="asset-detail-section-head">
+        <h3>Inventory level history</h3>
+        ${manage ? `<button class="secondary-button" type="button" id="consumableDetailMoveButton">Record movement</button>` : ""}
+      </div>
+      ${history.length
+        ? `<div class="table-wrap consumable-history-wrap"><table class="asset-table consumable-history-table">
+            <thead><tr>
+              <th>Date</th><th>Type</th><th>Qty</th><th>Balance</th><th>Who</th><th>Dept / recipient</th><th>Asset</th><th>Notes</th>
+            </tr></thead>
+            <tbody>${history.map((move) => `
+              <tr>
+                <td>${escapeHtml(formatAssetDate(move.date))}</td>
+                <td>${escapeHtml(move.type)}</td>
+                <td>${escapeHtml(formatConsumableNumber(move.quantity, 0))}</td>
+                <td>${move.balanceAfter === null || move.balanceAfter === undefined ? "—" : escapeHtml(formatConsumableNumber(move.balanceAfter, 0))}</td>
+                <td>${escapeHtml(move.issuedBy || "—")}</td>
+                <td>${escapeHtml(move.department || "—")}</td>
+                <td>${escapeHtml(move.relatedAsset || "—")}</td>
+                <td>${escapeHtml(move.notes || "—")}</td>
+              </tr>`).join("")}</tbody>
+          </table></div>`
+        : '<p class="muted-text">No movements in the selected date / issuer filters.</p>'}
+    </div>
+
+    ${manage ? `<div class="modal-actions asset-detail-actions">
+      <button class="secondary-button" type="button" id="consumableDetailEditButton">Edit item</button>
+      <button class="secondary-button" type="button" id="consumableDetailDeleteButton">Delete</button>
+    </div>` : ""}
+  `;
+
+  consumableDetailModal.hidden = false;
+  consumableDetailBody.querySelector("#consumableDetailMoveButton")?.addEventListener("click", () => openConsumableMoveModal(item.id));
+  consumableDetailBody.querySelector("#consumableDetailEditButton")?.addEventListener("click", () => openConsumableForm(item.id));
+  consumableDetailBody.querySelector("#consumableDetailDeleteButton")?.addEventListener("click", () => deleteConsumable(item.id));
+}
+
+function closeConsumableDetail() {
+  if (consumableDetailModal) consumableDetailModal.hidden = true;
+}
+
+function fillRelatedAssetOptions() {
+  if (!consumableMoveRelatedAsset) return;
+  const current = consumableMoveRelatedAsset.value;
+  const assets = typeof Assets !== "undefined" ? Assets.read() : [];
+  const options = assets
+    .map((asset) => ({
+      value: asset.assetCode || asset.id,
+      label: `${asset.assetCode || asset.id} — ${asset.deviceModel || asset.assetType || "Asset"}`
+    }))
+    .filter((entry) => entry.value)
+    .sort((a, b) => a.label.localeCompare(b.label));
+
+  consumableMoveRelatedAsset.innerHTML = '<option value="">None</option>'
+    + options.map((entry) => `<option value="${escapeHtml(entry.value)}">${escapeHtml(entry.label)}</option>`).join("");
+  if ([...consumableMoveRelatedAsset.options].some((opt) => opt.value === current)) {
+    consumableMoveRelatedAsset.value = current;
+  }
+}
+
+function openConsumableMoveModal(itemId) {
+  if (!canManageAssets()) return;
+  const item = Consumables.read().find((entry) => entry.id === itemId);
+  if (!item) return;
+
+  if (consumableMoveItemId) consumableMoveItemId.value = item.id;
+  if (consumableMoveType) consumableMoveType.value = "Issue";
+  if (consumableMoveDate) consumableMoveDate.value = new Date().toISOString().slice(0, 10);
+  if (consumableMoveQty) consumableMoveQty.value = "1";
+  if (consumableMoveIssuedBy) {
+    consumableMoveIssuedBy.value = currentPortalUserName();
+  }
+  if (consumableMoveDepartment) consumableMoveDepartment.value = "";
+  if (consumableMoveNotes) consumableMoveNotes.value = "";
+  fillRelatedAssetOptions();
+  if (consumableMoveModal) consumableMoveModal.hidden = false;
+}
+
+function closeConsumableMoveModal() {
+  if (consumableMoveModal) consumableMoveModal.hidden = true;
+}
+
+async function saveConsumableMoveFromForm(event) {
+  event.preventDefault();
+  if (!canManageAssets()) return;
+
+  const itemId = consumableMoveItemId?.value;
+  const items = Consumables.read();
+  const index = items.findIndex((entry) => entry.id === itemId);
+  if (index < 0) return;
+
+  const type = String(consumableMoveType?.value || "Issue").trim();
+  const quantity = Number(consumableMoveQty?.value);
+  const date = String(consumableMoveDate?.value || "").trim();
+  const issuedBy = String(consumableMoveIssuedBy?.value || "").trim();
+
+  if (!date || !issuedBy || !Number.isFinite(quantity) || quantity === 0) {
+    alert("Date, who issued, and a non-zero quantity are required.");
+    return;
+  }
+  if ((type === "Receive" || type === "Issue") && quantity < 0) {
+    alert("Receive and Issue quantities must be positive.");
+    return;
+  }
+
+  const item = Consumables.withBalances(items[index]);
+  const delta = Consumables.signedDelta(type, quantity);
+  const nextStock = (Number(item.currentStock) || 0) + delta;
+  if (nextStock < 0) {
+    alert(`Insufficient stock. Current: ${item.currentStock} ${item.unit}.`);
+    return;
+  }
+
+  const movement = Consumables.normalizeMovement({
+    date,
+    type,
+    quantity: type === "Adjust" ? quantity : Math.abs(quantity),
+    issuedBy,
+    department: String(consumableMoveDepartment?.value || "").trim(),
+    relatedAsset: String(consumableMoveRelatedAsset?.value || "").trim(),
+    notes: String(consumableMoveNotes?.value || "").trim()
+  });
+
+  item.movements = [...(item.movements || []), movement];
+  items[index] = Consumables.withBalances(item);
+  await Consumables.write(items);
+  closeConsumableMoveModal();
+  renderConsumables();
+  openConsumableDetail(itemId);
+}
+
+async function refreshConsumablesFromSheet() {
+  if (!canViewAssets()) return;
+  try {
+    await Consumables.loadFromSheet();
+    renderConsumables();
+  } catch (error) {
+    console.error(error);
+    renderConsumables();
+  }
+}
+
+function exportConsumablesCsv() {
+  if (!canManageAssets()) {
+    alert("You do not have permission to export consumables.");
+    return;
+  }
+
+  const headers = [
+    "Item ID", "Name", "Category", "Unit", "Current Stock", "Reorder Level",
+    "Avg Issue / 30d", "Days Cover", "Vendor", "Notes", "Movements JSON"
+  ];
+  const rows = Consumables.read().map((raw) => {
+    const item = Consumables.withBalances(raw);
+    const avg = Consumables.averageMonthlyIssue(item);
+    const cover = Consumables.daysOfCover(item);
+    return [
+      item.itemCode,
+      item.name,
+      item.category,
+      item.unit,
+      item.currentStock,
+      item.reorderLevel,
+      formatConsumableNumber(avg, 2),
+      cover === null ? "" : formatConsumableNumber(cover, 1),
+      item.vendor,
+      item.notes,
+      JSON.stringify(item.movements || [])
+    ];
+  });
+
+  downloadAssetCsvFile("tarmal-it-consumables.csv", headers, rows);
+}
+
+function initConsumablesModule() {
+  bindConsumableElements();
+  if (!consumableRows) return;
+
+  openConsumableFormButton?.addEventListener("click", () => openConsumableForm());
+  refreshConsumablesButton?.addEventListener("click", refreshConsumablesFromSheet);
+  exportConsumablesButton?.addEventListener("click", exportConsumablesCsv);
+
+  closeConsumableFormButton?.addEventListener("click", closeConsumableForm);
+  document.querySelector("#cancelConsumableFormButton")?.addEventListener("click", closeConsumableForm);
+  consumableFormModal?.addEventListener("click", (event) => {
+    if (event.target === consumableFormModal) closeConsumableForm();
+  });
+  consumableForm?.addEventListener("submit", saveConsumableFromForm);
+
+  closeConsumableDetailButton?.addEventListener("click", closeConsumableDetail);
+  consumableDetailModal?.addEventListener("click", (event) => {
+    if (event.target === consumableDetailModal) closeConsumableDetail();
+  });
+
+  closeConsumableMoveButton?.addEventListener("click", closeConsumableMoveModal);
+  document.querySelector("#cancelConsumableMoveButton")?.addEventListener("click", closeConsumableMoveModal);
+  consumableMoveModal?.addEventListener("click", (event) => {
+    if (event.target === consumableMoveModal) closeConsumableMoveModal();
+  });
+  consumableMoveForm?.addEventListener("submit", saveConsumableMoveFromForm);
+
+  [
+    consumableSearchFilter,
+    consumableCategoryFilter,
+    consumableStockFilter,
+    consumableIssuerFilter,
+    consumableHistoryFrom,
+    consumableHistoryTo
+  ]
+    .filter(Boolean)
+    .forEach((control) => control.addEventListener("input", () => {
+      renderConsumables();
+      const openId = consumableDetailModal && !consumableDetailModal.hidden
+        ? consumableDetailBody?.dataset?.openItem
+        : "";
+      if (openId) openConsumableDetail(openId);
+    }));
+
+  renderConsumables();
+  if (Auth.SHEET_WEB_APP_URL && canViewAssets()) {
+    refreshConsumablesFromSheet();
+  }
+}
+
+function currentPortalUserName() {
+  try {
+    if (typeof Auth.currentUser === "function") {
+      const user = Auth.currentUser();
+      if (user?.name) return String(user.name);
+    }
+  } catch {
+    /* ignore */
+  }
+  return "";
 }
 
 if (document.readyState === "loading") {

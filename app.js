@@ -233,6 +233,7 @@ const TAB_LABELS = {
   kanban: "Kanban",
   "asset-register": "Register Asset",
   "asset-list": "IT Assets",
+  consumables: "Consumables",
   documents: "DMS",
   users: "Users"
 };
@@ -250,7 +251,7 @@ let selectedPresentationOwner = "all";
 let selectedPresentationPriority = "all";
 let selectedPresentationPeriod = "all";
 let presentModeFullscreenSync = false;
-const DEFAULT_COLLAPSED_TOOLBARS = new Set(["tickets", "projects", "procurement", "kanban", "assets", "users"]);
+const DEFAULT_COLLAPSED_TOOLBARS = new Set(["tickets", "projects", "procurement", "kanban", "assets", "consumables", "users"]);
 
 const KANBAN_COLUMNS = [
   { id: "pending", label: "Not Started", statusClass: "status-pending" },
@@ -10389,6 +10390,12 @@ tabButtons.forEach((button) => {
       Auth.refreshSessionRights();
       if (typeof refreshAssetsFromSheet === "function") {
         refreshAssetsFromSheet();
+      }
+    }
+    if (button.dataset.tab === "consumables") {
+      Auth.refreshSessionRights();
+      if (typeof refreshConsumablesFromSheet === "function") {
+        refreshConsumablesFromSheet();
       }
     }
     if (button.dataset.tab === "asset-register") {
