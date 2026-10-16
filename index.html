@@ -6,12 +6,12 @@
     <title>Tarmal IT Portal</title>
     <link rel="icon" href="./assets/tarmal-mark.png?v=1" type="image/png">
     <link rel="apple-touch-icon" href="./assets/apple-touch-icon.png?v=1">
-    <link rel="stylesheet" href="./styles.css?v=205">
+    <link rel="stylesheet" href="./styles.css?v=206">
     <!-- auth stays blocking so requireLogin runs before app chrome paints -->
     <script src="./auth.js?v=27"></script>
     <!-- Defer main bundles so HTML can parse while ~210KB+ app.js downloads -->
     <script src="./app.js?v=228" defer></script>
-    <script src="./assets.js?v=13" defer></script>
+    <script src="./assets.js?v=14" defer></script>
     <script src="./documents.js?v=12" defer></script>
     <script src="./procurement.js?v=6" defer></script>
   </head>
@@ -777,45 +777,95 @@
             <input type="hidden" id="assetEditId" value="">
 
             <div class="field-row">
-              <label class="field" for="assetEmployeeId">
-                <span>Employee ID</span>
-                <input id="assetEmployeeId" type="text" autocomplete="off" placeholder="e.g. EMP-1024">
+              <label class="field" for="assetCodeField">
+                <span>Asset ID</span>
+                <input id="assetCodeField" type="text" autocomplete="off" placeholder="Auto if blank (e.g. AST-…)">
               </label>
-              <label class="field" for="assetEmployeeName">
-                <span>Employee Name</span>
-                <input id="assetEmployeeName" type="text" autocomplete="off" placeholder="Full name">
-              </label>
-            </div>
-
-            <div class="field-row">
               <label class="field" for="assetTypeField">
                 <span>Asset Type</span>
                 <select id="assetTypeField">
                   <option value="">Select type</option>
+                  <option value="Laptop">Laptop</option>
+                  <option value="Server">Server</option>
+                  <option value="Monitor">Monitor</option>
+                  <option value="License">License</option>
                   <option value="Phone">Phone</option>
                   <option value="Desktop">Desktop</option>
-                </select>
-              </label>
-              <label class="field" for="assetStatus">
-                <span>Status</span>
-                <select id="assetStatus">
-                  <option value="Active" selected>Active</option>
-                  <option value="In Repair">In Repair</option>
-                  <option value="Retired">Retired</option>
-                  <option value="Lost">Lost</option>
+                  <option value="Other">Other</option>
                 </select>
               </label>
             </div>
 
             <div class="field-row">
               <label class="field" for="assetDeviceModel">
-                <span>Device Model</span>
-                <input id="assetDeviceModel" type="text" autocomplete="off" placeholder="e.g. iPhone 14 / Dell OptiPlex">
+                <span id="assetModelLabel">Name / Model</span>
+                <input id="assetDeviceModel" type="text" autocomplete="off" placeholder="e.g. Dell Latitude / Microsoft 365">
               </label>
               <label class="field" for="assetSerialImei">
-                <span>Serial / IMEI</span>
+                <span id="assetSerialLabel">Serial / IMEI</span>
                 <input id="assetSerialImei" type="text" autocomplete="off" placeholder="Serial number or IMEI">
               </label>
+            </div>
+
+            <div class="field-row">
+              <label class="field" for="assetEmployeeName">
+                <span>Assigned user</span>
+                <input id="assetEmployeeName" type="text" autocomplete="off" placeholder="Full name">
+              </label>
+              <label class="field" for="assetEmployeeId">
+                <span>Employee ID</span>
+                <input id="assetEmployeeId" type="text" autocomplete="off" placeholder="e.g. EMP-1024">
+              </label>
+            </div>
+
+            <div class="field-row">
+              <label class="field" for="assetDepartment">
+                <span>Department</span>
+                <input id="assetDepartment" type="text" autocomplete="off" placeholder="e.g. Finance, IT">
+              </label>
+              <label class="field" for="assetStatus">
+                <span>Status</span>
+                <select id="assetStatus">
+                  <option value="In use" selected>In use</option>
+                  <option value="In store">In store</option>
+                  <option value="Under repair">Under repair</option>
+                  <option value="Returned">Returned</option>
+                  <option value="Retired">Retired</option>
+                </select>
+              </label>
+            </div>
+
+            <div class="field-row">
+              <label class="field" for="assetPurchaseDate">
+                <span>Purchase date</span>
+                <input id="assetPurchaseDate" type="date">
+              </label>
+              <label class="field" for="assetWarrantyExpiry">
+                <span id="assetWarrantyLabel">Warranty expiry</span>
+                <input id="assetWarrantyExpiry" type="date">
+              </label>
+            </div>
+
+            <div class="field-row">
+              <label class="field" for="assetVendor">
+                <span>Vendor</span>
+                <input id="assetVendor" type="text" autocomplete="off" placeholder="e.g. Dell, Microsoft, local supplier">
+              </label>
+            </div>
+
+            <div class="asset-type-panel" id="assetLicenseFields" hidden>
+              <p class="asset-type-panel-title">Software license</p>
+              <div class="field-row">
+                <label class="field" for="assetLicenseSeats">
+                  <span>Seats / quantity</span>
+                  <input id="assetLicenseSeats" type="number" min="0" step="1" placeholder="e.g. 25">
+                </label>
+                <label class="field" for="assetLicenseKey">
+                  <span>License key (optional)</span>
+                  <input id="assetLicenseKey" type="password" autocomplete="new-password" placeholder="Full key — table shows last 4 only">
+                </label>
+              </div>
+              <p class="field-hint">Do not paste secrets into Notes. The list shows last-4 only; full key stays off-screen.</p>
             </div>
 
             <div class="asset-type-panel" id="assetPhoneFields" hidden>
@@ -856,7 +906,7 @@
 
             <label class="field field-wide" for="assetNotes">
               <span>Notes</span>
-              <textarea id="assetNotes" rows="2" placeholder="Assignment notes, accessories, warranty..."></textarea>
+              <textarea id="assetNotes" rows="2" placeholder="Assignment notes, accessories, checklist..."></textarea>
             </label>
 
             <div class="asset-form-actions">
@@ -882,6 +932,7 @@
                   <div>
                     <p class="eyebrow">Inventory</p>
                     <h2>IT Assets</h2>
+                    <p class="asset-expiry-badge" id="assetExpiryBadge" hidden></p>
                   </div>
                   <div class="board-actions">
                     <button class="secondary-button" id="refreshAssetsButton" type="button" data-requires="viewAssets,manageAssets">Refresh</button>
@@ -896,18 +947,55 @@
                 <div class="asset-filters" aria-label="Asset filters">
               <label class="field filter-field filter-search">
                 <span>Search</span>
-                <input id="assetSearchFilter" type="search" placeholder="Employee, phone, serial...">
+                <input id="assetSearchFilter" type="search" placeholder="Asset ID, user, serial, vendor...">
               </label>
               <label class="field filter-field">
-                <span>Asset Type</span>
+                <span>Type</span>
                 <select id="assetTypeFilter">
                   <option value="">All types</option>
+                  <option value="Laptop">Laptop</option>
+                  <option value="Server">Server</option>
+                  <option value="Monitor">Monitor</option>
+                  <option value="License">License</option>
                   <option value="Phone">Phone</option>
                   <option value="Desktop">Desktop</option>
+                  <option value="Other">Other</option>
                 </select>
               </label>
               <label class="field filter-field">
-                <span>Provider</span>
+                <span>Status</span>
+                <select id="assetStatusFilter">
+                  <option value="">All statuses</option>
+                  <option value="In use">In use</option>
+                  <option value="In store">In store</option>
+                  <option value="Under repair">Under repair</option>
+                  <option value="Returned">Returned</option>
+                  <option value="Retired">Retired</option>
+                </select>
+              </label>
+              <label class="field filter-field">
+                <span>Department</span>
+                <select id="assetDepartmentFilter">
+                  <option value="">All departments</option>
+                </select>
+              </label>
+              <label class="field filter-field">
+                <span>Assigned user</span>
+                <select id="assetUserFilter">
+                  <option value="">All users</option>
+                </select>
+              </label>
+              <label class="field filter-field">
+                <span>Expiring soon</span>
+                <select id="assetExpiryFilter">
+                  <option value="">Any</option>
+                  <option value="30">Within 30 days</option>
+                  <option value="60">Within 60 days</option>
+                  <option value="90">Within 90 days</option>
+                </select>
+              </label>
+              <label class="field filter-field">
+                <span>Phone provider</span>
                 <select id="assetProviderFilter">
                   <option value="">All providers</option>
                   <option value="Airtel">Airtel</option>
@@ -924,17 +1012,17 @@
               <table class="asset-table">
                 <thead>
                   <tr>
-                    <th>Emp ID</th>
-                    <th>Employee</th>
+                    <th>Asset ID</th>
                     <th>Type</th>
-                    <th>Model</th>
-                    <th>Serial / IMEI</th>
-                    <th>Phone</th>
-                    <th>Provider</th>
-                    <th>Airtime</th>
-                    <th>Desktop</th>
+                    <th>Name / Model</th>
+                    <th>Serial / Key</th>
+                    <th>Assigned</th>
+                    <th>Department</th>
+                    <th>Purchase</th>
+                    <th>Warranty / Expiry</th>
+                    <th>Vendor</th>
                     <th>Status</th>
-                    <th class="asset-actions-col" data-requires="manageAssets">Actions</th>
+                    <th class="asset-actions-col">Actions</th>
                   </tr>
                 </thead>
                 <tbody id="assetRows"></tbody>
@@ -1693,6 +1781,118 @@
           <div class="modal-actions">
             <button class="secondary-button" id="cancelProcurementQuoteButton" type="button">Clear form</button>
             <button class="primary-button" type="submit"><span id="procurementQuoteSubmitLabel">Add Quote</span></button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <div class="modal-overlay" id="assetDetailModal" hidden>
+      <div class="modal-card modal-card-wide" role="dialog" aria-labelledby="assetDetailTitle" aria-modal="true">
+        <div class="modal-header">
+          <div>
+            <p class="eyebrow">IT Asset</p>
+            <h2 id="assetDetailTitle">Asset detail</h2>
+          </div>
+          <button class="icon-button modal-close-btn" id="closeAssetDetailButton" type="button" aria-label="Close asset detail">
+            <span aria-hidden="true">×</span>
+          </button>
+        </div>
+        <div id="assetDetailBody" class="asset-detail-body"></div>
+      </div>
+    </div>
+
+    <div class="modal-overlay" id="assetHandoverModal" hidden>
+      <div class="modal-card" role="dialog" aria-labelledby="assetHandoverTitle" aria-modal="true">
+        <div class="modal-header">
+          <div>
+            <p class="eyebrow">Asset movement</p>
+            <h2 id="assetHandoverTitle">Handover / return</h2>
+          </div>
+          <button class="icon-button modal-close-btn" id="closeAssetHandoverButton" type="button" aria-label="Close handover form">
+            <span aria-hidden="true">×</span>
+          </button>
+        </div>
+        <form id="assetHandoverForm" class="ticket-form modal-form">
+          <input type="hidden" id="assetHandoverAssetId" value="">
+          <div class="field-row">
+            <label class="field" for="assetHandoverKind">
+              <span>Type</span>
+              <select id="assetHandoverKind" required>
+                <option value="Handover">Handover</option>
+                <option value="Return">Return</option>
+              </select>
+            </label>
+            <label class="field" for="assetHandoverDate">
+              <span>Date</span>
+              <input id="assetHandoverDate" type="date" required>
+            </label>
+          </div>
+          <div class="field-row">
+            <label class="field" for="assetHandoverFrom">
+              <span>From user</span>
+              <input id="assetHandoverFrom" type="text" autocomplete="off" placeholder="Previous holder">
+            </label>
+            <label class="field" for="assetHandoverTo">
+              <span>To user</span>
+              <input id="assetHandoverTo" type="text" autocomplete="off" placeholder="Receiving user / IT store">
+            </label>
+          </div>
+          <label class="field field-wide" for="assetHandoverNotes">
+            <span>Notes</span>
+            <textarea id="assetHandoverNotes" rows="3" placeholder="Condition, accessories, charger, bag..."></textarea>
+          </label>
+          <div class="modal-actions">
+            <button class="secondary-button" id="cancelAssetHandoverButton" type="button">Cancel</button>
+            <button class="primary-button" type="submit">Save &amp; continue</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <div class="modal-overlay" id="assetHistoryModal" hidden>
+      <div class="modal-card" role="dialog" aria-labelledby="assetHistoryTitle" aria-modal="true">
+        <div class="modal-header">
+          <div>
+            <p class="eyebrow">Maintenance</p>
+            <h2 id="assetHistoryTitle">Repair / replacement</h2>
+          </div>
+          <button class="icon-button modal-close-btn" id="closeAssetHistoryButton" type="button" aria-label="Close history form">
+            <span aria-hidden="true">×</span>
+          </button>
+        </div>
+        <form id="assetHistoryForm" class="ticket-form modal-form">
+          <input type="hidden" id="assetHistoryAssetId" value="">
+          <div class="field-row">
+            <label class="field" for="assetHistoryType">
+              <span>Type</span>
+              <select id="assetHistoryType" required>
+                <option value="Repair">Repair</option>
+                <option value="Replacement">Replacement</option>
+              </select>
+            </label>
+            <label class="field" for="assetHistoryDate">
+              <span>Date</span>
+              <input id="assetHistoryDate" type="date" required>
+            </label>
+          </div>
+          <label class="field field-wide" for="assetHistoryDescription">
+            <span>Description</span>
+            <textarea id="assetHistoryDescription" rows="3" placeholder="What was repaired or replaced?" required></textarea>
+          </label>
+          <div class="field-row">
+            <label class="field" for="assetHistoryVendor">
+              <span>Vendor (optional)</span>
+              <input id="assetHistoryVendor" type="text" autocomplete="off" placeholder="Service centre">
+            </label>
+            <label class="field" for="assetHistoryCost">
+              <span>Cost (optional)</span>
+              <input id="assetHistoryCost" type="text" autocomplete="off" placeholder="e.g. KES 12,000">
+            </label>
+          </div>
+          <div id="assetHistoryList" class="asset-history-preview"></div>
+          <div class="modal-actions">
+            <button class="secondary-button" id="cancelAssetHistoryButton" type="button">Close</button>
+            <button class="primary-button" type="submit">Add entry</button>
           </div>
         </form>
       </div>

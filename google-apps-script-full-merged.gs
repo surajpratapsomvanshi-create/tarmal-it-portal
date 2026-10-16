@@ -85,7 +85,16 @@ const ASSET_HEADERS = [
   "Airtime Valid Until",
   "Desktop Specs",
   "Status",
-  "Notes"
+  "Notes",
+  "Asset ID",
+  "Department",
+  "Purchase Date",
+  "Warranty / Expiry",
+  "Vendor",
+  "License Seats",
+  "License Key Last4",
+  "History JSON",
+  "Handovers JSON"
 ];
 
 const COLUMN_ALIASES = {
@@ -2389,7 +2398,7 @@ function readAssets_() {
   if (values.length <= 1) return [];
 
   return values.slice(1)
-    .filter((row) => String(row[0] || "").trim() && String(row[1] || "").trim())
+    .filter((row) => String(row[0] || "").trim())
     .map((row) => rowToAsset_(row));
 }
 
@@ -2402,6 +2411,15 @@ function writeAssets_(assets) {
 
   if (output.length) {
     sheet.getRange(1, 1, output.length, ASSET_HEADERS.length).setValues(output);
+  }
+}
+
+function assetJsonCell_(value) {
+  if (typeof value === "string") return value;
+  try {
+    return JSON.stringify(Array.isArray(value) ? value : []);
+  } catch (error) {
+    return "[]";
   }
 }
 
@@ -2418,8 +2436,17 @@ function assetToRow_(asset) {
     asset.airtimeBalance || "",
     toSheetDate_(asset.airtimeValidUntil),
     asset.desktopSpecs || "",
-    asset.status || "Active",
-    asset.notes || ""
+    asset.status || "In use",
+    asset.notes || "",
+    asset.assetCode || "",
+    asset.department || "",
+    toSheetDate_(asset.purchaseDate),
+    toSheetDate_(asset.warrantyExpiry),
+    asset.vendor || "",
+    asset.licenseSeats === 0 || asset.licenseSeats ? String(asset.licenseSeats) : "",
+    asset.licenseKeyLast4 || "",
+    assetJsonCell_(asset.history),
+    assetJsonCell_(asset.handovers)
   ];
 }
 
@@ -2436,8 +2463,17 @@ function rowToAsset_(row) {
     airtimeBalance: String(row[8] || ""),
     airtimeValidUntil: formatTicketDate_(row[9]),
     desktopSpecs: String(row[10] || ""),
-    status: String(row[11] || "Active"),
-    notes: String(row[12] || "")
+    status: String(row[11] || "In use"),
+    notes: String(row[12] || ""),
+    assetCode: String(row[13] || ""),
+    department: String(row[14] || ""),
+    purchaseDate: formatTicketDate_(row[15]),
+    warrantyExpiry: formatTicketDate_(row[16]),
+    vendor: String(row[17] || ""),
+    licenseSeats: String(row[18] || ""),
+    licenseKeyLast4: String(row[19] || ""),
+    history: String(row[20] || "[]"),
+    handovers: String(row[21] || "[]")
   };
 }
 

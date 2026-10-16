@@ -1,7 +1,9 @@
 const Assets = {
   LOCAL_KEY: "tarmal-it-assets",
   PROVIDERS: ["Airtel", "Safaricom"],
-  TYPES: ["Phone", "Desktop"],
+  TYPES: ["Laptop", "Server", "Monitor", "License", "Phone", "Desktop", "Other"],
+  STATUSES: ["In use", "In store", "Under repair", "Returned", "Retired"],
+  EXPIRY_WINDOWS: [30, 60, 90],
 
   read() {
     const saved = localStorage.getItem(this.LOCAL_KEY);
@@ -20,13 +22,95 @@ const Assets = {
     return normalized;
   },
 
+  mapLegacyStatus(status) {
+    const raw = String(status || "").trim();
+    const map = {
+      Active: "In use",
+      "In Repair": "Under repair",
+      Lost: "Retired"
+    };
+    if (map[raw]) return map[raw];
+    if (this.STATUSES.includes(raw)) return raw;
+    return raw || "In use";
+  },
+
+  parseJsonArray(value) {
+    if (Array.isArray(value)) return value;
+    if (!value) return [];
+    if (typeof value === "string") {
+      try {
+        const parsed = JSON.parse(value);
+        return Array.isArray(parsed) ? parsed : [];
+      } catch {
+        return [];
+      }
+    }
+    return [];
+  },
+
+  last4FromSecret(secret) {
+    const raw = String(secret || "").replace(/\s+/g, "");
+    if (!raw) return "";
+    return raw.slice(-4);
+  },
+
+  maskSerialDisplay(asset) {
+    if (this.isLicense(asset)) {
+      const last4 = asset.licenseKeyLast4 || this.last4FromSecret(asset.licenseKey);
+      if (last4) return `••••${last4}`;
+      return asset.serialImei || "—";
+    }
+    return asset.serialImei || "—";
+  },
+
+  normalizeHistoryEntry(entry) {
+    return {
+      id: String(entry?.id || `hist-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`),
+      date: String(entry?.date || "").trim(),
+      type: ["Repair", "Replacement"].includes(String(entry?.type || "").trim())
+        ? String(entry.type).trim()
+        : "Repair",
+      description: String(entry?.description || "").trim(),
+      vendor: String(entry?.vendor || "").trim(),
+      cost: String(entry?.cost || "").trim(),
+      createdAt: String(entry?.createdAt || new Date().toISOString())
+    };
+  },
+
+  normalizeHandoverEntry(entry) {
+    return {
+      id: String(entry?.id || `hand-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`),
+      date: String(entry?.date || "").trim(),
+      kind: ["Handover", "Return"].includes(String(entry?.kind || "").trim())
+        ? String(entry.kind).trim()
+        : "Handover",
+      fromUser: String(entry?.fromUser || "").trim(),
+      toUser: String(entry?.toUser || "").trim(),
+      notes: String(entry?.notes || "").trim(),
+      createdAt: String(entry?.createdAt || new Date().toISOString())
+    };
+  },
+
   normalize(asset) {
     const assetType = String(asset.assetType || "").trim();
     const provider = String(asset.serviceProvider || "").trim();
+    const licenseKey = String(asset.licenseKey || "").trim();
+    let licenseKeyLast4 = String(asset.licenseKeyLast4 || "").trim();
+    if (licenseKey) {
+      licenseKeyLast4 = this.last4FromSecret(licenseKey);
+    }
+
+    const seatsRaw = asset.licenseSeats;
+    const licenseSeats = seatsRaw === "" || seatsRaw === null || seatsRaw === undefined
+      ? ""
+      : String(Math.max(0, Number(seatsRaw) || 0));
+
     return {
       id: String(asset.id || ""),
+      assetCode: String(asset.assetCode || "").trim(),
       employeeId: String(asset.employeeId || "").trim(),
       employeeName: String(asset.employeeName || "").trim(),
+      department: String(asset.department || "").trim(),
       assetType,
       deviceModel: String(asset.deviceModel || "").trim(),
       serialImei: String(asset.serialImei || "").trim(),
@@ -35,13 +119,26 @@ const Assets = {
       airtimeBalance: String(asset.airtimeBalance || "").trim(),
       airtimeValidUntil: asset.airtimeValidUntil || "",
       desktopSpecs: String(asset.desktopSpecs || "").trim(),
-      status: String(asset.status || "Active").trim() || "Active",
-      notes: String(asset.notes || "").trim()
+      purchaseDate: asset.purchaseDate || "",
+      warrantyExpiry: asset.warrantyExpiry || "",
+      vendor: String(asset.vendor || "").trim(),
+      licenseSeats,
+      licenseKey,
+      licenseKeyLast4,
+      status: this.mapLegacyStatus(asset.status),
+      notes: String(asset.notes || "").trim(),
+      history: this.parseJsonArray(asset.history).map((entry) => this.normalizeHistoryEntry(entry)),
+      handovers: this.parseJsonArray(asset.handovers).map((entry) => this.normalizeHandoverEntry(entry))
     };
   },
 
   createId() {
     return `asset-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+  },
+
+  createAssetCode() {
+    const stamp = new Date().toISOString().slice(0, 10).replaceAll("-", "");
+    return `AST-${stamp}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
   },
 
   loadFromSheet() {
@@ -93,11 +190,31 @@ const Assets = {
     const merged = new Map();
     remoteAssets.forEach((asset) => merged.set(asset.id, this.normalize(asset)));
     localAssets.forEach((asset) => {
-      if (!merged.has(asset.id)) {
-        merged.set(asset.id, this.normalize(asset));
+      const local = this.normalize(asset);
+      if (!merged.has(local.id)) {
+        merged.set(local.id, local);
+        return;
+      }
+      // Preserve locally held full license keys (sheet only stores last-4).
+      const remote = merged.get(local.id);
+      if (local.licenseKey && !remote.licenseKey) {
+        merged.set(local.id, {
+          ...remote,
+          licenseKey: local.licenseKey,
+          licenseKeyLast4: local.licenseKeyLast4 || remote.licenseKeyLast4
+        });
       }
     });
     return [...merged.values()];
+  },
+
+  forSheetSync(asset) {
+    const normalized = this.normalize(asset);
+    // Never push full license secrets to Google Sheets — last-4 only.
+    return {
+      ...normalized,
+      licenseKey: ""
+    };
   },
 
   async syncToSheet(assets) {
@@ -112,7 +229,7 @@ const Assets = {
       },
       body: JSON.stringify({
         action: "syncAssets",
-        assets: assets.map((asset) => this.normalize(asset))
+        assets: assets.map((asset) => this.forSheetSync(asset))
       })
     });
 
@@ -137,6 +254,37 @@ const Assets = {
     return String(asset.assetType).toLowerCase() === "desktop";
   },
 
+  isLicense(asset) {
+    return String(asset.assetType).toLowerCase() === "license";
+  },
+
+  isLaptop(asset) {
+    return String(asset.assetType).toLowerCase() === "laptop";
+  },
+
+  expiryDate(asset) {
+    return String(asset.warrantyExpiry || "").trim();
+  },
+
+  daysUntilExpiry(asset) {
+    const until = this.expiryDate(asset);
+    if (!until) return null;
+    const expiry = new Date(until);
+    if (Number.isNaN(expiry.getTime())) return null;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    expiry.setHours(0, 0, 0, 0);
+    return Math.ceil((expiry - today) / 86400000);
+  },
+
+  expiryStatus(asset, windowDays = 90) {
+    const diffDays = this.daysUntilExpiry(asset);
+    if (diffDays === null) return "";
+    if (diffDays < 0) return "expired";
+    if (diffDays <= windowDays) return "expiring";
+    return "ok";
+  },
+
   airtimeStatus(asset) {
     if (!this.isPhone(asset)) return "";
     const until = asset.airtimeValidUntil;
@@ -157,8 +305,10 @@ const Assets = {
 
   CSV_HEADERS: [
     "Id",
+    "Asset ID",
     "Employee ID",
     "Employee Name",
+    "Department",
     "Asset Type",
     "Device Model",
     "Serial / IMEI",
@@ -167,8 +317,15 @@ const Assets = {
     "Airtime Balance",
     "Airtime Valid Until",
     "Desktop Specs",
+    "Purchase Date",
+    "Warranty / Expiry",
+    "Vendor",
+    "License Seats",
+    "License Key Last4",
     "Status",
-    "Notes"
+    "Notes",
+    "History JSON",
+    "Handovers JSON"
   ]
 };
 
@@ -177,10 +334,16 @@ let assetRows;
 let assetTypeField;
 let assetPhoneFields;
 let assetDesktopFields;
+let assetLicenseFields;
 let assetSearchFilter;
 let assetTypeFilter;
+let assetStatusFilter;
+let assetDepartmentFilter;
+let assetUserFilter;
+let assetExpiryFilter;
 let assetProviderFilter;
 let assetFilterSummary;
+let assetExpiryBadge;
 let refreshAssetsButton;
 let exportAssetsButton;
 let downloadAssetTemplateButton;
@@ -193,8 +356,10 @@ let assetFormTitle;
 let assetSubmitButton;
 let assetCancelEditButton;
 let assetClearButton;
+let assetCodeField;
 let assetEmployeeId;
 let assetEmployeeName;
+let assetDepartment;
 let assetStatus;
 let assetDeviceModel;
 let assetSerialImei;
@@ -203,7 +368,35 @@ let assetServiceProvider;
 let assetAirtimeBalance;
 let assetAirtimeValidUntil;
 let assetDesktopSpecs;
+let assetPurchaseDate;
+let assetWarrantyExpiry;
+let assetVendor;
+let assetLicenseSeats;
+let assetLicenseKey;
 let assetNotes;
+let assetDetailModal;
+let assetDetailTitle;
+let assetDetailBody;
+let closeAssetDetailButton;
+let assetHandoverModal;
+let closeAssetHandoverButton;
+let assetHandoverForm;
+let assetHandoverAssetId;
+let assetHandoverKind;
+let assetHandoverDate;
+let assetHandoverFrom;
+let assetHandoverTo;
+let assetHandoverNotes;
+let assetHistoryModal;
+let closeAssetHistoryButton;
+let assetHistoryForm;
+let assetHistoryAssetId;
+let assetHistoryDate;
+let assetHistoryType;
+let assetHistoryDescription;
+let assetHistoryVendor;
+let assetHistoryCost;
+let assetHistoryList;
 
 function canViewAssets() {
   return Auth.canViewAssets();
@@ -219,10 +412,16 @@ function bindAssetElements() {
   assetTypeField = document.querySelector("#assetTypeField");
   assetPhoneFields = document.querySelector("#assetPhoneFields");
   assetDesktopFields = document.querySelector("#assetDesktopFields");
+  assetLicenseFields = document.querySelector("#assetLicenseFields");
   assetSearchFilter = document.querySelector("#assetSearchFilter");
   assetTypeFilter = document.querySelector("#assetTypeFilter");
+  assetStatusFilter = document.querySelector("#assetStatusFilter");
+  assetDepartmentFilter = document.querySelector("#assetDepartmentFilter");
+  assetUserFilter = document.querySelector("#assetUserFilter");
+  assetExpiryFilter = document.querySelector("#assetExpiryFilter");
   assetProviderFilter = document.querySelector("#assetProviderFilter");
   assetFilterSummary = document.querySelector("#assetFilterSummary");
+  assetExpiryBadge = document.querySelector("#assetExpiryBadge");
   refreshAssetsButton = document.querySelector("#refreshAssetsButton");
   exportAssetsButton = document.querySelector("#exportAssetsButton");
   downloadAssetTemplateButton = document.querySelector("#downloadAssetTemplateButton");
@@ -235,8 +434,10 @@ function bindAssetElements() {
   assetSubmitButton = document.querySelector("#assetSubmitButton");
   assetCancelEditButton = document.querySelector("#assetCancelEditButton");
   assetClearButton = document.querySelector("#assetClearButton");
+  assetCodeField = document.querySelector("#assetCodeField");
   assetEmployeeId = document.querySelector("#assetEmployeeId");
   assetEmployeeName = document.querySelector("#assetEmployeeName");
+  assetDepartment = document.querySelector("#assetDepartment");
   assetStatus = document.querySelector("#assetStatus");
   assetDeviceModel = document.querySelector("#assetDeviceModel");
   assetSerialImei = document.querySelector("#assetSerialImei");
@@ -245,24 +446,75 @@ function bindAssetElements() {
   assetAirtimeBalance = document.querySelector("#assetAirtimeBalance");
   assetAirtimeValidUntil = document.querySelector("#assetAirtimeValidUntil");
   assetDesktopSpecs = document.querySelector("#assetDesktopSpecs");
+  assetPurchaseDate = document.querySelector("#assetPurchaseDate");
+  assetWarrantyExpiry = document.querySelector("#assetWarrantyExpiry");
+  assetVendor = document.querySelector("#assetVendor");
+  assetLicenseSeats = document.querySelector("#assetLicenseSeats");
+  assetLicenseKey = document.querySelector("#assetLicenseKey");
   assetNotes = document.querySelector("#assetNotes");
+  assetDetailModal = document.querySelector("#assetDetailModal");
+  assetDetailTitle = document.querySelector("#assetDetailTitle");
+  assetDetailBody = document.querySelector("#assetDetailBody");
+  closeAssetDetailButton = document.querySelector("#closeAssetDetailButton");
+  assetHandoverModal = document.querySelector("#assetHandoverModal");
+  closeAssetHandoverButton = document.querySelector("#closeAssetHandoverButton");
+  assetHandoverForm = document.querySelector("#assetHandoverForm");
+  assetHandoverAssetId = document.querySelector("#assetHandoverAssetId");
+  assetHandoverKind = document.querySelector("#assetHandoverKind");
+  assetHandoverDate = document.querySelector("#assetHandoverDate");
+  assetHandoverFrom = document.querySelector("#assetHandoverFrom");
+  assetHandoverTo = document.querySelector("#assetHandoverTo");
+  assetHandoverNotes = document.querySelector("#assetHandoverNotes");
+  assetHistoryModal = document.querySelector("#assetHistoryModal");
+  closeAssetHistoryButton = document.querySelector("#closeAssetHistoryButton");
+  assetHistoryForm = document.querySelector("#assetHistoryForm");
+  assetHistoryAssetId = document.querySelector("#assetHistoryAssetId");
+  assetHistoryDate = document.querySelector("#assetHistoryDate");
+  assetHistoryType = document.querySelector("#assetHistoryType");
+  assetHistoryDescription = document.querySelector("#assetHistoryDescription");
+  assetHistoryVendor = document.querySelector("#assetHistoryVendor");
+  assetHistoryCost = document.querySelector("#assetHistoryCost");
+  assetHistoryList = document.querySelector("#assetHistoryList");
 }
 
 function toggleAssetFieldGroups() {
   const type = assetTypeField?.value || "";
   const isPhone = type === "Phone";
   const isDesktop = type === "Desktop";
+  const isLicense = type === "License";
 
   if (assetPhoneFields) assetPhoneFields.hidden = !isPhone;
   if (assetDesktopFields) assetDesktopFields.hidden = !isDesktop;
+  if (assetLicenseFields) assetLicenseFields.hidden = !isLicense;
+
+  const serialLabel = document.querySelector("#assetSerialLabel");
+  if (serialLabel) {
+    serialLabel.textContent = isLicense ? "License ID" : "Serial / IMEI";
+  }
+  const serialInput = assetSerialImei;
+  if (serialInput) {
+    serialInput.placeholder = isLicense
+      ? "License ID or agreement number (not the full key)"
+      : "Serial number or IMEI";
+  }
+  const expiryLabel = document.querySelector("#assetWarrantyLabel");
+  if (expiryLabel) {
+    expiryLabel.textContent = isLicense ? "License expiry" : "Warranty expiry";
+  }
+  const modelLabel = document.querySelector("#assetModelLabel");
+  if (modelLabel) {
+    modelLabel.textContent = isLicense ? "Product / SKU" : "Name / Model";
+  }
 }
 
 function resetAssetForm() {
   if (assetEditId) assetEditId.value = "";
+  if (assetCodeField) assetCodeField.value = "";
   if (assetEmployeeId) assetEmployeeId.value = "";
   if (assetEmployeeName) assetEmployeeName.value = "";
+  if (assetDepartment) assetDepartment.value = "";
   if (assetTypeField) assetTypeField.value = "";
-  if (assetStatus) assetStatus.value = "Active";
+  if (assetStatus) assetStatus.value = "In use";
   if (assetDeviceModel) assetDeviceModel.value = "";
   if (assetSerialImei) assetSerialImei.value = "";
   if (assetPhoneNumber) assetPhoneNumber.value = "";
@@ -270,6 +522,11 @@ function resetAssetForm() {
   if (assetAirtimeBalance) assetAirtimeBalance.value = "";
   if (assetAirtimeValidUntil) assetAirtimeValidUntil.value = "";
   if (assetDesktopSpecs) assetDesktopSpecs.value = "";
+  if (assetPurchaseDate) assetPurchaseDate.value = "";
+  if (assetWarrantyExpiry) assetWarrantyExpiry.value = "";
+  if (assetVendor) assetVendor.value = "";
+  if (assetLicenseSeats) assetLicenseSeats.value = "";
+  if (assetLicenseKey) assetLicenseKey.value = "";
   if (assetNotes) assetNotes.value = "";
   if (assetFormTitle) assetFormTitle.textContent = "Register Asset";
   if (assetSubmitButton) assetSubmitButton.textContent = "Save Asset";
@@ -279,11 +536,20 @@ function resetAssetForm() {
 
 function assetFromForm() {
   const assetType = String(assetTypeField?.value || "").trim();
+  const existingId = assetEditId?.value || "";
+  const existing = existingId
+    ? Assets.read().find((entry) => entry.id === existingId)
+    : null;
+
+  const licenseKeyInput = String(assetLicenseKey?.value || "").trim();
+  const licenseKey = licenseKeyInput || existing?.licenseKey || "";
 
   const asset = {
-    id: assetEditId?.value || Assets.createId(),
+    id: existingId || Assets.createId(),
+    assetCode: String(assetCodeField?.value || "").trim() || existing?.assetCode || Assets.createAssetCode(),
     employeeId: String(assetEmployeeId?.value || "").trim(),
     employeeName: String(assetEmployeeName?.value || "").trim(),
+    department: String(assetDepartment?.value || "").trim(),
     assetType,
     deviceModel: String(assetDeviceModel?.value || "").trim(),
     serialImei: String(assetSerialImei?.value || "").trim(),
@@ -292,8 +558,18 @@ function assetFromForm() {
     airtimeBalance: "",
     airtimeValidUntil: "",
     desktopSpecs: "",
-    status: String(assetStatus?.value || "Active").trim(),
-    notes: String(assetNotes?.value || "").trim()
+    purchaseDate: String(assetPurchaseDate?.value || "").trim(),
+    warrantyExpiry: String(assetWarrantyExpiry?.value || "").trim(),
+    vendor: String(assetVendor?.value || "").trim(),
+    licenseSeats: assetType === "License" ? String(assetLicenseSeats?.value || "").trim() : "",
+    licenseKey: assetType === "License" ? licenseKey : "",
+    licenseKeyLast4: assetType === "License"
+      ? (Assets.last4FromSecret(licenseKey) || existing?.licenseKeyLast4 || "")
+      : "",
+    status: String(assetStatus?.value || "In use").trim(),
+    notes: String(assetNotes?.value || "").trim(),
+    history: existing?.history || [],
+    handovers: existing?.handovers || []
   };
 
   if (assetType === "Phone") {
@@ -310,25 +586,61 @@ function assetFromForm() {
   return Assets.normalize(asset);
 }
 
+function populateAssetFilterOptions(assets) {
+  const departments = [...new Set(assets.map((a) => a.department).filter(Boolean))].sort();
+  const users = [...new Set(assets.map((a) => a.employeeName).filter(Boolean))].sort();
+
+  if (assetDepartmentFilter) {
+    const current = assetDepartmentFilter.value;
+    assetDepartmentFilter.innerHTML = '<option value="">All departments</option>'
+      + departments.map((d) => `<option value="${escapeHtml(d)}">${escapeHtml(d)}</option>`).join("");
+    assetDepartmentFilter.value = departments.includes(current) ? current : "";
+  }
+
+  if (assetUserFilter) {
+    const current = assetUserFilter.value;
+    assetUserFilter.innerHTML = '<option value="">All users</option>'
+      + users.map((u) => `<option value="${escapeHtml(u)}">${escapeHtml(u)}</option>`).join("");
+    assetUserFilter.value = users.includes(current) ? current : "";
+  }
+}
+
 function applyAssetFilters(assets) {
   const search = String(assetSearchFilter?.value || "").trim().toLowerCase();
   const type = String(assetTypeFilter?.value || "").trim();
+  const status = String(assetStatusFilter?.value || "").trim();
+  const department = String(assetDepartmentFilter?.value || "").trim();
+  const user = String(assetUserFilter?.value || "").trim();
+  const expiryWindow = Number(assetExpiryFilter?.value || 0);
   const provider = String(assetProviderFilter?.value || "").trim();
 
   return assets.filter((asset) => {
     if (type && asset.assetType !== type) return false;
+    if (status && asset.status !== status) return false;
+    if (department && asset.department !== department) return false;
+    if (user && asset.employeeName !== user) return false;
     if (provider && asset.serviceProvider !== provider) return false;
+    if (expiryWindow > 0) {
+      const days = Assets.daysUntilExpiry(asset);
+      if (days === null || days > expiryWindow) return false;
+    }
     if (!search) return true;
 
     const haystack = [
+      asset.assetCode,
       asset.employeeId,
       asset.employeeName,
+      asset.department,
       asset.deviceModel,
       asset.serialImei,
+      asset.licenseKeyLast4,
       asset.phoneNumber,
       asset.serviceProvider,
       asset.desktopSpecs,
-      asset.notes
+      asset.vendor,
+      asset.notes,
+      asset.status,
+      asset.assetType
     ].join(" ").toLowerCase();
 
     return haystack.includes(search);
@@ -357,22 +669,72 @@ function airtimeBadge(asset) {
   return "";
 }
 
+function warrantyBadgeClass(asset) {
+  const status = Assets.expiryStatus(asset, 90);
+  if (status === "expired") return "warranty-expired";
+  if (status === "expiring") {
+    const days = Assets.daysUntilExpiry(asset);
+    if (days !== null && days <= 30) return "warranty-expiring-soon";
+    return "warranty-expiring";
+  }
+  return "";
+}
+
+function warrantyLabel(asset) {
+  const days = Assets.daysUntilExpiry(asset);
+  if (days === null) return formatAssetDate(Assets.expiryDate(asset));
+  if (days < 0) return `${formatAssetDate(Assets.expiryDate(asset))} (expired)`;
+  if (days === 0) return `${formatAssetDate(Assets.expiryDate(asset))} (today)`;
+  if (days <= 90) return `${formatAssetDate(Assets.expiryDate(asset))} (${days}d)`;
+  return formatAssetDate(Assets.expiryDate(asset));
+}
+
+function countExpiringAssets(assets, windowDays = 90) {
+  return assets.filter((asset) => {
+    const days = Assets.daysUntilExpiry(asset);
+    return days !== null && days <= windowDays;
+  }).length;
+}
+
+function updateExpiryBadge(assets) {
+  if (!assetExpiryBadge) return;
+  const count30 = countExpiringAssets(assets, 30);
+  const count60 = countExpiringAssets(assets, 60);
+  const count90 = countExpiringAssets(assets, 90);
+  if (!count90) {
+    assetExpiryBadge.hidden = true;
+    assetExpiryBadge.textContent = "";
+    return;
+  }
+  assetExpiryBadge.hidden = false;
+  assetExpiryBadge.textContent = `${count90} expiring ≤90d (30d: ${count30} · 60d: ${count60})`;
+}
+
 function renderAssets() {
   if (!assetRows) return;
 
   if (!canViewAssets()) {
-    assetRows.innerHTML = '<tr class="empty-row"><td colspan="11">You do not have permission to view IT assets.</td></tr>';
+    assetRows.innerHTML = '<tr class="empty-row"><td colspan="12">You do not have permission to view IT assets.</td></tr>';
     return;
   }
 
-  const assets = applyAssetFilters(Assets.read());
+  const allAssets = Assets.read();
+  populateAssetFilterOptions(allAssets);
+  updateExpiryBadge(allAssets);
+
+  const assets = applyAssetFilters(allAssets);
   const showActions = canManageAssets();
-  const colCount = showActions ? 11 : 10;
+  const colCount = showActions ? 12 : 11;
 
   updateAssetTableHeader();
 
   if (assetFilterSummary) {
     assetFilterSummary.textContent = `${assets.length} asset${assets.length === 1 ? "" : "s"} listed`;
+  }
+
+  const readonlyNote = document.querySelector("#assetsReadonlyNote");
+  if (readonlyNote) {
+    readonlyNote.hidden = canManageAssets();
   }
 
   if (!assets.length) {
@@ -382,39 +744,42 @@ function renderAssets() {
 
   assetRows.innerHTML = assets
     .map((asset) => {
-      const isPhone = Assets.isPhone(asset);
-      const isDesktop = Assets.isDesktop(asset);
-      const airtimeClass = airtimeBadge(asset);
+      const warrantyClass = warrantyBadgeClass(asset);
+      const serialDisplay = Assets.maskSerialDisplay(asset);
+      const seats = Assets.isLicense(asset) && asset.licenseSeats !== ""
+        ? `<br><small>${escapeHtml(asset.licenseSeats)} seat(s)</small>`
+        : "";
 
       return `
-        <tr class="asset-row asset-type-${asset.assetType.toLowerCase()}">
-          <td>${escapeHtml(asset.employeeId)}</td>
-          <td>${escapeHtml(asset.employeeName)}</td>
-          <td><span class="asset-type-pill">${escapeHtml(asset.assetType)}</span></td>
+        <tr class="asset-row asset-type-${escapeHtml(String(asset.assetType || "other").toLowerCase())}">
+          <td>${escapeHtml(asset.assetCode || "—")}</td>
+          <td><span class="asset-type-pill">${escapeHtml(asset.assetType || "—")}</span>${seats}</td>
           <td>${escapeHtml(asset.deviceModel || "—")}</td>
-          <td>${escapeHtml(asset.serialImei || "—")}</td>
-          <td>${isPhone ? escapeHtml(asset.phoneNumber || "—") : '<span class="muted-text">—</span>'}</td>
-          <td>${isPhone && asset.serviceProvider
-            ? `<span class="provider-pill ${providerBadge(asset.serviceProvider)}">${escapeHtml(asset.serviceProvider)}</span>`
-            : '<span class="muted-text">—</span>'}</td>
-          <td class="${airtimeClass}">${isPhone
-            ? `${escapeHtml(asset.airtimeBalance || "—")}<br><small>Until ${escapeHtml(formatAssetDate(asset.airtimeValidUntil))}</small>`
-            : '<span class="muted-text">—</span>'}</td>
-          <td>${isDesktop ? escapeHtml(asset.desktopSpecs || "—") : '<span class="muted-text">—</span>'}</td>
-          <td>${escapeHtml(asset.status)}</td>
-          ${showActions ? `<td class="asset-actions">
-            <button class="text-button asset-edit-button" type="button" data-asset-id="${escapeHtml(asset.id)}">Edit</button>
-            <button class="text-button asset-delete-button" type="button" data-asset-id="${escapeHtml(asset.id)}">Delete</button>
-          </td>` : ""}
+          <td>${escapeHtml(serialDisplay)}</td>
+          <td>${escapeHtml(asset.employeeName || "—")}${asset.employeeId ? `<br><small>${escapeHtml(asset.employeeId)}</small>` : ""}</td>
+          <td>${escapeHtml(asset.department || "—")}</td>
+          <td>${escapeHtml(formatAssetDate(asset.purchaseDate))}</td>
+          <td class="${warrantyClass}">${escapeHtml(warrantyLabel(asset))}</td>
+          <td>${escapeHtml(asset.vendor || "—")}</td>
+          <td>${escapeHtml(asset.status || "—")}</td>
+          <td>
+            <button class="text-button asset-view-button" type="button" data-asset-id="${escapeHtml(asset.id)}">View</button>
+            ${showActions ? `
+              <button class="text-button asset-edit-button" type="button" data-asset-id="${escapeHtml(asset.id)}">Edit</button>
+              <button class="text-button asset-delete-button" type="button" data-asset-id="${escapeHtml(asset.id)}">Delete</button>
+            ` : ""}
+          </td>
         </tr>
       `;
     })
     .join("");
 
+  assetRows.querySelectorAll(".asset-view-button").forEach((button) => {
+    button.addEventListener("click", () => openAssetDetail(button.dataset.assetId));
+  });
   assetRows.querySelectorAll(".asset-edit-button").forEach((button) => {
     button.addEventListener("click", () => startAssetEdit(button.dataset.assetId));
   });
-
   assetRows.querySelectorAll(".asset-delete-button").forEach((button) => {
     button.addEventListener("click", () => deleteAsset(button.dataset.assetId));
   });
@@ -425,12 +790,8 @@ function updateAssetTableHeader() {
   if (!headerRow) return;
 
   const actionHeader = headerRow.querySelector(".asset-actions-col");
-  if (canManageAssets()) {
-    if (!actionHeader) {
-      headerRow.insertAdjacentHTML("beforeend", '<th class="asset-actions-col">Actions</th>');
-    }
-  } else if (actionHeader) {
-    actionHeader.remove();
+  if (!actionHeader) {
+    headerRow.insertAdjacentHTML("beforeend", '<th class="asset-actions-col">Actions</th>');
   }
 }
 
@@ -443,13 +804,27 @@ function startAssetEdit(assetId) {
   const asset = Assets.read().find((entry) => entry.id === assetId);
   if (!asset) return;
 
+  closeAssetDetail();
+
   if (assetEditId) assetEditId.value = asset.id;
+  if (assetCodeField) assetCodeField.value = asset.assetCode;
   if (assetEmployeeId) assetEmployeeId.value = asset.employeeId;
   if (assetEmployeeName) assetEmployeeName.value = asset.employeeName;
+  if (assetDepartment) assetDepartment.value = asset.department;
   if (assetTypeField) assetTypeField.value = asset.assetType;
   if (assetDeviceModel) assetDeviceModel.value = asset.deviceModel;
   if (assetSerialImei) assetSerialImei.value = asset.serialImei;
   if (assetStatus) assetStatus.value = asset.status;
+  if (assetPurchaseDate) assetPurchaseDate.value = asset.purchaseDate;
+  if (assetWarrantyExpiry) assetWarrantyExpiry.value = asset.warrantyExpiry;
+  if (assetVendor) assetVendor.value = asset.vendor;
+  if (assetLicenseSeats) assetLicenseSeats.value = asset.licenseSeats;
+  if (assetLicenseKey) {
+    assetLicenseKey.value = "";
+    assetLicenseKey.placeholder = asset.licenseKeyLast4
+      ? `Stored ••••${asset.licenseKeyLast4} — enter to replace`
+      : "Full key (stored securely; table shows last 4 only)";
+  }
   if (assetNotes) assetNotes.value = asset.notes;
 
   toggleAssetFieldGroups();
@@ -483,6 +858,7 @@ async function deleteAsset(assetId) {
   if (!confirm("Delete this IT asset record?")) return;
   const remaining = Assets.read().filter((asset) => asset.id !== assetId);
   await Assets.write(remaining);
+  closeAssetDetail();
   renderAssets();
 }
 
@@ -496,6 +872,297 @@ async function refreshAssetsFromSheet() {
     console.error(error);
     renderAssets();
   }
+}
+
+function openAssetDetail(assetId) {
+  const asset = Assets.read().find((entry) => entry.id === assetId);
+  if (!asset || !assetDetailModal || !assetDetailBody) return;
+
+  if (assetDetailTitle) {
+    assetDetailTitle.textContent = `${asset.assetCode || "Asset"} — ${asset.deviceModel || asset.assetType}`;
+  }
+
+  const manage = canManageAssets();
+  const history = [...(asset.history || [])].sort((a, b) => String(b.date).localeCompare(String(a.date)));
+  const handovers = [...(asset.handovers || [])].sort((a, b) => String(b.date).localeCompare(String(a.date)));
+  const warrantyClass = warrantyBadgeClass(asset);
+
+  assetDetailBody.innerHTML = `
+    <div class="asset-detail-grid">
+      <div><span class="muted-text">Asset ID</span><strong>${escapeHtml(asset.assetCode || "—")}</strong></div>
+      <div><span class="muted-text">Type</span><strong>${escapeHtml(asset.assetType || "—")}</strong></div>
+      <div><span class="muted-text">Name / Model</span><strong>${escapeHtml(asset.deviceModel || "—")}</strong></div>
+      <div><span class="muted-text">${Assets.isLicense(asset) ? "License ID / Key" : "Serial"}</span><strong>${escapeHtml(Assets.maskSerialDisplay(asset))}</strong></div>
+      <div><span class="muted-text">Assigned user</span><strong>${escapeHtml(asset.employeeName || "—")}</strong></div>
+      <div><span class="muted-text">Department</span><strong>${escapeHtml(asset.department || "—")}</strong></div>
+      <div><span class="muted-text">Purchase</span><strong>${escapeHtml(formatAssetDate(asset.purchaseDate))}</strong></div>
+      <div><span class="muted-text">${Assets.isLicense(asset) ? "License expiry" : "Warranty"}</span><strong class="${warrantyClass}">${escapeHtml(warrantyLabel(asset))}</strong></div>
+      <div><span class="muted-text">Vendor</span><strong>${escapeHtml(asset.vendor || "—")}</strong></div>
+      <div><span class="muted-text">Status</span><strong>${escapeHtml(asset.status || "—")}</strong></div>
+      ${Assets.isLicense(asset) ? `<div><span class="muted-text">Seats</span><strong>${escapeHtml(asset.licenseSeats || "—")}</strong></div>` : ""}
+      <div class="asset-detail-notes"><span class="muted-text">Notes</span><p>${escapeHtml(asset.notes || "—")}</p></div>
+    </div>
+
+    <div class="asset-detail-section">
+      <div class="asset-detail-section-head">
+        <h3>Handover / return</h3>
+        ${manage && (Assets.isLaptop(asset) || asset.assetType === "Phone" || asset.assetType === "Desktop" || asset.assetType === "Monitor" || asset.assetType === "Other")
+          ? `<button class="secondary-button" type="button" id="assetOpenHandoverButton">Record handover / return</button>`
+          : ""}
+      </div>
+      ${handovers.length
+        ? `<ul class="asset-history-ul">${handovers.map((h) => `
+            <li>
+              <strong>${escapeHtml(h.kind)}</strong> · ${escapeHtml(formatAssetDate(h.date))}
+              <span class="muted-text"> — ${escapeHtml(h.fromUser || "—")} → ${escapeHtml(h.toUser || "—")}</span>
+              ${h.notes ? `<div class="muted-text">${escapeHtml(h.notes)}</div>` : ""}
+              <div class="asset-inline-actions">
+                <button class="text-button asset-print-handover" type="button" data-handover-id="${escapeHtml(h.id)}">Print / export</button>
+              </div>
+            </li>`).join("")}</ul>`
+        : '<p class="muted-text">No handover or return records yet.</p>'}
+    </div>
+
+    <div class="asset-detail-section">
+      <div class="asset-detail-section-head">
+        <h3>Repair / replacement history</h3>
+        ${manage ? '<button class="secondary-button" type="button" id="assetOpenHistoryButton">Add history</button>' : ""}
+      </div>
+      ${history.length
+        ? `<ul class="asset-history-ul">${history.map((h) => `
+            <li>
+              <strong>${escapeHtml(h.type)}</strong> · ${escapeHtml(formatAssetDate(h.date))}
+              <div>${escapeHtml(h.description || "—")}</div>
+              <div class="muted-text">${escapeHtml([h.vendor, h.cost].filter(Boolean).join(" · ") || "")}</div>
+            </li>`).join("")}</ul>`
+        : '<p class="muted-text">No repair or replacement history yet.</p>'}
+    </div>
+
+    ${manage ? `<div class="modal-actions asset-detail-actions">
+      <button class="secondary-button" type="button" id="assetDetailEditButton">Edit asset</button>
+      <button class="secondary-button" type="button" id="assetDetailDeleteButton">Delete</button>
+    </div>` : ""}
+  `;
+
+  assetDetailModal.hidden = false;
+
+  assetDetailBody.querySelector("#assetOpenHandoverButton")?.addEventListener("click", () => openHandoverModal(asset.id));
+  assetDetailBody.querySelector("#assetOpenHistoryButton")?.addEventListener("click", () => openHistoryModal(asset.id));
+  assetDetailBody.querySelector("#assetDetailEditButton")?.addEventListener("click", () => startAssetEdit(asset.id));
+  assetDetailBody.querySelector("#assetDetailDeleteButton")?.addEventListener("click", () => deleteAsset(asset.id));
+  assetDetailBody.querySelectorAll(".asset-print-handover").forEach((button) => {
+    button.addEventListener("click", () => printHandoverReport(asset.id, button.dataset.handoverId));
+  });
+}
+
+function closeAssetDetail() {
+  if (assetDetailModal) assetDetailModal.hidden = true;
+}
+
+function openHandoverModal(assetId) {
+  if (!canManageAssets()) return;
+  const asset = Assets.read().find((entry) => entry.id === assetId);
+  if (!asset) return;
+
+  if (assetHandoverAssetId) assetHandoverAssetId.value = asset.id;
+  if (assetHandoverKind) assetHandoverKind.value = "Handover";
+  if (assetHandoverDate) assetHandoverDate.value = new Date().toISOString().slice(0, 10);
+  if (assetHandoverFrom) assetHandoverFrom.value = asset.employeeName || "";
+  if (assetHandoverTo) assetHandoverTo.value = "";
+  if (assetHandoverNotes) assetHandoverNotes.value = "";
+  if (assetHandoverModal) assetHandoverModal.hidden = false;
+}
+
+function closeHandoverModal() {
+  if (assetHandoverModal) assetHandoverModal.hidden = true;
+}
+
+async function saveHandoverFromForm(event) {
+  event.preventDefault();
+  if (!canManageAssets()) return;
+
+  const assetId = assetHandoverAssetId?.value;
+  const assets = Assets.read();
+  const index = assets.findIndex((entry) => entry.id === assetId);
+  if (index < 0) return;
+
+  const kind = String(assetHandoverKind?.value || "Handover").trim();
+  const entry = Assets.normalizeHandoverEntry({
+    date: String(assetHandoverDate?.value || "").trim(),
+    kind,
+    fromUser: String(assetHandoverFrom?.value || "").trim(),
+    toUser: String(assetHandoverTo?.value || "").trim(),
+    notes: String(assetHandoverNotes?.value || "").trim()
+  });
+
+  if (!entry.date) {
+    alert("Handover / return date is required.");
+    return;
+  }
+
+  const asset = { ...assets[index] };
+  asset.handovers = [...(asset.handovers || []), entry];
+
+  if (kind === "Handover" && entry.toUser) {
+    asset.employeeName = entry.toUser;
+    asset.status = "In use";
+  }
+  if (kind === "Return") {
+    if (entry.toUser) asset.employeeName = entry.toUser;
+    else asset.employeeName = "";
+    asset.status = "Returned";
+  }
+
+  assets[index] = Assets.normalize(asset);
+  await Assets.write(assets);
+  closeHandoverModal();
+  renderAssets();
+  openAssetDetail(assetId);
+
+  if (confirm("Handover / return saved. Open printable report now?")) {
+    printHandoverReport(assetId, entry.id);
+  }
+}
+
+function printHandoverReport(assetId, handoverId) {
+  const asset = Assets.read().find((entry) => entry.id === assetId);
+  if (!asset) return;
+  const handover = (asset.handovers || []).find((entry) => entry.id === handoverId);
+  if (!handover) return;
+
+  const title = `${handover.kind} report — ${asset.assetCode || asset.id}`;
+  const html = `<!doctype html>
+<html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title>
+<style>
+  body { font-family: Segoe UI, Arial, sans-serif; margin: 32px; color: #0f172a; }
+  h1 { font-size: 20px; margin: 0 0 8px; }
+  .meta { color: #64748b; margin-bottom: 24px; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #e2e8f0; vertical-align: top; }
+  th { width: 180px; color: #475569; font-weight: 600; }
+  .actions { margin-top: 24px; }
+  @media print { .actions { display: none; } }
+</style></head><body>
+  <h1>Tarmal IT — Laptop ${escapeHtml(handover.kind)} Report</h1>
+  <p class="meta">Generated ${escapeHtml(new Date().toLocaleString())}</p>
+  <table>
+    <tr><th>Asset ID</th><td>${escapeHtml(asset.assetCode || "—")}</td></tr>
+    <tr><th>Type / Model</th><td>${escapeHtml(asset.assetType)} — ${escapeHtml(asset.deviceModel || "—")}</td></tr>
+    <tr><th>Serial</th><td>${escapeHtml(Assets.maskSerialDisplay(asset))}</td></tr>
+    <tr><th>Report type</th><td>${escapeHtml(handover.kind)}</td></tr>
+    <tr><th>Date</th><td>${escapeHtml(formatAssetDate(handover.date))}</td></tr>
+    <tr><th>From</th><td>${escapeHtml(handover.fromUser || "—")}</td></tr>
+    <tr><th>To</th><td>${escapeHtml(handover.toUser || "—")}</td></tr>
+    <tr><th>Department</th><td>${escapeHtml(asset.department || "—")}</td></tr>
+    <tr><th>Vendor</th><td>${escapeHtml(asset.vendor || "—")}</td></tr>
+    <tr><th>Notes</th><td>${escapeHtml(handover.notes || "—")}</td></tr>
+  </table>
+  <div class="actions">
+    <button onclick="window.print()">Print</button>
+    <button onclick="downloadCsv()">Download CSV</button>
+  </div>
+  <script>
+    function downloadCsv() {
+      const rows = [
+        ["Field","Value"],
+        ["Asset ID",${JSON.stringify(asset.assetCode || "")}],
+        ["Type",${JSON.stringify(asset.assetType || "")}],
+        ["Model",${JSON.stringify(asset.deviceModel || "")}],
+        ["Serial",${JSON.stringify(Assets.maskSerialDisplay(asset))}],
+        ["Kind",${JSON.stringify(handover.kind)}],
+        ["Date",${JSON.stringify(handover.date)}],
+        ["From",${JSON.stringify(handover.fromUser || "")}],
+        ["To",${JSON.stringify(handover.toUser || "")}],
+        ["Department",${JSON.stringify(asset.department || "")}],
+        ["Notes",${JSON.stringify(handover.notes || "")}]
+      ];
+      const csv = rows.map((r) => r.map((v) => '"' + String(v).replaceAll('"','""') + '"').join(",")).join("\\n");
+      const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = ${JSON.stringify(`${(asset.assetCode || "asset").replace(/[^\w-]+/g, "_")}-${handover.kind.toLowerCase()}.csv`)};
+      a.click();
+    }
+  </script>
+</body></html>`;
+
+  const win = window.open("", "_blank");
+  if (!win) {
+    alert("Pop-up blocked. Allow pop-ups to print the handover report.");
+    return;
+  }
+  win.document.write(html);
+  win.document.close();
+}
+
+function openHistoryModal(assetId) {
+  if (!canManageAssets()) return;
+  const asset = Assets.read().find((entry) => entry.id === assetId);
+  if (!asset) return;
+
+  if (assetHistoryAssetId) assetHistoryAssetId.value = asset.id;
+  if (assetHistoryDate) assetHistoryDate.value = new Date().toISOString().slice(0, 10);
+  if (assetHistoryType) assetHistoryType.value = "Repair";
+  if (assetHistoryDescription) assetHistoryDescription.value = "";
+  if (assetHistoryVendor) assetHistoryVendor.value = "";
+  if (assetHistoryCost) assetHistoryCost.value = "";
+  renderHistoryList(asset);
+  if (assetHistoryModal) assetHistoryModal.hidden = false;
+}
+
+function renderHistoryList(asset) {
+  if (!assetHistoryList) return;
+  const history = [...(asset.history || [])].sort((a, b) => String(b.date).localeCompare(String(a.date)));
+  if (!history.length) {
+    assetHistoryList.innerHTML = '<p class="muted-text">No history entries yet.</p>';
+    return;
+  }
+  assetHistoryList.innerHTML = `<ul class="asset-history-ul">${history.map((h) => `
+    <li><strong>${escapeHtml(h.type)}</strong> · ${escapeHtml(formatAssetDate(h.date))}
+      <div>${escapeHtml(h.description || "—")}</div>
+      <div class="muted-text">${escapeHtml([h.vendor, h.cost].filter(Boolean).join(" · "))}</div>
+    </li>`).join("")}</ul>`;
+}
+
+function closeHistoryModal() {
+  if (assetHistoryModal) assetHistoryModal.hidden = true;
+}
+
+async function saveHistoryFromForm(event) {
+  event.preventDefault();
+  if (!canManageAssets()) return;
+
+  const assetId = assetHistoryAssetId?.value;
+  const assets = Assets.read();
+  const index = assets.findIndex((entry) => entry.id === assetId);
+  if (index < 0) return;
+
+  const entry = Assets.normalizeHistoryEntry({
+    date: String(assetHistoryDate?.value || "").trim(),
+    type: String(assetHistoryType?.value || "Repair").trim(),
+    description: String(assetHistoryDescription?.value || "").trim(),
+    vendor: String(assetHistoryVendor?.value || "").trim(),
+    cost: String(assetHistoryCost?.value || "").trim()
+  });
+
+  if (!entry.date || !entry.description) {
+    alert("Date and description are required.");
+    return;
+  }
+
+  const asset = { ...assets[index] };
+  asset.history = [...(asset.history || []), entry];
+  if (entry.type === "Repair") asset.status = "Under repair";
+  if (entry.type === "Replacement") asset.status = "In use";
+
+  assets[index] = Assets.normalize(asset);
+  await Assets.write(assets);
+  renderHistoryList(assets[index]);
+  if (assetHistoryDescription) assetHistoryDescription.value = "";
+  if (assetHistoryVendor) assetHistoryVendor.value = "";
+  if (assetHistoryCost) assetHistoryCost.value = "";
+  renderAssets();
+  openAssetDetail(assetId);
 }
 
 function exportAssetsCsv() {
@@ -520,33 +1187,51 @@ function downloadAssetTemplateCsv() {
   const sampleRows = [
     [
       "",
+      "AST-LAP-001",
       "EMP-1001",
       "Jane Doe",
-      "Phone",
-      "iPhone 14",
-      "IMEI123456789",
-      "+254712345678",
-      "Safaricom",
-      "KES 500",
-      "2026-12-31",
+      "Finance",
+      "Laptop",
+      "Dell Latitude 5440",
+      "SN-DELL-1001",
       "",
-      "Active",
-      "Company phone"
+      "",
+      "",
+      "",
+      "",
+      "2025-01-15",
+      "2028-01-15",
+      "Dell",
+      "",
+      "",
+      "In use",
+      "Primary laptop",
+      "[]",
+      "[]"
     ],
     [
       "",
-      "EMP-1002",
-      "John Smith",
-      "Desktop",
-      "Dell OptiPlex 7090",
-      "SN-DELL-99001",
+      "AST-LIC-MS365",
+      "",
+      "",
+      "IT",
+      "License",
+      "Microsoft 365 Business",
+      "AGR-MS365-01",
       "",
       "",
       "",
       "",
-      "Intel i7, 16GB RAM, 512GB SSD, Windows 11",
-      "Active",
-      "Office desk 3"
+      "",
+      "2025-03-01",
+      "2026-03-01",
+      "Microsoft",
+      "25",
+      "7890",
+      "In use",
+      "Company Microsoft licenses",
+      "[]",
+      "[]"
     ]
   ];
 
@@ -555,18 +1240,27 @@ function downloadAssetTemplateCsv() {
 
 function assetToCsvValues(asset, includeId = true) {
   const values = [
+    asset.assetCode,
     asset.employeeId,
     asset.employeeName,
+    asset.department,
     asset.assetType,
     asset.deviceModel,
-    asset.serialImei,
+    Assets.isLicense(asset) ? (asset.serialImei || `••••${asset.licenseKeyLast4 || ""}`) : asset.serialImei,
     asset.phoneNumber,
     asset.serviceProvider,
     asset.airtimeBalance,
     formatAssetDateForCsv(asset.airtimeValidUntil),
     asset.desktopSpecs,
+    formatAssetDateForCsv(asset.purchaseDate),
+    formatAssetDateForCsv(asset.warrantyExpiry),
+    asset.vendor,
+    asset.licenseSeats,
+    asset.licenseKeyLast4,
     asset.status,
-    asset.notes
+    asset.notes,
+    JSON.stringify(asset.history || []),
+    JSON.stringify(asset.handovers || [])
   ];
 
   return includeId ? [asset.id, ...values] : values;
@@ -668,33 +1362,45 @@ function csvField(headerIndex, values, ...names) {
 function assetFromCsvRow(headerIndex, values) {
   return Assets.normalize({
     id: csvField(headerIndex, values, "Id", "ID"),
+    assetCode: csvField(headerIndex, values, "Asset ID", "Asset Code"),
     employeeId: csvField(headerIndex, values, "Employee ID", "Emp ID"),
-    employeeName: csvField(headerIndex, values, "Employee Name", "Employee"),
+    employeeName: csvField(headerIndex, values, "Employee Name", "Employee", "Assigned user", "Assigned User"),
+    department: csvField(headerIndex, values, "Department"),
     assetType: csvField(headerIndex, values, "Asset Type", "Type"),
-    deviceModel: csvField(headerIndex, values, "Device Model", "Model"),
-    serialImei: csvField(headerIndex, values, "Serial / IMEI", "Serial", "IMEI"),
+    deviceModel: csvField(headerIndex, values, "Device Model", "Model", "Name / Model", "Product / SKU"),
+    serialImei: csvField(headerIndex, values, "Serial / IMEI", "Serial", "IMEI", "License ID"),
     phoneNumber: csvField(headerIndex, values, "Phone Number", "Phone"),
     serviceProvider: csvField(headerIndex, values, "Service Provider", "Provider"),
     airtimeBalance: csvField(headerIndex, values, "Airtime Balance"),
     airtimeValidUntil: parseAssetDateFromCsv(csvField(headerIndex, values, "Airtime Valid Until", "Valid Until")),
     desktopSpecs: csvField(headerIndex, values, "Desktop Specs"),
-    status: csvField(headerIndex, values, "Status") || "Active",
-    notes: csvField(headerIndex, values, "Notes")
+    purchaseDate: parseAssetDateFromCsv(csvField(headerIndex, values, "Purchase Date")),
+    warrantyExpiry: parseAssetDateFromCsv(csvField(headerIndex, values, "Warranty / Expiry", "Warranty Expiry", "License Expiry", "Expiry")),
+    vendor: csvField(headerIndex, values, "Vendor"),
+    licenseSeats: csvField(headerIndex, values, "License Seats", "Seats", "Quantity"),
+    licenseKeyLast4: csvField(headerIndex, values, "License Key Last4", "License Last4"),
+    status: csvField(headerIndex, values, "Status") || "In use",
+    notes: csvField(headerIndex, values, "Notes"),
+    history: csvField(headerIndex, values, "History JSON", "History"),
+    handovers: csvField(headerIndex, values, "Handovers JSON", "Handovers")
   });
 }
 
 function validateImportedAsset(asset, rowNumber) {
-  if (!asset.employeeId || !asset.employeeName) {
-    return `Row ${rowNumber}: Employee ID and Employee Name are required.`;
+  if (!asset.assetType || !Assets.TYPES.includes(asset.assetType)) {
+    return `Row ${rowNumber}: Asset Type must be one of ${Assets.TYPES.join(", ")}.`;
   }
-  if (!Assets.TYPES.includes(asset.assetType)) {
-    return `Row ${rowNumber}: Asset Type must be Phone or Desktop.`;
+  if (!asset.deviceModel) {
+    return `Row ${rowNumber}: Name / Model is required.`;
   }
   if (asset.assetType === "Phone" && !asset.phoneNumber) {
     return `Row ${rowNumber}: Phone Number is required for Phone assets.`;
   }
   if (asset.assetType === "Phone" && asset.serviceProvider && !Assets.PROVIDERS.includes(asset.serviceProvider)) {
     return `Row ${rowNumber}: Service Provider must be Airtel or Safaricom.`;
+  }
+  if (asset.status && !Assets.STATUSES.includes(asset.status) && !["Active", "In Repair", "Lost"].includes(asset.status)) {
+    return `Row ${rowNumber}: Status must be one of ${Assets.STATUSES.join(", ")}.`;
   }
   return "";
 }
@@ -716,7 +1422,11 @@ function mergeImportedAssets(existingAssets, importedAssets) {
       merged.set(id, { ...asset, id });
       updated += 1;
     } else {
-      merged.set(id, { ...asset, id });
+      merged.set(id, {
+        ...asset,
+        id,
+        assetCode: asset.assetCode || Assets.createAssetCode()
+      });
       added += 1;
     }
   });
@@ -812,13 +1522,18 @@ async function saveAssetFromPanel() {
 
   const asset = assetFromForm();
 
-  if (!asset.employeeId || !asset.employeeName) {
-    alert("Employee ID and name are required.");
+  if (!asset.assetType) {
+    alert("Select an asset type.");
     return;
   }
 
-  if (!asset.assetType) {
-    alert("Select an asset type.");
+  if (!Assets.TYPES.includes(asset.assetType)) {
+    alert(`Asset type must be one of: ${Assets.TYPES.join(", ")}`);
+    return;
+  }
+
+  if (!asset.deviceModel) {
+    alert("Name / Model is required.");
     return;
   }
 
@@ -833,11 +1548,19 @@ async function saveAssetFromPanel() {
     }
   }
 
+  if (asset.assetType !== "License" && asset.assetType !== "Server" && !asset.employeeName && asset.status === "In use") {
+    // Assigned user recommended for in-use hardware, but not hard-required for store items.
+  }
+
   const assets = Assets.read();
   const editIndex = assets.findIndex((entry) => entry.id === asset.id);
 
   if (editIndex >= 0) {
-    assets[editIndex] = asset;
+    assets[editIndex] = {
+      ...asset,
+      history: assets[editIndex].history || [],
+      handovers: assets[editIndex].handovers || []
+    };
   } else {
     assets.push(asset);
   }
@@ -876,9 +1599,36 @@ function initAssetsModule() {
     if (file) await importAssetsFromFile(file);
   });
 
-  [assetSearchFilter, assetTypeFilter, assetProviderFilter]
+  [
+    assetSearchFilter,
+    assetTypeFilter,
+    assetStatusFilter,
+    assetDepartmentFilter,
+    assetUserFilter,
+    assetExpiryFilter,
+    assetProviderFilter
+  ]
     .filter(Boolean)
     .forEach((control) => control.addEventListener("input", renderAssets));
+
+  closeAssetDetailButton?.addEventListener("click", closeAssetDetail);
+  assetDetailModal?.addEventListener("click", (event) => {
+    if (event.target === assetDetailModal) closeAssetDetail();
+  });
+
+  closeAssetHandoverButton?.addEventListener("click", closeHandoverModal);
+  assetHandoverModal?.addEventListener("click", (event) => {
+    if (event.target === assetHandoverModal) closeHandoverModal();
+  });
+  assetHandoverForm?.addEventListener("submit", saveHandoverFromForm);
+  document.querySelector("#cancelAssetHandoverButton")?.addEventListener("click", closeHandoverModal);
+
+  closeAssetHistoryButton?.addEventListener("click", closeHistoryModal);
+  assetHistoryModal?.addEventListener("click", (event) => {
+    if (event.target === assetHistoryModal) closeHistoryModal();
+  });
+  assetHistoryForm?.addEventListener("submit", saveHistoryFromForm);
+  document.querySelector("#cancelAssetHistoryButton")?.addEventListener("click", closeHistoryModal);
 
   resetAssetForm();
   renderAssets();
