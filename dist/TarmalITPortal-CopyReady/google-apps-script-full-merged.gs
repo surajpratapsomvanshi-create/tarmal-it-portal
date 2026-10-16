@@ -41,7 +41,8 @@ const EXTERNAL_LOGIN_MICROSOFT_CLIENT_ID = "";
 const USER_HEADERS = [
   "Id", "Name", "Username", "Email", "Password", "Active",
   "Dashboard", "Create Tickets", "Edit Tickets", "Export Data", "Sync Sheet", "Manage Users",
-  "View Assets", "Manage Assets", "View Documents", "Manage Documents", "Delete Documents"
+  "View Assets", "Manage Assets", "View Documents", "Manage Documents", "Delete Documents",
+  "View Consumables", "Manage Consumables", "Edit Consumable History"
 ];
 
 const DOCUMENT_HEADERS = [
@@ -108,7 +109,8 @@ const CONSUMABLE_HEADERS = [
   "Current Stock",
   "Vendor",
   "Notes",
-  "Movements JSON"
+  "Movements JSON",
+  "Opening Stock"
 ];
 
 const COLUMN_ALIASES = {
@@ -2548,12 +2550,13 @@ function consumableToRow_(item) {
     item.currentStock === 0 || item.currentStock ? String(item.currentStock) : "",
     item.vendor || "",
     item.notes || "",
-    assetJsonCell_(item.movements)
+    assetJsonCell_(item.movements),
+    item.openingStock === 0 || item.openingStock ? String(item.openingStock) : "0"
   ];
 }
 
 function rowToConsumable_(row) {
-  return {
+  const item = {
     id: String(row[0] || ""),
     itemCode: String(row[1] || ""),
     name: String(row[2] || ""),
@@ -2565,6 +2568,10 @@ function rowToConsumable_(row) {
     notes: String(row[8] || ""),
     movements: String(row[9] || "[]")
   };
+  if (row.length > 10) {
+    item.openingStock = String(row[10] || "0");
+  }
+  return item;
 }
 
 function ensureDocumentsSheet_() {
@@ -2740,13 +2747,36 @@ function userToRow_(user) {
     rights.manageAssets ? "Yes" : "No",
     rights.viewDocuments ? "Yes" : "No",
     rights.manageDocuments ? "Yes" : "No",
-    rights.deleteDocuments ? "Yes" : "No"
+    rights.deleteDocuments ? "Yes" : "No",
+    rights.viewConsumables ? "Yes" : "No",
+    rights.manageConsumables ? "Yes" : "No",
+    rights.editConsumableHistory ? "Yes" : "No"
   ];
 }
 
 function rowToUser_(row) {
   const manageDocuments = isTruthy_(row[15]);
   const hasDeleteColumn = row.length > 16;
+  const hasConsumableColumns = row.length > 17;
+  const rights = {
+    dashboard: isTruthy_(row[6]),
+    createTicket: isTruthy_(row[7]),
+    editTicket: isTruthy_(row[8]),
+    exportData: isTruthy_(row[9]),
+    syncSheet: isTruthy_(row[10]),
+    manageUsers: isTruthy_(row[11]),
+    viewAssets: isTruthy_(row[12]),
+    manageAssets: isTruthy_(row[13]),
+    viewDocuments: isTruthy_(row[14]),
+    manageDocuments: manageDocuments,
+    // Older sheets without the column keep prior Mgr Docs delete behavior.
+    deleteDocuments: hasDeleteColumn ? isTruthy_(row[16]) : manageDocuments
+  };
+  if (hasConsumableColumns) {
+    rights.viewConsumables = isTruthy_(row[17]);
+    rights.manageConsumables = isTruthy_(row[18]);
+    rights.editConsumableHistory = isTruthy_(row[19]);
+  }
   return {
     id: String(row[0] || ""),
     name: String(row[1] || ""),
@@ -2754,20 +2784,7 @@ function rowToUser_(row) {
     email: String(row[3] || ""),
     password: String(row[4] || ""),
     active: isTruthy_(row[5]),
-    rights: {
-      dashboard: isTruthy_(row[6]),
-      createTicket: isTruthy_(row[7]),
-      editTicket: isTruthy_(row[8]),
-      exportData: isTruthy_(row[9]),
-      syncSheet: isTruthy_(row[10]),
-      manageUsers: isTruthy_(row[11]),
-      viewAssets: isTruthy_(row[12]),
-      manageAssets: isTruthy_(row[13]),
-      viewDocuments: isTruthy_(row[14]),
-      manageDocuments: manageDocuments,
-      // Older sheets without the column keep prior Mgr Docs delete behavior.
-      deleteDocuments: hasDeleteColumn ? isTruthy_(row[16]) : manageDocuments
-    }
+    rights: rights
   };
 }
 

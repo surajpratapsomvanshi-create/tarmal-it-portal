@@ -41,6 +41,9 @@ const Auth = {
       manageUsers: true,
       viewAssets: true,
       manageAssets: true,
+      viewConsumables: true,
+      manageConsumables: true,
+      editConsumableHistory: true,
       viewDocuments: true,
       manageDocuments: true,
       deleteDocuments: true
@@ -111,22 +114,49 @@ const Auth = {
     return next;
   },
 
+  migrateConsumableRights(rights) {
+    const next = { ...rights };
+    const source = rights || {};
+    const hasView = Object.prototype.hasOwnProperty.call(source, "viewConsumables");
+    const hasManage = Object.prototype.hasOwnProperty.call(source, "manageConsumables");
+    const hasHistory = Object.prototype.hasOwnProperty.call(source, "editConsumableHistory");
+
+    // New rights default off until checked. Only admin-like users get them via allRights().
+    if (!hasView) next.viewConsumables = false;
+    if (!hasManage) next.manageConsumables = false;
+    if (!hasHistory) next.editConsumableHistory = false;
+
+    if (next.manageConsumables) next.viewConsumables = true;
+    if (next.editConsumableHistory) next.viewConsumables = true;
+    return next;
+  },
+
   normalizeUser(user) {
-    const rights = this.migrateDocumentRights({
-      dashboard: Boolean(user.rights?.dashboard),
-      createTicket: Boolean(user.rights?.createTicket),
-      editTicket: Boolean(user.rights?.editTicket),
-      exportData: Boolean(user.rights?.exportData),
-      syncSheet: Boolean(user.rights?.syncSheet),
-      manageUsers: Boolean(user.rights?.manageUsers),
-      viewAssets: Boolean(user.rights?.viewAssets),
-      manageAssets: Boolean(user.rights?.manageAssets),
-      viewDocuments: Boolean(user.rights?.viewDocuments),
-      manageDocuments: Boolean(user.rights?.manageDocuments),
-      ...(Object.prototype.hasOwnProperty.call(user.rights || {}, "deleteDocuments")
-        ? { deleteDocuments: Boolean(user.rights.deleteDocuments) }
+    const sourceRights = user.rights || {};
+    const rights = this.migrateConsumableRights(this.migrateDocumentRights({
+      dashboard: Boolean(sourceRights.dashboard),
+      createTicket: Boolean(sourceRights.createTicket),
+      editTicket: Boolean(sourceRights.editTicket),
+      exportData: Boolean(sourceRights.exportData),
+      syncSheet: Boolean(sourceRights.syncSheet),
+      manageUsers: Boolean(sourceRights.manageUsers),
+      viewAssets: Boolean(sourceRights.viewAssets),
+      manageAssets: Boolean(sourceRights.manageAssets),
+      viewDocuments: Boolean(sourceRights.viewDocuments),
+      manageDocuments: Boolean(sourceRights.manageDocuments),
+      ...(Object.prototype.hasOwnProperty.call(sourceRights, "deleteDocuments")
+        ? { deleteDocuments: Boolean(sourceRights.deleteDocuments) }
+        : {}),
+      ...(Object.prototype.hasOwnProperty.call(sourceRights, "viewConsumables")
+        ? { viewConsumables: Boolean(sourceRights.viewConsumables) }
+        : {}),
+      ...(Object.prototype.hasOwnProperty.call(sourceRights, "manageConsumables")
+        ? { manageConsumables: Boolean(sourceRights.manageConsumables) }
+        : {}),
+      ...(Object.prototype.hasOwnProperty.call(sourceRights, "editConsumableHistory")
+        ? { editConsumableHistory: Boolean(sourceRights.editConsumableHistory) }
         : {})
-    });
+    }));
 
     const finalRights = this.isBuiltInAdmin(user) || rights.manageUsers
       ? this.allRights()
@@ -170,6 +200,9 @@ const Auth = {
     if (this.isAdminLevelUser()) return true;
     if (rightId === "viewAssets") return this.canViewAssets();
     if (rightId === "manageAssets") return this.canManageAssets();
+    if (rightId === "viewConsumables") return this.canViewConsumables();
+    if (rightId === "manageConsumables") return this.canManageConsumables();
+    if (rightId === "editConsumableHistory") return this.canEditConsumableHistory();
     if (rightId === "viewDocuments") return this.canViewDocuments();
     if (rightId === "manageDocuments") return this.canManageDocuments();
     if (rightId === "deleteDocuments") return this.canDeleteDocuments();
@@ -180,6 +213,21 @@ const Auth = {
     return this.isAdminLevelUser()
       || this.hasRight("viewAssets")
       || this.hasRight("manageAssets");
+  },
+
+  canViewConsumables() {
+    return this.isAdminLevelUser()
+      || this.hasRight("viewConsumables")
+      || this.hasRight("manageConsumables")
+      || this.hasRight("editConsumableHistory");
+  },
+
+  canManageConsumables() {
+    return this.isAdminLevelUser() || this.hasRight("manageConsumables");
+  },
+
+  canEditConsumableHistory() {
+    return this.isAdminLevelUser() || this.hasRight("editConsumableHistory");
   },
 
   isAdminUser(user = this.currentUser()) {
@@ -987,11 +1035,21 @@ const Auth = {
       button.style.display = allowed ? "" : "none";
     });
 
+    document.querySelectorAll(".tab-button[data-tab='consumables']").forEach((button) => {
+      const allowed = this.canViewConsumables();
+      button.hidden = !allowed;
+      button.style.display = allowed ? "" : "none";
+    });
+
     document.querySelectorAll(".tab-button[data-tab='documents']").forEach((button) => {
       const allowed = this.canViewDocuments();
       button.hidden = !allowed;
       button.style.display = allowed ? "" : "none";
     });
+
+    if (typeof updateGlobalConsumableLowStockWarning === "function") {
+      updateGlobalConsumableLowStockWarning();
+    }
   },
 
   refreshSessionRights() {

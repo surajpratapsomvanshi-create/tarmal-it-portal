@@ -557,6 +557,38 @@ body.performance-filters-collapsed .filter-sidebar {
   justify-content: flex-end;
 }
 
+.topbar-stock-warning {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  max-width: min(360px, 42vw);
+  min-height: 36px;
+  padding: 0 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid #f59e0b;
+  background: linear-gradient(180deg, #fff7ed 0%, #ffedd5 100%);
+  color: #9a3412;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.25;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.topbar-stock-warning:hover {
+  background: linear-gradient(180deg, #ffedd5 0%, #fed7aa 100%);
+  border-color: #d97706;
+}
+
+.topbar-stock-warning-compact {
+  max-width: min(220px, 40vw);
+  min-height: 30px;
+  padding: 0 10px;
+  font-size: 11px;
+}
+
 .topbar-actions > .user-chip,
 .topbar-actions > .secondary-button {
   box-sizing: border-box;

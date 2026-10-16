@@ -406,6 +406,24 @@ function canManageAssets() {
   return Auth.canManageAssets();
 }
 
+function canViewConsumables() {
+  return typeof Auth.canViewConsumables === "function"
+    ? Auth.canViewConsumables()
+    : (Auth.canViewAssets() || Auth.hasPermission?.("viewConsumables"));
+}
+
+function canManageConsumables() {
+  return typeof Auth.canManageConsumables === "function"
+    ? Auth.canManageConsumables()
+    : (Auth.canManageAssets() || Auth.hasPermission?.("manageConsumables"));
+}
+
+function canEditConsumableHistory() {
+  return typeof Auth.canEditConsumableHistory === "function"
+    ? Auth.canEditConsumableHistory()
+    : Boolean(Auth.hasPermission?.("editConsumableHistory") || Auth.isAdminLevelUser?.());
+}
+
 function bindAssetElements() {
   assetRegisterPanel = document.querySelector("#assetRegisterPanel");
   assetRows = document.querySelector("#assetRows");
@@ -1658,14 +1676,14 @@ const Consumables = {
     const saved = localStorage.getItem(this.LOCAL_KEY);
     if (!saved) return [];
     try {
-      return JSON.parse(saved).map((item) => this.normalize(item));
+      return JSON.parse(saved).map((item) => this.withBalances(item));
     } catch {
       return [];
     }
   },
 
   save(items) {
-    const normalized = items.map((item) => this.normalize(item));
+    const normalized = items.map((item) => this.withBalances(item));
     localStorage.setItem(this.LOCAL_KEY, JSON.stringify(normalized));
     return normalized;
   },
@@ -1702,12 +1720,32 @@ const Consumables = {
     };
   },
 
+  resolveOpeningStock(item, movements = []) {
+    const hasOpening = !(item?.openingStock === "" || item?.openingStock === null || item?.openingStock === undefined);
+    if (hasOpening) {
+      return Math.max(0, Number(item.openingStock) || 0);
+    }
+
+    const current = item?.currentStock === "" || item?.currentStock === null || item?.currentStock === undefined
+      ? null
+      : Number(item.currentStock) || 0;
+    if (!movements.length) {
+      return Math.max(0, current || 0);
+    }
+    if (current === null) return 0;
+
+    // Migrate legacy rows. Clamp so a stale currentStock=0 after Receive cannot invent a
+    // negative opening that cancels the movement (the Receive-left-stock-at-0 bug).
+    const net = movements.reduce((sum, move) => sum + this.signedDelta(move.type, move.quantity), 0);
+    return Math.max(0, current - net);
+  },
+
   normalize(item) {
     const category = String(item.category || "").trim();
     const movements = this.parseJsonArray(item.movements).map((entry) => this.normalizeMovement(entry));
-    const currentStock = item.currentStock === "" || item.currentStock === null || item.currentStock === undefined
-      ? this.recomputeStock(0, movements)
-      : Number(item.currentStock) || 0;
+    const openingStock = this.resolveOpeningStock(item, movements);
+    const movementCopies = movements.map((move) => ({ ...move }));
+    const currentStock = this.recomputeStock(openingStock, movementCopies);
 
     return {
       id: String(item.id || ""),
@@ -1716,10 +1754,11 @@ const Consumables = {
       category: this.CATEGORIES.includes(category) ? category : (category || "Other"),
       unit: String(item.unit || "pcs").trim() || "pcs",
       reorderLevel: Math.max(0, Number(item.reorderLevel) || 0),
+      openingStock,
       currentStock,
       vendor: String(item.vendor || "").trim(),
       notes: String(item.notes || "").trim(),
-      movements
+      movements: movementCopies
     };
   },
 
@@ -1767,20 +1806,15 @@ const Consumables = {
   },
 
   withBalances(item) {
+    if (!item) return null;
     const normalized = this.normalize(item);
-    const opening = this.inferOpeningStock(normalized);
-    const movements = [...normalized.movements];
-    const stock = this.recomputeStock(opening, movements);
-    return this.normalize({ ...normalized, movements, currentStock: stock });
-  },
-
-  inferOpeningStock(item) {
-    // Opening = currentStock minus net of all recorded movements (so edits keep history).
-    const net = (item.movements || []).reduce(
-      (sum, move) => sum + this.signedDelta(move.type, move.quantity),
-      0
-    );
-    return (Number(item.currentStock) || 0) - net;
+    const movements = normalized.movements.map((move) => ({ ...move }));
+    const stock = this.recomputeStock(normalized.openingStock, movements);
+    return {
+      ...normalized,
+      movements,
+      currentStock: stock
+    };
   },
 
   averageMonthlyIssue(item) {
@@ -1813,7 +1847,14 @@ const Consumables = {
   },
 
   isLowStock(item) {
-    return (Number(item.currentStock) || 0) <= (Number(item.reorderLevel) || 0);
+    const reorder = Number(item.reorderLevel) || 0;
+    if (reorder <= 0) return false;
+    return (Number(item.currentStock) || 0) <= reorder;
+  },
+
+  lowStockItems(items = null) {
+    const list = (items || this.read()).map((item) => this.withBalances(item));
+    return list.filter((item) => this.isLowStock(item));
   },
 
   loadFromSheet() {
@@ -1840,11 +1881,14 @@ const Consumables = {
           return;
         }
 
-        const remote = (payload.consumables || []).map((item) => this.normalize(item));
+        const remote = (payload.consumables || []).map((item) => this.withBalances(item));
         const merged = this.merge(localItems, remote);
         this.save(merged);
+        if (typeof updateGlobalConsumableLowStockWarning === "function") {
+          updateGlobalConsumableLowStockWarning(merged);
+        }
 
-        if (canManageAssets() && (!remote.length || merged.length > remote.length)) {
+        if (canManageConsumables() && (!remote.length || merged.length > remote.length)) {
           await this.syncToSheet(merged);
         }
 
@@ -1873,7 +1917,7 @@ const Consumables = {
 
   async syncToSheet(items) {
     const url = Auth.SHEET_WEB_APP_URL;
-    if (!url || !canManageAssets()) return { synced: false };
+    if (!url || !canManageConsumables()) return { synced: false };
 
     await fetch(url, {
       method: "POST",
@@ -1883,7 +1927,7 @@ const Consumables = {
       },
       body: JSON.stringify({
         action: "syncConsumables",
-        consumables: items.map((item) => this.normalize(item))
+        consumables: items.map((item) => this.withBalances(item))
       })
     });
 
@@ -1892,6 +1936,9 @@ const Consumables = {
 
   async write(items) {
     const normalized = this.save(items.map((item) => this.withBalances(item)));
+    if (typeof updateGlobalConsumableLowStockWarning === "function") {
+      updateGlobalConsumableLowStockWarning(normalized);
+    }
     try {
       await this.syncToSheet(normalized);
     } catch (error) {
@@ -1934,6 +1981,7 @@ let closeConsumableDetailButton;
 let consumableMoveModal;
 let consumableMoveForm;
 let consumableMoveItemId;
+let consumableMoveEditId;
 let consumableMoveType;
 let consumableMoveDate;
 let consumableMoveQty;
@@ -1942,6 +1990,8 @@ let consumableMoveDepartment;
 let consumableMoveRelatedAsset;
 let consumableMoveNotes;
 let closeConsumableMoveButton;
+let consumableLowStockWarning;
+let consumableLowStockWarningCompact;
 /** True while Item ID is still auto-managed (blank or last filled from category). */
 let consumableItemCodeAuto = true;
 
@@ -1979,6 +2029,7 @@ function bindConsumableElements() {
   consumableMoveModal = document.querySelector("#consumableMoveModal");
   consumableMoveForm = document.querySelector("#consumableMoveForm");
   consumableMoveItemId = document.querySelector("#consumableMoveItemId");
+  consumableMoveEditId = document.querySelector("#consumableMoveEditId");
   consumableMoveType = document.querySelector("#consumableMoveType");
   consumableMoveDate = document.querySelector("#consumableMoveDate");
   consumableMoveQty = document.querySelector("#consumableMoveQty");
@@ -1987,6 +2038,8 @@ function bindConsumableElements() {
   consumableMoveRelatedAsset = document.querySelector("#consumableMoveRelatedAsset");
   consumableMoveNotes = document.querySelector("#consumableMoveNotes");
   closeConsumableMoveButton = document.querySelector("#closeConsumableMoveButton");
+  consumableLowStockWarning = document.querySelector("#consumableLowStockWarning");
+  consumableLowStockWarningCompact = document.querySelector("#consumableLowStockWarningCompact");
 }
 
 function formatConsumableNumber(value, digits = 1) {
@@ -2093,20 +2146,82 @@ function updateConsumableLowStockBadge(items) {
   consumableLowStockBadge.textContent = `${low} low stock`;
 }
 
+function updateGlobalConsumableLowStockWarning(items = null) {
+  const buttons = [consumableLowStockWarning, consumableLowStockWarningCompact].filter(Boolean);
+  if (!buttons.length) {
+    consumableLowStockWarning = document.querySelector("#consumableLowStockWarning");
+    consumableLowStockWarningCompact = document.querySelector("#consumableLowStockWarningCompact");
+  }
+  const targets = [consumableLowStockWarning, consumableLowStockWarningCompact].filter(Boolean);
+  if (!targets.length) return;
+
+  if (!canViewConsumables()) {
+    targets.forEach((el) => {
+      el.hidden = true;
+      el.textContent = "";
+      el.removeAttribute("title");
+    });
+    return;
+  }
+
+  const lowItems = Consumables.lowStockItems(items);
+  if (!lowItems.length) {
+    targets.forEach((el) => {
+      el.hidden = true;
+      el.textContent = "";
+      el.removeAttribute("title");
+    });
+    return;
+  }
+
+  const names = lowItems
+    .slice(0, 3)
+    .map((item) => item.itemCode || item.name || "Item")
+    .join(", ");
+  const more = lowItems.length > 3 ? ` +${lowItems.length - 3} more` : "";
+  const label = lowItems.length === 1
+    ? `Low stock: ${names}`
+    : `Low stock: ${lowItems.length} items (${names}${more})`;
+  const title = lowItems
+    .map((item) => `${item.itemCode || "—"} ${item.name || ""} (${item.currentStock}/${item.reorderLevel})`)
+    .join(" · ");
+
+  targets.forEach((el) => {
+    el.hidden = false;
+    el.textContent = label;
+    el.title = title;
+  });
+}
+
+function openConsumablesLowStockFromWarning() {
+  if (!canViewConsumables()) return;
+  if (typeof setActiveTab === "function") {
+    setActiveTab("consumables");
+  } else {
+    document.querySelector('.tab-button[data-tab="consumables"]')?.click();
+  }
+  if (consumableStockFilter) {
+    consumableStockFilter.value = "low";
+  }
+  renderConsumables();
+}
+
 function renderConsumables() {
   if (!consumableRows) return;
 
-  if (!canViewAssets()) {
+  if (!canViewConsumables()) {
     consumableRows.innerHTML = '<tr class="empty-row"><td colspan="10">You do not have permission to view consumables.</td></tr>';
+    updateGlobalConsumableLowStockWarning([]);
     return;
   }
 
   const allItems = Consumables.read().map((item) => Consumables.withBalances(item));
   populateConsumableIssuerFilter();
   updateConsumableLowStockBadge(allItems);
+  updateGlobalConsumableLowStockWarning(allItems);
 
   const items = applyConsumableFilters(allItems);
-  const manage = canManageAssets();
+  const manage = canManageConsumables();
   const readonlyNote = document.querySelector("#consumablesReadonlyNote");
   if (readonlyNote) readonlyNote.hidden = manage;
 
@@ -2176,13 +2291,13 @@ function applyAutoConsumableItemCode() {
 }
 
 function openConsumableForm(itemId = "") {
-  if (!canManageAssets()) {
+  if (!canManageConsumables()) {
     alert("You do not have permission to manage consumables.");
     return;
   }
 
   const existing = itemId
-    ? Consumables.read().find((entry) => entry.id === itemId)
+    ? Consumables.withBalances(Consumables.read().find((entry) => entry.id === itemId) || null)
     : null;
 
   if (consumableEditId) consumableEditId.value = existing?.id || "";
@@ -2196,13 +2311,13 @@ function openConsumableForm(itemId = "") {
   if (consumableUnit) consumableUnit.value = existing?.unit || "pcs";
   if (consumableReorderLevel) consumableReorderLevel.value = existing ? existing.reorderLevel : 0;
   if (consumableOpeningStock) {
-    consumableOpeningStock.value = existing ? existing.currentStock : 0;
+    consumableOpeningStock.value = existing ? (Number(existing.openingStock) || 0) : 0;
     consumableOpeningStock.disabled = Boolean(existing && (existing.movements || []).length);
   }
   if (consumableOpeningStockHint) {
     consumableOpeningStockHint.textContent = existing && (existing.movements || []).length
-      ? "Stock is driven by the movement log. Use Stock to receive/issue/adjust."
-      : "Used as starting stock for new items. Edits do not wipe movement history.";
+      ? "Opening stock is locked after movements. Current stock = opening + receives − issues ± adjusts."
+      : "Used as starting stock for new items. Current stock = opening + movement history.";
   }
   if (consumableVendor) consumableVendor.value = existing?.vendor || "";
   if (consumableNotes) consumableNotes.value = existing?.notes || "";
@@ -2217,12 +2332,12 @@ function closeConsumableForm() {
 
 async function saveConsumableFromForm(event) {
   event.preventDefault();
-  if (!canManageAssets()) return;
+  if (!canManageConsumables()) return;
 
   const existingId = consumableEditId?.value || "";
   const items = Consumables.read();
   const index = items.findIndex((entry) => entry.id === existingId);
-  const existing = index >= 0 ? items[index] : null;
+  const existing = index >= 0 ? Consumables.withBalances(items[index]) : null;
 
   const category = String(consumableCategory?.value || "").trim();
   const name = String(consumableName?.value || "").trim();
@@ -2233,6 +2348,9 @@ async function saveConsumableFromForm(event) {
   }
 
   const openingInput = Number(consumableOpeningStock?.value);
+  const openingStock = existing && (existing.movements || []).length
+    ? (Number(existing.openingStock) || 0)
+    : (Number.isFinite(openingInput) ? Math.max(0, openingInput) : 0);
   const typedCode = String(consumableItemCode?.value || "").trim();
   let item = {
     id: existing?.id || Consumables.createId(),
@@ -2241,23 +2359,23 @@ async function saveConsumableFromForm(event) {
     category,
     unit,
     reorderLevel: Math.max(0, Number(consumableReorderLevel?.value) || 0),
-    currentStock: existing
-      ? ((existing.movements || []).length ? existing.currentStock : (Number.isFinite(openingInput) ? openingInput : 0))
-      : (Number.isFinite(openingInput) ? openingInput : 0),
+    openingStock,
+    currentStock: openingStock,
     vendor: String(consumableVendor?.value || "").trim(),
     notes: String(consumableNotes?.value || "").trim(),
     movements: existing?.movements || []
   };
 
-  // New item with opening stock > 0: seed an Adjust movement for history.
-  if (!existing && item.currentStock > 0 && !(item.movements || []).length) {
+  // New item with opening stock > 0: seed an Adjust movement for history (opening stays 0).
+  if (!existing && openingStock > 0 && !(item.movements || []).length) {
+    item.openingStock = 0;
     item.movements = [Consumables.normalizeMovement({
       date: new Date().toISOString().slice(0, 10),
       type: "Adjust",
-      quantity: item.currentStock,
+      quantity: openingStock,
       issuedBy: currentPortalUserName() || "System",
       notes: "Opening stock",
-      balanceAfter: item.currentStock
+      balanceAfter: openingStock
     })];
   }
 
@@ -2272,7 +2390,7 @@ async function saveConsumableFromForm(event) {
 }
 
 async function deleteConsumable(itemId) {
-  if (!canManageAssets()) return;
+  if (!canManageConsumables()) return;
   if (!confirm("Delete this consumable and its movement history?")) return;
   const remaining = Consumables.read().filter((item) => item.id !== itemId);
   await Consumables.write(remaining);
@@ -2290,7 +2408,8 @@ function openConsumableDetail(itemId) {
     consumableDetailTitle.textContent = `${item.itemCode || "Item"} — ${item.name}`;
   }
 
-  const manage = canManageAssets();
+  const manage = canManageConsumables();
+  const editHistory = canEditConsumableHistory();
   const avg = Consumables.averageMonthlyIssue(item);
   const cover = Consumables.daysOfCover(item);
   const history = filterConsumableMovements(item.movements)
@@ -2324,6 +2443,7 @@ function openConsumableDetail(itemId) {
         ? `<div class="table-wrap consumable-history-wrap"><table class="asset-table consumable-history-table">
             <thead><tr>
               <th>Date</th><th>Type</th><th>Qty</th><th>Balance</th><th>Who</th><th>Dept / recipient</th><th>Asset</th><th>Notes</th>
+              ${editHistory ? "<th>Actions</th>" : ""}
             </tr></thead>
             <tbody>${history.map((move) => `
               <tr>
@@ -2335,6 +2455,10 @@ function openConsumableDetail(itemId) {
                 <td>${escapeHtml(move.department || "—")}</td>
                 <td>${escapeHtml(move.relatedAsset || "—")}</td>
                 <td>${escapeHtml(move.notes || "—")}</td>
+                ${editHistory ? `<td class="asset-actions">
+                  <button class="text-button consumable-history-edit" type="button" data-move-id="${escapeHtml(move.id)}">Edit</button>
+                  <button class="text-button consumable-history-delete" type="button" data-move-id="${escapeHtml(move.id)}">Delete</button>
+                </td>` : ""}
               </tr>`).join("")}</tbody>
           </table></div>`
         : '<p class="muted-text">No movements in the selected date / issuer filters.</p>'}
@@ -2350,6 +2474,12 @@ function openConsumableDetail(itemId) {
   consumableDetailBody.querySelector("#consumableDetailMoveButton")?.addEventListener("click", () => openConsumableMoveModal(item.id));
   consumableDetailBody.querySelector("#consumableDetailEditButton")?.addEventListener("click", () => openConsumableForm(item.id));
   consumableDetailBody.querySelector("#consumableDetailDeleteButton")?.addEventListener("click", () => deleteConsumable(item.id));
+  consumableDetailBody.querySelectorAll(".consumable-history-edit").forEach((button) => {
+    button.addEventListener("click", () => openConsumableMoveModal(item.id, button.dataset.moveId));
+  });
+  consumableDetailBody.querySelectorAll(".consumable-history-delete").forEach((button) => {
+    button.addEventListener("click", () => deleteConsumableMovement(item.id, button.dataset.moveId));
+  });
 }
 
 function closeConsumableDetail() {
@@ -2375,31 +2505,83 @@ function fillRelatedAssetOptions() {
   }
 }
 
-function openConsumableMoveModal(itemId) {
-  if (!canManageAssets()) return;
-  const item = Consumables.read().find((entry) => entry.id === itemId);
+function openConsumableMoveModal(itemId, moveId = "") {
+  const editing = Boolean(String(moveId || "").trim());
+  if (editing ? !canEditConsumableHistory() : !canManageConsumables()) {
+    alert(editing
+      ? "You do not have permission to edit consumable history."
+      : "You do not have permission to record stock movements.");
+    return;
+  }
+
+  const item = Consumables.withBalances(Consumables.read().find((entry) => entry.id === itemId) || null);
   if (!item) return;
 
+  const existingMove = editing
+    ? (item.movements || []).find((move) => move.id === moveId)
+    : null;
+  if (editing && !existingMove) {
+    alert("That movement could not be found.");
+    return;
+  }
+
   if (consumableMoveItemId) consumableMoveItemId.value = item.id;
-  if (consumableMoveType) consumableMoveType.value = "Issue";
-  if (consumableMoveDate) consumableMoveDate.value = new Date().toISOString().slice(0, 10);
-  if (consumableMoveQty) consumableMoveQty.value = "1";
-  populateConsumableMoveIssuedBy(currentPortalUserName());
-  if (consumableMoveDepartment) consumableMoveDepartment.value = "";
-  if (consumableMoveNotes) consumableMoveNotes.value = "";
+  if (consumableMoveEditId) consumableMoveEditId.value = existingMove?.id || "";
+  if (consumableMoveType) consumableMoveType.value = existingMove?.type || "Receive";
+  if (consumableMoveDate) {
+    consumableMoveDate.value = existingMove?.date || new Date().toISOString().slice(0, 10);
+  }
+  if (consumableMoveQty) {
+    consumableMoveQty.value = existingMove
+      ? String(existingMove.quantity)
+      : "1";
+  }
+  populateConsumableMoveIssuedBy(existingMove?.issuedBy || currentPortalUserName());
+  if (consumableMoveDepartment) consumableMoveDepartment.value = existingMove?.department || "";
+  if (consumableMoveNotes) consumableMoveNotes.value = existingMove?.notes || "";
   fillRelatedAssetOptions();
+  if (consumableMoveRelatedAsset) {
+    consumableMoveRelatedAsset.value = existingMove?.relatedAsset || "";
+  }
+  const title = document.querySelector("#consumableMoveTitle");
+  if (title) title.textContent = existingMove ? "Edit stock movement" : "Receive / Issue / Adjust";
   if (consumableMoveModal) consumableMoveModal.hidden = false;
 }
 
 function closeConsumableMoveModal() {
   if (consumableMoveModal) consumableMoveModal.hidden = true;
+  if (consumableMoveEditId) consumableMoveEditId.value = "";
+  const title = document.querySelector("#consumableMoveTitle");
+  if (title) title.textContent = "Receive / Issue / Adjust";
+}
+
+async function deleteConsumableMovement(itemId, moveId) {
+  if (!canEditConsumableHistory()) {
+    alert("You do not have permission to edit consumable history.");
+    return;
+  }
+  if (!confirm("Delete this stock movement? Balances and current stock will be recalculated.")) return;
+
+  const items = Consumables.read();
+  const index = items.findIndex((entry) => entry.id === itemId);
+  if (index < 0) return;
+
+  const item = Consumables.withBalances(items[index]);
+  item.movements = (item.movements || []).filter((move) => move.id !== moveId);
+  items[index] = Consumables.withBalances(item);
+  await Consumables.write(items);
+  renderConsumables();
+  openConsumableDetail(itemId);
 }
 
 async function saveConsumableMoveFromForm(event) {
   event.preventDefault();
-  if (!canManageAssets()) return;
 
   const itemId = consumableMoveItemId?.value;
+  const editMoveId = String(consumableMoveEditId?.value || "").trim();
+  const editing = Boolean(editMoveId);
+  if (editing ? !canEditConsumableHistory() : !canManageConsumables()) return;
+
   const items = Consumables.read();
   const index = items.findIndex((entry) => entry.id === itemId);
   if (index < 0) return;
@@ -2419,14 +2601,18 @@ async function saveConsumableMoveFromForm(event) {
   }
 
   const item = Consumables.withBalances(items[index]);
-  const delta = Consumables.signedDelta(type, quantity);
-  const nextStock = (Number(item.currentStock) || 0) + delta;
-  if (nextStock < 0) {
-    alert(`Insufficient stock. Current: ${item.currentStock} ${item.unit}.`);
+  const previousMovements = [...(item.movements || [])];
+  const existingMove = editing
+    ? previousMovements.find((move) => move.id === editMoveId)
+    : null;
+  if (editing && !existingMove) {
+    alert("That movement could not be found.");
     return;
   }
 
   const movement = Consumables.normalizeMovement({
+    id: existingMove?.id,
+    createdAt: existingMove?.createdAt,
     date,
     type,
     quantity: type === "Adjust" ? quantity : Math.abs(quantity),
@@ -2436,8 +2622,17 @@ async function saveConsumableMoveFromForm(event) {
     notes: String(consumableMoveNotes?.value || "").trim()
   });
 
-  item.movements = [...(item.movements || []), movement];
-  items[index] = Consumables.withBalances(item);
+  const nextMovements = editing
+    ? previousMovements.map((move) => (move.id === editMoveId ? movement : move))
+    : [...previousMovements, movement];
+
+  const trial = Consumables.withBalances({ ...item, movements: nextMovements });
+  if ((Number(trial.currentStock) || 0) < 0) {
+    alert(`Insufficient stock. Resulting balance would be ${trial.currentStock} ${item.unit}.`);
+    return;
+  }
+
+  items[index] = trial;
   await Consumables.write(items);
   closeConsumableMoveModal();
   renderConsumables();
@@ -2445,7 +2640,7 @@ async function saveConsumableMoveFromForm(event) {
 }
 
 async function refreshConsumablesFromSheet() {
-  if (!canViewAssets()) return;
+  if (!canViewConsumables()) return;
   try {
     await Consumables.loadFromSheet();
     renderConsumables();
@@ -2456,7 +2651,7 @@ async function refreshConsumablesFromSheet() {
 }
 
 function exportConsumablesCsv() {
-  if (!canManageAssets()) {
+  if (!canManageConsumables()) {
     alert("You do not have permission to export consumables.");
     return;
   }
@@ -2545,8 +2740,14 @@ function initConsumablesModule() {
       if (openId) openConsumableDetail(openId);
     }));
 
+  consumableLowStockWarning?.addEventListener("click", openConsumablesLowStockFromWarning);
+  consumableLowStockWarningCompact?.addEventListener("click", openConsumablesLowStockFromWarning);
+
+  // Persist recalculated balances for any legacy rows left at stock 0 after Receive.
+  const repaired = Consumables.save(Consumables.read());
   renderConsumables();
-  if (Auth.SHEET_WEB_APP_URL && canViewAssets()) {
+  updateGlobalConsumableLowStockWarning(repaired);
+  if (Auth.SHEET_WEB_APP_URL && canViewConsumables()) {
     refreshConsumablesFromSheet();
   }
 }
