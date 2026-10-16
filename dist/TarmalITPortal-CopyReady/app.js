@@ -146,7 +146,8 @@ const exitPresentModeButton = document.querySelector("#exitPresentModeButton");
 const presentationHero = document.querySelector("#presentationHero");
 const presentationBoard = document.querySelector(".presentation-board");
 const togglePresentationHeroButton = document.querySelector("#togglePresentationHeroButton");
-const presentationTypeFilter = document.querySelector("#presentationTypeFilter");
+const presentationTypeFilterPanel = document.querySelector("#presentationTypeFilterPanel");
+const presentationTypeFilterTrigger = document.querySelector("#presentationTypeFilterTrigger");
 const presentationOwnerFilter = document.querySelector("#presentationOwnerFilter");
 const presentationPriorityFilter = document.querySelector("#presentationPriorityFilter");
 const presentationSearchFilter = document.querySelector("#presentationSearchFilter");
@@ -244,7 +245,7 @@ const TOPBAR_COLLAPSED_KEY = "tarmal-topbar-collapsed";
 const PERFORMANCE_FILTERS_COLLAPSED_KEY = "tarmal-performance-filters-collapsed";
 const TOOLBAR_COLLAPSED_PREFIX = "tarmal-toolbar-";
 const PRESENTATION_HERO_COLLAPSED_KEY = "tarmal-presentation-hero-collapsed";
-let selectedPresentationType = "all";
+let selectedPresentationTypes = [];
 let selectedPresentationOwner = "all";
 let selectedPresentationPriority = "all";
 let selectedPresentationPeriod = "all";
@@ -296,7 +297,21 @@ const projectMultiFilters = [
   { panel: projectPriorityFilterPanel, trigger: projectPriorityFilterTrigger, defaultLabel: "All priorities", getValues: (ticket) => ticket.Priority, labelFormatter: formatPriorityLabel }
 ];
 
-const allMultiFilters = () => [...ticketMultiFilters, ...projectMultiFilters].filter((filter) => filter.panel && filter.trigger);
+const presentationMultiFilters = [
+  {
+    panel: presentationTypeFilterPanel,
+    trigger: presentationTypeFilterTrigger,
+    defaultLabel: "All types",
+    staticOptions: ["SAP", "Infra", "MOM"],
+    onChange: () => {
+      selectedPresentationTypes = getActivePresentationTypeFilters();
+      schedulePresentationViewRender();
+    }
+  }
+];
+
+const allMultiFilters = () => [...ticketMultiFilters, ...projectMultiFilters, ...presentationMultiFilters]
+  .filter((filter) => filter.panel && filter.trigger);
 const userForm = document.querySelector("#userForm");
 const rolePreset = document.querySelector("#rolePreset");
 const rightsCheckboxes = document.querySelector("#rightsCheckboxes");
@@ -3653,7 +3668,7 @@ function isProjectTypeTicket(ticket) {
   return isExactSapType(ticket?.Type) || isExactInfraType(ticket?.Type) || isExactMomType(ticket?.Type);
 }
 
-/** Normalize Presentation type dropdown → "all" | "SAP" | "Infra" | "MOM". */
+/** Normalize Presentation type value → "SAP" | "Infra" | "MOM" | "all". */
 function normalizePresentationTypeFilter(value) {
   const raw = cleanText(value).toLowerCase();
   if (raw === "sap") return "SAP";
@@ -3662,19 +3677,32 @@ function normalizePresentationTypeFilter(value) {
   return "all";
 }
 
-function getActivePresentationTypeFilter() {
-  // Prefer live DOM so browser form restore / programmatic value changes stay in sync.
-  return normalizePresentationTypeFilter(
-    presentationTypeFilter?.value ?? selectedPresentationType ?? "all"
-  );
+/** Active Presentation types from the multi-select; empty = all types. */
+function getActivePresentationTypeFilters() {
+  if (presentationTypeFilterPanel) {
+    return getMultiFilterValues(presentationTypeFilterPanel)
+      .map((value) => normalizePresentationTypeFilter(value))
+      .filter((value) => value !== "all");
+  }
+  return Array.isArray(selectedPresentationTypes) ? selectedPresentationTypes.slice() : [];
 }
 
-function ticketMatchesPresentationType(ticket, typeFilter = getActivePresentationTypeFilter()) {
-  const selected = normalizePresentationTypeFilter(typeFilter);
-  if (selected === "SAP") return isExactSapType(ticket?.Type);
-  if (selected === "Infra") return isExactInfraType(ticket?.Type);
-  if (selected === "MOM") return isExactMomType(ticket?.Type);
-  return true;
+function ticketMatchesPresentationType(ticket, typeFilters = getActivePresentationTypeFilters()) {
+  const selected = Array.isArray(typeFilters)
+    ? typeFilters.map((value) => normalizePresentationTypeFilter(value)).filter((value) => value !== "all")
+    : (() => {
+        const single = normalizePresentationTypeFilter(typeFilters);
+        return single === "all" ? [] : [single];
+      })();
+  // None selected (or "All types") → show every presentation type.
+  if (!selected.length) return true;
+  // OR: match if the ticket is any of the selected types.
+  return selected.some((type) => {
+    if (type === "SAP") return isExactSapType(ticket?.Type);
+    if (type === "Infra") return isExactInfraType(ticket?.Type);
+    if (type === "MOM") return isExactMomType(ticket?.Type);
+    return false;
+  });
 }
 
 function normalizePresentationPriorityFilter(value) {
@@ -3686,7 +3714,7 @@ function normalizePresentationPriorityFilter(value) {
 }
 
 function syncPresentationFiltersFromDom() {
-  selectedPresentationType = getActivePresentationTypeFilter();
+  selectedPresentationTypes = getActivePresentationTypeFilters();
   if (presentationOwnerFilter) {
     selectedPresentationOwner = cleanText(presentationOwnerFilter.value) || "all";
   }
@@ -4386,7 +4414,7 @@ function closeMultiFilterPanels(exceptPanel = null) {
   }
 }
 
-function populateMultiFilter(panel, trigger, values, defaultLabel, labelFormatter = null, staticOptions = null) {
+function populateMultiFilter(panel, trigger, values, defaultLabel, labelFormatter = null, staticOptions = null, onChange = null) {
   const selected = new Set(getMultiFilterValues(panel));
   const sortedOptions = staticOptions?.length
     ? staticOptions
@@ -4404,13 +4432,29 @@ function populateMultiFilter(panel, trigger, values, defaultLabel, labelFormatte
   panel.querySelectorAll("input[type='checkbox']").forEach((input) => {
     input.addEventListener("change", () => {
       updateMultiFilterLabel(trigger, panel, defaultLabel, labelFormatter);
-      renderTickets();
+      if (typeof onChange === "function") onChange();
+      else renderTickets();
     });
   });
 
   updateMultiFilterLabel(trigger, panel, defaultLabel, labelFormatter);
   panel.hidden = true;
   trigger.setAttribute("aria-expanded", "false");
+}
+
+function populatePresentationTypeFilter() {
+  presentationMultiFilters.forEach((filter) => {
+    if (!filter.panel || !filter.trigger) return;
+    populateMultiFilter(
+      filter.panel,
+      filter.trigger,
+      [],
+      filter.defaultLabel,
+      filter.labelFormatter || null,
+      filter.staticOptions || null,
+      filter.onChange || null
+    );
+  });
 }
 
 function populateFilterOptions(tickets) {
@@ -8336,11 +8380,11 @@ function getPresentationTickets(tickets = getValidTickets()) {
   // Exact Type SAP / Infra / MOM only (never Daily variants); top-level projects.
   // Type filter is applied here once; every Kanban column renders from this list.
   syncPresentationFiltersFromDom();
-  const typeFilter = selectedPresentationType;
+  const typeFilters = selectedPresentationTypes;
   const searchQuery = getPresentationSearchQuery();
   return tickets
     .filter((ticket) => isProjectTypeTicket(ticket) && !isSubtaskTicket(ticket))
-    .filter((ticket) => ticketMatchesPresentationType(ticket, typeFilter))
+    .filter((ticket) => ticketMatchesPresentationType(ticket, typeFilters))
     .filter((ticket) => ticketMatchesPresentationOwner(ticket))
     .filter((ticket) => ticketMatchesPresentationPriority(ticket))
     .filter((ticket) => ticketMatchesPresentationPeriod(ticket))
@@ -8680,7 +8724,7 @@ let presentationFilterDebounceTimer = 0;
 
 function computePresentationBoardSignature(shown) {
   let body = [
-    selectedPresentationType,
+    selectedPresentationTypes.join(","),
     selectedPresentationOwner,
     selectedPresentationPriority,
     selectedPresentationPeriod,
@@ -8710,16 +8754,16 @@ function renderPresentationView(tickets = getValidTickets()) {
   if (!presentationDeck) return;
 
   syncPresentationFiltersFromDom();
-  if (presentationTypeFilter && presentationTypeFilter.value !== selectedPresentationType) {
-    // Keep the visible select aligned with the normalized filter ("SAP" / "Infra" / "MOM" / "all").
-    presentationTypeFilter.value = selectedPresentationType;
-  }
   if (presentationPriorityFilter && presentationPriorityFilter.value !== selectedPresentationPriority) {
     presentationPriorityFilter.value = selectedPresentationPriority;
   }
 
   const shown = getPresentationTickets(tickets);
-  const typeLabel = selectedPresentationType === "all" ? "SAP, Infra & MOM" : selectedPresentationType;
+  const typeLabel = !selectedPresentationTypes.length
+    ? "SAP, Infra & MOM"
+    : selectedPresentationTypes.length === 1
+      ? selectedPresentationTypes[0]
+      : selectedPresentationTypes.join(", ");
   const ownerLabel = presentationOwnerLabel();
   const priorityLabel = presentationPriorityLabel();
   const searchQuery = getPresentationSearchQuery();
@@ -8766,7 +8810,7 @@ function renderPresentationView(tickets = getValidTickets()) {
   const grouped = Object.fromEntries(PRESENTATION_KANBAN_COLUMNS.map((column) => [column.id, []]));
   shown.forEach((ticket) => {
     // Defensive: never let a mismatched type into any column.
-    if (!ticketMatchesPresentationType(ticket, selectedPresentationType)) return;
+    if (!ticketMatchesPresentationType(ticket, selectedPresentationTypes)) return;
     const columnId = kanbanColumnId(ticket.Status);
     if (grouped[columnId]) {
       grouped[columnId].push(ticket);
@@ -10369,14 +10413,6 @@ exitPresentModeButton?.addEventListener("click", () => setPresentMode(false));
 document.addEventListener("fullscreenchange", onPresentModeFullscreenChange);
 document.addEventListener("webkitfullscreenchange", onPresentModeFullscreenChange);
 document.addEventListener("MSFullscreenChange", onPresentModeFullscreenChange);
-function onPresentationTypeFilterChange() {
-  selectedPresentationType = normalizePresentationTypeFilter(presentationTypeFilter?.value);
-  if (presentationTypeFilter) presentationTypeFilter.value = selectedPresentationType;
-  schedulePresentationViewRender();
-}
-presentationTypeFilter?.addEventListener("change", onPresentationTypeFilterChange);
-presentationTypeFilter?.addEventListener("input", onPresentationTypeFilterChange);
-
 presentationOwnerFilter?.addEventListener("change", () => {
   selectedPresentationOwner = cleanText(presentationOwnerFilter.value) || "all";
   schedulePresentationViewRender();
@@ -10494,6 +10530,7 @@ projectSearchFilter?.addEventListener("input", () => scheduleRenderTickets());
 projectSortFilter?.addEventListener("change", () => scheduleRenderTickets({ immediate: true }));
 
 initMultiFilterControls();
+populatePresentationTypeFilter();
 bindRecurrenceFormControls("ticketForm");
 bindRecurrenceFormControls("ticketEdit");
 setTicketSortFilter(DEFAULT_TICKET_SORT);

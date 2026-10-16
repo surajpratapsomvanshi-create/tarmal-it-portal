@@ -8727,6 +8727,38 @@ body.view-focus .dashboard-layout {
   max-width: 6.5rem;
 }
 
+.presentation-filter-field--type .multi-select {
+  min-width: 0;
+}
+
+.presentation-filter-field--type .multi-select-trigger {
+  width: auto;
+  min-width: 6.5rem;
+  max-width: 10rem;
+  height: 24px;
+  min-height: 24px;
+  padding: 0 1.4rem 0 0.35rem;
+  border-radius: 5px;
+  border: 1px solid rgba(226, 232, 240, 0.22);
+  background: rgba(248, 250, 252, 0.08);
+  color: #f8fafc;
+  font-size: 0.72rem;
+  font-weight: 600;
+  line-height: 22px;
+}
+
+.presentation-filter-field--type .multi-select-trigger::after {
+  right: 8px;
+  width: 6px;
+  height: 6px;
+  border-right-color: #94a3b8;
+  border-bottom-color: #94a3b8;
+}
+
+.presentation-filter-field--type .multi-select-panel {
+  z-index: 50;
+}
+
 .presentation-filter-field--owner select {
   max-width: 7.25rem;
 }

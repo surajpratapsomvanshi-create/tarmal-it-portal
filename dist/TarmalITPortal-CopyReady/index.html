@@ -6,11 +6,11 @@
     <title>Tarmal IT Portal</title>
     <link rel="icon" href="./assets/tarmal-mark.png?v=1" type="image/png">
     <link rel="apple-touch-icon" href="./assets/apple-touch-icon.png?v=1">
-    <link rel="stylesheet" href="./styles.css?v=204">
+    <link rel="stylesheet" href="./styles.css?v=205">
     <!-- auth stays blocking so requireLogin runs before app chrome paints -->
     <script src="./auth.js?v=27"></script>
     <!-- Defer main bundles so HTML can parse while ~210KB+ app.js downloads -->
-    <script src="./app.js?v=227" defer></script>
+    <script src="./app.js?v=228" defer></script>
     <script src="./assets.js?v=13" defer></script>
     <script src="./documents.js?v=12" defer></script>
     <script src="./procurement.js?v=6" defer></script>
@@ -590,14 +590,12 @@
             <div class="presentation-hero-collapsible" id="presentationHeroBody">
               <h2 class="presentation-hero-title">Project Presentation</h2>
               <div class="presentation-filters" id="presentationFilters" role="group" aria-label="Presentation filters">
-                <label class="presentation-filter-field presentation-filter-field--type">
-                  <select id="presentationTypeFilter" aria-label="Type">
-                    <option value="all">All types</option>
-                    <option value="SAP">SAP</option>
-                    <option value="Infra">Infra</option>
-                    <option value="MOM">MOM</option>
-                  </select>
-                </label>
+                <div class="presentation-filter-field presentation-filter-field--type">
+                  <div class="multi-select" data-default-label="All types">
+                    <button class="multi-select-trigger" id="presentationTypeFilterTrigger" type="button" aria-expanded="false" aria-label="Type">All types</button>
+                    <div class="multi-select-panel" id="presentationTypeFilterPanel" hidden></div>
+                  </div>
+                </div>
                 <label class="presentation-filter-field presentation-filter-field--owner">
                   <select id="presentationOwnerFilter" aria-label="Original Owner">
                     <option value="all">All owners</option>
