@@ -1662,13 +1662,14 @@ function initAssetsModule() {
 
 const Consumables = {
   LOCAL_KEY: "tarmal-it-consumables",
-  CATEGORIES: ["Cartridge", "Paper", "Cable", "Other"],
+  CATEGORIES: ["Cartridge", "Paper", "Cable", "Barcode ribbon", "Other"],
   MOVE_TYPES: ["Receive", "Issue", "Adjust"],
-  // Category → Item ID prefix (seq CRT-001…): Cartridge→CRT, Paper→PPR, Cable→CBL, Other→OTH.
+  // Category → Item ID prefix (seq CRT-001…): Cartridge→CRT, Paper→PPR, Cable→CBL, Barcode ribbon→BRB, Other→OTH.
   CATEGORY_PREFIXES: {
     Cartridge: "CRT",
     Paper: "PPR",
     Cable: "CBL",
+    "Barcode ribbon": "BRB",
     Other: "OTH"
   },
 
