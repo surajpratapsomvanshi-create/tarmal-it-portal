@@ -4761,11 +4761,32 @@ tbody tr.milestone-today:not(.status-blocked):hover {
   /* Sum of the fixed columns below, plus remarks. A percentage budget that
      already filled the table collapsed the outside-hours Completed column
      to 0, and overflow:visible painted its stamp across Type and Remarks. */
-  min-width: 86rem;
+  min-width: 88.75rem;
 }
 
 #ticketTable.ticket-table-show-completed {
-  min-width: 98rem;
+  min-width: 100.75rem;
+}
+
+#ticketTable .ticket-col-sno,
+#projectTable .ticket-col-sno {
+  width: 2.75rem;
+  min-width: 2.75rem;
+  max-width: 2.75rem;
+  padding-left: 4px;
+  padding-right: 4px;
+  text-align: center;
+  vertical-align: middle;
+  white-space: nowrap;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+#ticketTable tbody tr.milestone-today:not(.status-blocked) .ticket-col-sno,
+#projectTable tbody tr.milestone-today:not(.status-blocked) .ticket-col-sno {
+  color: rgba(255, 255, 255, 0.85);
 }
 
 #ticketTable .task-col,
@@ -8200,6 +8221,11 @@ body.view-focus .dashboard-layout {
   #ticketTable .subtask-row .task-col,
   #projectTable .subtask-row .task-col {
     padding-left: 8px !important;
+  }
+
+  #ticketTable .ticket-col-sno,
+  #projectTable .ticket-col-sno {
+    display: none;
   }
 }
 

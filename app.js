@@ -8923,7 +8923,7 @@ function renderTicketTable(tickets, options = {}) {
     ticketCompletedAtHeader.hidden = !showCompletedAt;
   }
 
-  const columnCount = (showActions ? 10 : 9) + (showCompletedAt ? 1 : 0);
+  const columnCount = (showActions ? 11 : 10) + (showCompletedAt ? 1 : 0);
   const pageLimit = Number(options.pageLimit) > 0 ? Number(options.pageLimit) : 0;
   const loadMoreKind = options.loadMoreKind || "";
 
@@ -8970,10 +8970,19 @@ function renderTicketTable(tickets, options = {}) {
     : displayTickets;
   const remaining = Math.max(0, displayTickets.length - visibleTickets.length);
 
+  // Serial numbers are display positions. Sub-tasks shown under their parent stay
+  // unnumbered; a sub-task whose parent is filtered out stands alone and gets one.
+  const shownParentRows = new Set(
+    visibleTickets.filter((ticket) => !isSubtaskTicket(ticket)).map((ticket) => Number(ticket.sheetRow))
+  );
+  let serialNo = 0;
+
   const rowsHtml = visibleTickets
     .map((ticket) => {
       const parent = getParentTicket(ticket);
       const subtask = isSubtaskTicket(ticket);
+      const nestedSubtask = subtask && shownParentRows.has(Number(ticket.parentSheetRow));
+      const serialLabel = nestedSubtask ? "" : String(++serialNo);
       const parentRow = Number(ticket.sheetRow);
       const childCount = childCounts.get(parentRow) || 0;
       const hasChildren = !subtask && childCount > 0;
@@ -9035,6 +9044,7 @@ function renderTicketTable(tickets, options = {}) {
 
       return `
       <tr class="${rowClasses}" ${parentCollapsed ? "hidden" : ""}>
+        <td class="ticket-col-sno">${serialLabel}</td>
         <td class="task-col">${taskCell}</td>
         <td class="ticket-col-compact ticket-col-priority"><span class="priority-pill priority-${normalizePriority(ticket.Priority) === "80" ? "high" : "low"}">${escapeHtml(formatPriorityLabel(ticket.Priority))}</span></td>
         <td class="ticket-col-compact ticket-col-owner">${escapeHtml(ticket.Owner)}</td>
