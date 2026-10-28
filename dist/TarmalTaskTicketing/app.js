@@ -8970,19 +8970,14 @@ function renderTicketTable(tickets, options = {}) {
     : displayTickets;
   const remaining = Math.max(0, displayTickets.length - visibleTickets.length);
 
-  // Serial numbers are display positions. Sub-tasks shown under their parent stay
-  // unnumbered; a sub-task whose parent is filtered out stands alone and gets one.
-  const shownParentRows = new Set(
-    visibleTickets.filter((ticket) => !isSubtaskTicket(ticket)).map((ticket) => Number(ticket.sheetRow))
-  );
+  // Serial numbers are display positions: every shown row (parent, standalone or
+  // sub-task) is numbered; rows hidden by a collapsed parent are skipped.
   let serialNo = 0;
 
   const rowsHtml = visibleTickets
     .map((ticket) => {
       const parent = getParentTicket(ticket);
       const subtask = isSubtaskTicket(ticket);
-      const nestedSubtask = subtask && shownParentRows.has(Number(ticket.parentSheetRow));
-      const serialLabel = nestedSubtask ? "" : String(++serialNo);
       const parentRow = Number(ticket.sheetRow);
       const childCount = childCounts.get(parentRow) || 0;
       const hasChildren = !subtask && childCount > 0;
@@ -8993,6 +8988,7 @@ function renderTicketTable(tickets, options = {}) {
         Number(ticket.parentSheetRow),
         collapsePanel
       );
+      const serialLabel = parentCollapsed ? "" : String(++serialNo);
 
       let toggleTitle = "Hide sub-tasks";
       let toggleAria = `Collapse ${childCount} sub-task${childCount === 1 ? "" : "s"}`;
