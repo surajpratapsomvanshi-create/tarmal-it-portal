@@ -5196,6 +5196,216 @@ body.view-focus #projectTable td.remarks-col {
   position: static;
 }
 
+/* Desktop: Tickets/Projects must fit the board with no horizontal scrollbar,
+   so the table may not carry a rem min-width. The fixed layout sizes columns
+   from the header row only, so widths live on the th cells. Meta columns are
+   sized to their header label (MILESTONE, PRIORITY) or 4 action buttons;
+   Task and Remarks are auto and share the rest. Tablet (<=900px) keeps its
+   scrollable auto layout and phones keep the card layout. */
+@media (min-width: 901px) {
+  .ticket-table-wrap > #ticketTable.ticket-table,
+  .ticket-table-wrap > #projectTable.ticket-table,
+  .ticket-table-wrap > #ticketTable.ticket-table.ticket-table-show-completed {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    table-layout: fixed;
+  }
+
+  .ticket-table-wrap > #ticketTable.ticket-table thead th,
+  .ticket-table-wrap > #projectTable.ticket-table thead th {
+    min-width: 0;
+    max-width: none;
+  }
+
+  .ticket-table-wrap > #ticketTable.ticket-table thead th.task-col,
+  .ticket-table-wrap > #projectTable.ticket-table thead th.task-col,
+  .ticket-table-wrap > #ticketTable.ticket-table thead th.remarks-col,
+  .ticket-table-wrap > #projectTable.ticket-table thead th.remarks-col {
+    width: auto;
+  }
+
+  .ticket-table-wrap > #ticketTable.ticket-table .ticket-col-compact,
+  .ticket-table-wrap > #projectTable.ticket-table .ticket-col-compact,
+  .ticket-table-wrap > #ticketTable.ticket-table .actions-col,
+  .ticket-table-wrap > #projectTable.ticket-table .actions-col {
+    padding-left: 4px;
+    padding-right: 4px;
+  }
+
+  .ticket-table-wrap > #ticketTable.ticket-table .actions-col,
+  .ticket-table-wrap > #projectTable.ticket-table .actions-col {
+    min-width: 0;
+    max-width: none;
+  }
+
+  /* inline-flex ignores text-overflow, so long statuses were hard-cut. */
+  .ticket-table-wrap > #ticketTable.ticket-table .ticket-col-priority .priority-pill,
+  .ticket-table-wrap > #ticketTable.ticket-table .ticket-col-status .status-pill,
+  .ticket-table-wrap > #projectTable.ticket-table .ticket-col-priority .priority-pill,
+  .ticket-table-wrap > #projectTable.ticket-table .ticket-col-status .status-pill {
+    display: inline-block;
+    max-width: 100%;
+    line-height: 18px;
+    vertical-align: middle;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .ticket-table-wrap > #ticketTable.ticket-table thead th.ticket-col-sno,
+  .ticket-table-wrap > #projectTable.ticket-table thead th.ticket-col-sno {
+    width: 2rem;
+  }
+
+  .ticket-table-wrap > #ticketTable.ticket-table thead th.ticket-col-priority,
+  .ticket-table-wrap > #projectTable.ticket-table thead th.ticket-col-priority {
+    width: 4rem;
+  }
+
+  .ticket-table-wrap > #ticketTable.ticket-table thead th.ticket-col-owner,
+  .ticket-table-wrap > #projectTable.ticket-table thead th.ticket-col-owner,
+  .ticket-table-wrap > #ticketTable.ticket-table thead th.ticket-col-raised,
+  .ticket-table-wrap > #projectTable.ticket-table thead th.ticket-col-raised {
+    width: 4.75rem;
+  }
+
+  .ticket-table-wrap > #ticketTable.ticket-table thead th.ticket-col-status,
+  .ticket-table-wrap > #projectTable.ticket-table thead th.ticket-col-status {
+    width: 5.5rem;
+  }
+
+  .ticket-table-wrap > #ticketTable.ticket-table thead th.ticket-col-date,
+  .ticket-table-wrap > #projectTable.ticket-table thead th.ticket-col-date {
+    width: 4.875rem;
+  }
+
+  .ticket-table-wrap > #ticketTable.ticket-table thead th.ticket-col-completed-at {
+    width: 7.25rem;
+  }
+
+  .ticket-table-wrap > #ticketTable.ticket-table thead th.ticket-col-type,
+  .ticket-table-wrap > #projectTable.ticket-table thead th.ticket-col-type {
+    width: 5.5rem;
+  }
+
+  .ticket-table-wrap > #ticketTable.ticket-table thead th.actions-col,
+  .ticket-table-wrap > #projectTable.ticket-table thead th.actions-col {
+    width: 6.75rem;
+  }
+}
+
+/* Narrow desktop (sidebar open at ~1024px leaves ~710px for 11 columns):
+   tighter padding, 12px text, and action buttons in a 2x2 grid. */
+@media (min-width: 901px) and (max-width: 1280px) {
+  .ticket-table-wrap > #ticketTable.ticket-table th,
+  .ticket-table-wrap > #ticketTable.ticket-table td,
+  .ticket-table-wrap > #projectTable.ticket-table th,
+  .ticket-table-wrap > #projectTable.ticket-table td {
+    padding-left: 4px;
+    padding-right: 4px;
+  }
+
+  .ticket-table-wrap > #ticketTable.ticket-table td,
+  .ticket-table-wrap > #projectTable.ticket-table td {
+    font-size: 12px;
+  }
+
+  .ticket-table-wrap > #ticketTable.ticket-table thead th,
+  .ticket-table-wrap > #projectTable.ticket-table thead th {
+    font-size: 10px;
+    letter-spacing: 0.02em;
+  }
+
+  .ticket-table-wrap > #ticketTable.ticket-table thead th.ticket-col-compact,
+  .ticket-table-wrap > #projectTable.ticket-table thead th.ticket-col-compact {
+    white-space: normal;
+    word-break: normal;
+    overflow-wrap: normal;
+    text-overflow: clip;
+    line-height: 1.2;
+  }
+
+  .ticket-table-wrap > #ticketTable.ticket-table thead th.ticket-col-sno,
+  .ticket-table-wrap > #projectTable.ticket-table thead th.ticket-col-sno {
+    width: 1.625rem;
+  }
+
+  /* Remarks is one line with a View popover; a small share leaves Task
+     wide enough to wrap at word boundaries instead of mid-word. */
+  .ticket-table-wrap > #ticketTable.ticket-table thead th.remarks-col,
+  .ticket-table-wrap > #projectTable.ticket-table thead th.remarks-col {
+    width: 9%;
+  }
+
+  .ticket-table-wrap > #ticketTable.ticket-table thead th.ticket-col-priority,
+  .ticket-table-wrap > #projectTable.ticket-table thead th.ticket-col-priority {
+    width: 3.75rem;
+  }
+
+  .ticket-table-wrap > #ticketTable.ticket-table thead th.ticket-col-owner,
+  .ticket-table-wrap > #projectTable.ticket-table thead th.ticket-col-owner,
+  .ticket-table-wrap > #ticketTable.ticket-table thead th.ticket-col-raised,
+  .ticket-table-wrap > #projectTable.ticket-table thead th.ticket-col-raised {
+    width: 3.75rem;
+  }
+
+  .ticket-table-wrap > #ticketTable.ticket-table thead th.ticket-col-status,
+  .ticket-table-wrap > #projectTable.ticket-table thead th.ticket-col-status {
+    width: 4.25rem;
+  }
+
+  .ticket-table-wrap > #ticketTable.ticket-table thead th.ticket-col-date,
+  .ticket-table-wrap > #projectTable.ticket-table thead th.ticket-col-date {
+    width: 4.5rem;
+  }
+
+  .ticket-table-wrap > #ticketTable.ticket-table thead th.ticket-col-type,
+  .ticket-table-wrap > #projectTable.ticket-table thead th.ticket-col-type {
+    width: 3.75rem;
+  }
+
+  .ticket-table-wrap > #ticketTable.ticket-table thead th.actions-col,
+  .ticket-table-wrap > #projectTable.ticket-table thead th.actions-col {
+    width: 3.75rem;
+  }
+
+  /* Outside-hours adds Completed: the stamp wraps to two lines, the meta
+     columns give a little more, and Remarks drops its fixed share so the
+     extra column still fits at 1024px with the sidebar open. */
+  .ticket-table-wrap > #ticketTable.ticket-table.ticket-table-show-completed thead th.remarks-col {
+    width: auto;
+  }
+
+  .ticket-table-wrap > #ticketTable.ticket-table thead th.ticket-col-completed-at {
+    width: 4.5rem;
+  }
+
+  .ticket-table-wrap > #ticketTable.ticket-table .ticket-col-completed-at,
+  .ticket-table-wrap > #ticketTable.ticket-table .ticket-completed-label {
+    white-space: normal;
+    text-overflow: clip;
+  }
+
+  .ticket-table-wrap > #ticketTable.ticket-table.ticket-table-show-completed thead th.ticket-col-owner,
+  .ticket-table-wrap > #ticketTable.ticket-table.ticket-table-show-completed thead th.ticket-col-raised,
+  .ticket-table-wrap > #ticketTable.ticket-table.ticket-table-show-completed thead th.ticket-col-type {
+    width: 3.25rem;
+  }
+
+  .ticket-table-wrap > #ticketTable.ticket-table.ticket-table-show-completed thead th.ticket-col-status {
+    width: 3.75rem;
+  }
+}
+
+/* Below 1024px with the sidebar open the columns cannot all fit, so keep the
+   scrollbar there rather than clip Actions. */
+@media (min-width: 1024px) {
+  .ticket-board .table-wrap.ticket-table-wrap:not(.procurement-table-wrap),
+  body.view-focus .ticket-board .table-wrap.ticket-table-wrap:not(.procurement-table-wrap) {
+    overflow-x: hidden;
+  }
+}
+
 body.view-focus .kanban-columns {
   overflow-x: hidden;
   flex-wrap: wrap;
