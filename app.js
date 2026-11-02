@@ -115,6 +115,8 @@ const ticketPriorityFilterPanel = document.querySelector("#ticketPriorityFilterP
 const ticketPriorityFilterTrigger = document.querySelector("#ticketPriorityFilterTrigger");
 const ticketBhanuFilterPanel = document.querySelector("#ticketBhanuFilterPanel");
 const ticketBhanuFilterTrigger = document.querySelector("#ticketBhanuFilterTrigger");
+const ticketRaisedByFilterPanel = document.querySelector("#ticketRaisedByFilterPanel");
+const ticketRaisedByFilterTrigger = document.querySelector("#ticketRaisedByFilterTrigger");
 const ticketSortFilter = document.querySelector("#ticketSortFilter");
 const ticketCompletedAtHeader = document.querySelector("#ticketCompletedAtHeader");
 const clearTicketFilters = document.querySelector("#clearTicketFilters");
@@ -282,12 +284,28 @@ function getTicketOriginalOwnerValue(ticket) {
   return isTicketOriginalOwnerBhanu(ticket) ? "Bhanu" : "";
 }
 
+function getTicketRaisedByValue(ticket) {
+  return cleanText(ticket?.["Raised By"]);
+}
+
+function uniqueCaseInsensitive(values) {
+  const byKey = new Map();
+  values.forEach((value) => {
+    const text = cleanText(value);
+    if (!text) return;
+    const key = text.toLowerCase();
+    if (!byKey.has(key)) byKey.set(key, text);
+  });
+  return [...byKey.values()];
+}
+
 const ticketMultiFilters = [
   { panel: ticketStatusFilterPanel, trigger: ticketStatusFilterTrigger, defaultLabel: "All statuses", getValues: (ticket) => ticket.Status },
   { panel: ticketOwnerFilterPanel, trigger: ticketOwnerFilterTrigger, defaultLabel: "All owners", getValues: (ticket) => ticket.Owner },
   { panel: ticketTypeFilterPanel, trigger: ticketTypeFilterTrigger, defaultLabel: "All types", getValues: (ticket) => ticket.Type },
   { panel: ticketPriorityFilterPanel, trigger: ticketPriorityFilterTrigger, defaultLabel: "All priorities", getValues: (ticket) => ticket.Priority, labelFormatter: formatPriorityLabel },
-  { panel: ticketBhanuFilterPanel, trigger: ticketBhanuFilterTrigger, defaultLabel: "All original owners", getValues: (ticket) => getTicketOriginalOwnerValue(ticket), staticOptions: ["Bhanu"] }
+  { panel: ticketBhanuFilterPanel, trigger: ticketBhanuFilterTrigger, defaultLabel: "All original owners", getValues: (ticket) => getTicketOriginalOwnerValue(ticket), staticOptions: ["Bhanu"] },
+  { panel: ticketRaisedByFilterPanel, trigger: ticketRaisedByFilterTrigger, defaultLabel: "All raisers", getValues: getTicketRaisedByValue, caseInsensitive: true }
 ];
 
 const projectMultiFilters = [
@@ -1810,6 +1828,7 @@ function getFilterUiSignature() {
     ticketTypeFilterPanel ? getMultiFilterValues(ticketTypeFilterPanel).join(",") : "",
     ticketPriorityFilterPanel ? getMultiFilterValues(ticketPriorityFilterPanel).join(",") : "",
     ticketBhanuFilterPanel ? getMultiFilterValues(ticketBhanuFilterPanel).join(",") : "",
+    ticketRaisedByFilterPanel ? getMultiFilterValues(ticketRaisedByFilterPanel).join(",") : "",
     projectSearchFilter?.value || "",
     projectSortFilter?.value || "",
     projectStatusFilterPanel ? getMultiFilterValues(projectStatusFilterPanel).join(",") : "",
@@ -4464,10 +4483,11 @@ function populatePresentationTypeFilter() {
 function populateFilterOptions(tickets) {
   ticketMultiFilters.forEach((filter) => {
     if (!filter.panel || !filter.trigger) return;
+    const values = tickets.map(filter.getValues);
     populateMultiFilter(
       filter.panel,
       filter.trigger,
-      tickets.map(filter.getValues),
+      filter.caseInsensitive ? uniqueCaseInsensitive(values) : values,
       filter.defaultLabel,
       filter.labelFormatter || null,
       filter.staticOptions || null
@@ -4659,6 +4679,9 @@ function applyTicketFilters(tickets) {
   const typeValues = getMultiFilterValues(ticketTypeFilterPanel);
   const priorityValues = getMultiFilterValues(ticketPriorityFilterPanel);
   const bhanuValues = getMultiFilterValues(ticketBhanuFilterPanel);
+  const raisedByValues = ticketRaisedByFilterPanel
+    ? getMultiFilterValues(ticketRaisedByFilterPanel).map((value) => cleanText(value).toLowerCase())
+    : [];
 
   const outsideHoursOnly = isTicketOutsideHoursFilterOn();
   const filtered = tickets.filter((ticket) => {
@@ -4668,6 +4691,7 @@ function applyTicketFilters(tickets) {
     if (typeValues.length && !typeValues.includes(ticket.Type)) return false;
     if (priorityValues.length && !priorityValues.includes(ticket.Priority)) return false;
     if (bhanuValues.length && !bhanuValues.includes(getTicketOriginalOwnerValue(ticket))) return false;
+    if (raisedByValues.length && !raisedByValues.includes(getTicketRaisedByValue(ticket).toLowerCase())) return false;
     if (!search) return true;
     return ticketSearchHaystack(ticket).includes(search);
   });
