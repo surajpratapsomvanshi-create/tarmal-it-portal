@@ -4477,6 +4477,11 @@ tbody tr.milestone-today:not(.status-blocked):hover {
   white-space: nowrap;
 }
 
+.multi-select-panel.is-align-end {
+  left: auto;
+  right: 0;
+}
+
 .multi-select-option {
   display: flex;
   align-items: center;

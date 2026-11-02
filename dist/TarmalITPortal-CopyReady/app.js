@@ -4776,6 +4776,15 @@ function resetTicketFilters() {
   closeMultiFilterPanels();
 }
 
+function alignMultiFilterPanel(panel) {
+  panel.classList.remove("is-align-end");
+  const panelRect = panel.getBoundingClientRect();
+  const viewportWidth = document.documentElement.clientWidth;
+  if (panelRect.right <= viewportWidth - 8) return;
+  const anchorRect = panel.parentElement.getBoundingClientRect();
+  if (anchorRect.right - panelRect.width >= 8) panel.classList.add("is-align-end");
+}
+
 function initMultiFilterControls() {
   allMultiFilters().forEach(({ panel, trigger }) => {
     trigger.addEventListener("click", (event) => {
@@ -4783,6 +4792,7 @@ function initMultiFilterControls() {
       const willOpen = panel.hidden;
       closeMultiFilterPanels(willOpen ? panel : null);
       panel.hidden = !willOpen;
+      if (willOpen) alignMultiFilterPanel(panel);
       trigger.setAttribute("aria-expanded", willOpen ? "true" : "false");
     });
 
