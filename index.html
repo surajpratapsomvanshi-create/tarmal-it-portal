@@ -6,11 +6,11 @@
     <title>Tarmal IT Portal</title>
     <link rel="icon" href="./assets/tarmal-mark.png?v=1" type="image/png">
     <link rel="apple-touch-icon" href="./assets/apple-touch-icon.png?v=1">
-    <link rel="stylesheet" href="./styles.css?v=213">
+    <link rel="stylesheet" href="./styles.css?v=214">
     <!-- auth stays blocking so requireLogin runs before app chrome paints -->
     <script src="./auth.js?v=28"></script>
     <!-- Defer main bundles so HTML can parse while ~210KB+ app.js downloads -->
-    <script src="./app.js?v=234" defer></script>
+    <script src="./app.js?v=235" defer></script>
     <script src="./assets.js?v=21" defer></script>
     <script src="./documents.js?v=12" defer></script>
     <script src="./procurement.js?v=6" defer></script>
@@ -453,6 +453,7 @@
               </select>
             </label>
             <button class="secondary-button filter-clear clear-filters-button" id="clearTicketFilters" type="button">Clear Filters</button>
+            <button class="secondary-button filter-clear my-focus-mode-button" id="myFocusModeButton" type="button" aria-pressed="false" title="Show only My Focus tickets (also reopens the My Focus note)">⭐ My Focus (0)</button>
           </div>
           <p class="filter-summary" id="ticketFilterSummary"></p>
             </div>
@@ -2148,5 +2149,29 @@
       </div>
     </div>
 
+    <aside class="my-focus-note" id="myFocusNote" aria-label="My Focus – Today's Work" data-view="expanded" hidden>
+      <button class="my-focus-bubble" id="myFocusBubble" type="button" aria-label="Expand My Focus" title="My Focus – click to expand, drag to move" hidden>
+        <span class="my-focus-bubble-star" aria-hidden="true">★</span>
+        <span class="my-focus-bubble-count" id="myFocusBubbleCount">0</span>
+      </button>
+      <section class="my-focus-card" id="myFocusCard">
+        <header class="my-focus-head" id="myFocusHead" title="Drag to move">
+          <h2 class="my-focus-title">My Focus – Today's Work</h2>
+          <span class="my-focus-count" id="myFocusCount">0</span>
+          <div class="my-focus-head-actions">
+            <button class="my-focus-head-btn" id="myFocusMinimize" type="button" aria-label="Minimize My Focus" title="Minimize">–</button>
+            <button class="my-focus-head-btn" id="myFocusExpand" type="button" aria-label="Expand My Focus" aria-pressed="false" title="Expand">⤢</button>
+            <button class="my-focus-head-btn" id="myFocusClose" type="button" aria-label="Close My Focus" title="Close (reopen with ⭐ My Focus on Tickets)">×</button>
+          </div>
+        </header>
+        <div class="my-focus-body">
+          <ul class="my-focus-list" id="myFocusList" aria-label="Focus tasks"></ul>
+          <p class="my-focus-empty" id="myFocusEmpty">Click ☆ on a ticket row to add it here.</p>
+          <label class="my-focus-notes-label" for="myFocusNotes">Quick notes</label>
+          <textarea class="my-focus-notes" id="myFocusNotes" rows="3" maxlength="4000" placeholder="Temporary work notes (saved on this device)…"></textarea>
+          <p class="my-focus-foot" id="myFocusFoot" role="status" hidden></p>
+        </div>
+      </section>
+    </aside>
   </body>
 </html>

@@ -4313,8 +4313,8 @@ tbody tr.milestone-today:not(.status-blocked):hover {
 }
 
 .ticket-filters[aria-label="Ticket filters"] > .filter-search {
-  flex: 1 1 140px;
-  min-width: 140px;
+  flex: 1 1 120px;
+  min-width: 120px;
   max-width: 280px;
 }
 
@@ -5295,7 +5295,12 @@ body.view-focus #projectTable td.remarks-col {
 
   .ticket-table-wrap > #ticketTable.ticket-table thead th.actions-col,
   .ticket-table-wrap > #projectTable.ticket-table thead th.actions-col {
-    width: 6.75rem;
+    width: 7.875rem;
+  }
+
+  .ticket-table-wrap > #ticketTable.ticket-table .ticket-row-actions,
+  .ticket-table-wrap > #projectTable.ticket-table .ticket-row-actions {
+    gap: 2px;
   }
 }
 
@@ -5361,7 +5366,7 @@ body.view-focus #projectTable td.remarks-col {
 
   .ticket-table-wrap > #ticketTable.ticket-table thead th.ticket-col-date,
   .ticket-table-wrap > #projectTable.ticket-table thead th.ticket-col-date {
-    width: 4.5rem;
+    width: 4.25rem;
   }
 
   .ticket-table-wrap > #ticketTable.ticket-table thead th.ticket-col-type,
@@ -5369,9 +5374,25 @@ body.view-focus #projectTable td.remarks-col {
     width: 3.75rem;
   }
 
+  /* Five 20px action buttons wrap 3 + 2; the dates give back the extra width
+     so Task keeps its share at 1024px with the sidebar open. */
   .ticket-table-wrap > #ticketTable.ticket-table thead th.actions-col,
   .ticket-table-wrap > #projectTable.ticket-table thead th.actions-col {
-    width: 3.75rem;
+    width: 4.25rem;
+  }
+
+  .ticket-table-wrap > #ticketTable.ticket-table .actions-col,
+  .ticket-table-wrap > #projectTable.ticket-table .actions-col {
+    padding-left: 2px;
+    padding-right: 2px;
+  }
+
+  .ticket-table-wrap > #ticketTable.ticket-table .ticket-row-actions > button,
+  .ticket-table-wrap > #projectTable.ticket-table .ticket-row-actions > button {
+    width: 20px;
+    height: 20px;
+    min-width: 20px;
+    min-height: 20px;
   }
 
   /* Outside-hours adds Completed: the stamp wraps to two lines, the meta
@@ -10163,5 +10184,456 @@ body.present-mode .presentation-files-chip {
   .presentation-card {
     break-inside: avoid;
     box-shadow: none;
+  }
+}
+
+/* ---------- My Focus – Today's Work ---------- */
+
+.ticket-focus-button {
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  min-width: 22px;
+  min-height: 22px;
+  padding: 0;
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  background: #fff;
+  color: #a16207;
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+}
+
+.ticket-focus-button:hover {
+  background: #fefce8;
+  border-color: #eab308;
+  color: #854d0e;
+}
+
+.ticket-focus-button.is-on {
+  background: #fef9c3;
+  border-color: #eab308;
+  color: #ca8a04;
+}
+
+.ticket-focus-button.is-inline {
+  float: left;
+  margin: 0 6px 0 0;
+}
+
+tbody tr.milestone-today:not(.status-blocked) .ticket-focus-button {
+  background: rgba(255, 255, 255, 0.14);
+  border-color: rgba(255, 255, 255, 0.45);
+  color: #ffffff;
+}
+
+tbody tr.milestone-today:not(.status-blocked) .ticket-focus-button:hover {
+  background: rgba(255, 255, 255, 0.26);
+  border-color: rgba(255, 255, 255, 0.65);
+}
+
+tbody tr.milestone-today:not(.status-blocked) .ticket-focus-button.is-on {
+  background: #fde047;
+  border-color: #fde047;
+  color: #713f12;
+}
+
+/* Yellow left accent on the first cell so it layers over red/blocked/remarks row tints. */
+tbody tr.is-my-focus > td:first-child {
+  box-shadow: inset 4px 0 0 #facc15;
+}
+
+tbody tr.my-focus-flash > td {
+  animation: my-focus-flash 1.6s ease-out;
+}
+
+@keyframes my-focus-flash {
+  0%,
+  35% {
+    background-color: rgba(250, 204, 21, 0.45);
+  }
+
+  100% {
+    background-color: transparent;
+  }
+}
+
+.ticket-filters[aria-label="Ticket filters"] > .my-focus-mode-button {
+  flex: 0 0 auto;
+  width: auto;
+  min-width: max-content;
+}
+
+.my-focus-mode-button.is-active {
+  background: #fef9c3;
+  border-color: #eab308;
+  color: #713f12;
+  box-shadow: inset 0 1px 2px rgba(113, 63, 18, 0.18);
+  font-weight: 600;
+}
+
+.my-focus-note {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 900;
+  font-family: inherit;
+  color: #422006;
+}
+
+.my-focus-note[hidden],
+.my-focus-card[hidden],
+.my-focus-bubble[hidden],
+.my-focus-empty[hidden],
+.my-focus-foot[hidden] {
+  display: none;
+}
+
+body.present-mode .my-focus-note {
+  display: none;
+}
+
+.my-focus-card {
+  display: flex;
+  flex-direction: column;
+  width: 320px;
+  max-width: calc(100vw - 16px);
+  max-height: min(70vh, 520px);
+  background: linear-gradient(180deg, #fef9c3 0%, #fef08a 100%);
+  border: 1px solid #facc15;
+  border-radius: var(--radius-md);
+  box-shadow: 0 2px 4px rgba(66, 32, 6, 0.08), 0 14px 32px rgba(66, 32, 6, 0.18);
+  overflow: hidden;
+}
+
+.my-focus-note.is-large .my-focus-card {
+  width: 420px;
+  max-height: min(85vh, 760px);
+}
+
+.my-focus-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 8px 8px 12px;
+  background: rgba(250, 204, 21, 0.35);
+  border-bottom: 1px solid rgba(202, 138, 4, 0.3);
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+
+.my-focus-note.is-dragging .my-focus-head,
+.my-focus-note.is-dragging .my-focus-bubble {
+  cursor: grabbing;
+}
+
+.my-focus-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  color: #422006;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.my-focus-count {
+  flex: 0 0 auto;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.7);
+  color: #713f12;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.my-focus-head-actions {
+  display: flex;
+  gap: 2px;
+}
+
+.my-focus-head-btn {
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #713f12;
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.my-focus-head-btn:hover,
+.my-focus-head-btn:focus-visible {
+  background: rgba(255, 255, 255, 0.65);
+}
+
+.my-focus-head-btn[aria-pressed="true"] {
+  background: rgba(255, 255, 255, 0.5);
+}
+
+.my-focus-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 0;
+  padding: 8px 10px 10px;
+  overflow-y: auto;
+}
+
+.my-focus-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.my-focus-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 4px 4px 2px;
+  border-radius: 6px;
+}
+
+.my-focus-item:hover {
+  background: rgba(255, 255, 255, 0.45);
+}
+
+.my-focus-check {
+  flex: 0 0 auto;
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  accent-color: #a16207;
+  cursor: pointer;
+}
+
+.my-focus-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #422006;
+  font: inherit;
+  font-size: 12.5px;
+  line-height: 1.3;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+button.my-focus-name {
+  cursor: pointer;
+}
+
+button.my-focus-name:hover,
+button.my-focus-name:focus-visible {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.my-focus-item.is-done .my-focus-name {
+  color: rgba(66, 32, 6, 0.55);
+  text-decoration: line-through;
+}
+
+.my-focus-item.is-missing .my-focus-name {
+  color: rgba(66, 32, 6, 0.45);
+  font-style: italic;
+}
+
+.my-focus-item.is-missing .my-focus-name em {
+  font-size: 11px;
+}
+
+.my-focus-item.is-missing .my-focus-priority {
+  opacity: 0.5;
+}
+
+.my-focus-item .my-focus-priority {
+  flex: 0 0 auto;
+  min-height: 18px;
+  padding: 0 6px;
+  font-size: 10px;
+}
+
+.my-focus-remove {
+  flex: 0 0 auto;
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: rgba(113, 63, 18, 0.7);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.my-focus-remove:hover,
+.my-focus-remove:focus-visible {
+  background: rgba(255, 255, 255, 0.7);
+  color: #991b1b;
+}
+
+.my-focus-empty {
+  margin: 2px 0;
+  color: rgba(66, 32, 6, 0.65);
+  font-size: 12px;
+}
+
+.my-focus-notes-label {
+  margin-top: 2px;
+  color: #713f12;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.my-focus-notes {
+  width: 100%;
+  min-height: 56px;
+  max-height: 40vh;
+  box-sizing: border-box;
+  padding: 6px 8px;
+  border: 1px solid rgba(202, 138, 4, 0.45);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.6);
+  color: #422006;
+  font-size: 12.5px;
+  line-height: 1.4;
+  resize: vertical;
+}
+
+.my-focus-notes:focus {
+  outline: 2px solid rgba(202, 138, 4, 0.55);
+  outline-offset: 0;
+  background: rgba(255, 255, 255, 0.85);
+}
+
+.my-focus-foot {
+  margin: 0;
+  color: #991b1b;
+  font-size: 11px;
+}
+
+.my-focus-bubble {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  padding: 0;
+  border: 1px solid #facc15;
+  border-radius: 50%;
+  background: linear-gradient(180deg, #fef9c3 0%, #fde047 100%);
+  box-shadow: 0 2px 4px rgba(66, 32, 6, 0.1), 0 10px 22px rgba(66, 32, 6, 0.22);
+  color: #a16207;
+  cursor: pointer;
+  touch-action: none;
+  user-select: none;
+}
+
+.my-focus-bubble-star {
+  font-size: 22px;
+  line-height: 1;
+}
+
+.my-focus-bubble-count {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
+  box-sizing: border-box;
+  border-radius: 999px;
+  background: #713f12;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 20px;
+  text-align: center;
+}
+
+@media (max-width: 768px) {
+  /* Stacked ticket cards hide the # cell, so outline the whole card instead. */
+  #ticketTable tbody tr.is-my-focus,
+  #projectTable tbody tr.is-my-focus {
+    border-color: #eab308;
+    outline: 1px solid #eab308;
+    outline-offset: -1px;
+  }
+
+  #ticketTable tbody tr.milestone-today .ticket-focus-button,
+  #projectTable tbody tr.milestone-today .ticket-focus-button {
+    background: #fff;
+    border-color: var(--line-strong);
+    color: #a16207;
+  }
+
+  #ticketTable tbody tr.milestone-today .ticket-focus-button.is-on,
+  #projectTable tbody tr.milestone-today .ticket-focus-button.is-on {
+    background: #fef9c3;
+    border-color: #eab308;
+    color: #ca8a04;
+  }
+
+  .my-focus-note {
+    right: 10px;
+    bottom: 10px;
+  }
+
+  .my-focus-card,
+  .my-focus-note.is-large .my-focus-card {
+    width: min(320px, calc(100vw - 20px));
+    max-height: 55vh;
+  }
+
+  .my-focus-note.is-large .my-focus-card {
+    max-height: 80vh;
+  }
+
+  .my-focus-head-btn {
+    width: 32px;
+    height: 32px;
+  }
+
+  .my-focus-check {
+    width: 18px;
+    height: 18px;
+  }
+
+  .my-focus-remove {
+    width: 28px;
+    height: 28px;
+  }
+
+  .my-focus-notes {
+    min-height: 44px;
+  }
+}
+
+@media print {
+  .my-focus-note {
+    display: none !important;
   }
 }

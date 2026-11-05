@@ -1829,6 +1829,7 @@ function getFilterUiSignature() {
     ticketPriorityFilterPanel ? getMultiFilterValues(ticketPriorityFilterPanel).join(",") : "",
     ticketBhanuFilterPanel ? getMultiFilterValues(ticketBhanuFilterPanel).join(",") : "",
     ticketRaisedByFilterPanel ? getMultiFilterValues(ticketRaisedByFilterPanel).join(",") : "",
+    isMyFocusModeOn() ? "focus" : "",
     projectSearchFilter?.value || "",
     projectSortFilter?.value || "",
     projectStatusFilterPanel ? getMultiFilterValues(projectStatusFilterPanel).join(",") : "",
@@ -4684,7 +4685,9 @@ function applyTicketFilters(tickets) {
     : [];
 
   const outsideHoursOnly = isTicketOutsideHoursFilterOn();
+  const focusOnly = isMyFocusModeOn();
   const filtered = tickets.filter((ticket) => {
+    if (focusOnly && !isMyFocusTicket(ticket)) return false;
     if (outsideHoursOnly && !completionOutsideOffice(ticket)) return false;
     if (statusValues.length && !statusValues.includes(ticket.Status)) return false;
     if (ownerValues.length && !ownerValues.includes(ticket.Owner)) return false;
@@ -4699,6 +4702,8 @@ function applyTicketFilters(tickets) {
   // Outside-hours mode stays strictly on completed clock times. Do not pull in
   // open parents or in-hours siblings just to keep a family together.
   if (outsideHoursOnly) return filtered;
+  // Focus Mode lists only starred tickets; do not pull in unstarred parents or siblings.
+  if (focusOnly) return filtered;
   // Always keep parent↔subtask families together across type/status/owner filters.
   return expandFilteredTicketsWithSubtaskFamily(filtered, tickets);
 }
@@ -8934,6 +8939,547 @@ function onPresentModeFullscreenChange() {
   }
 }
 
+/* My Focus – Today's Work: a per-user, client-only sticky note. Starring a
+   ticket never edits the ticket or touches the sheet; state lives in
+   localStorage under tarmal-my-focus:<username>. */
+const MY_FOCUS_STORAGE_PREFIX = "tarmal-my-focus:";
+const MY_FOCUS_MAX_ITEMS = 100;
+const MY_FOCUS_NAME_MAX = 160;
+const MY_FOCUS_NOTES_MAX = 4000;
+const MY_FOCUS_EDGE = 8;
+const MY_FOCUS_VIEWS = ["expanded", "minimized", "closed"];
+
+let myFocusState = null;
+let myFocusKeySet = new Set();
+let myFocusStorageKey = "";
+let myFocusEls = null;
+let myFocusNotesTimer = 0;
+let myFocusMissingKeys = new Set();
+let myFocusListSignature = "";
+let myFocusSuppressBubbleClick = false;
+let myFocusResizeFrame = 0;
+
+function myFocusUserStorageKey() {
+  const user = typeof Auth !== "undefined" ? Auth.currentUser?.() : null;
+  const name = cleanText(user?.username || user?.name || user?.id).toLowerCase();
+  return name ? `${MY_FOCUS_STORAGE_PREFIX}${name}` : "";
+}
+
+function normalizeMyFocusItems(list) {
+  const seen = new Set();
+  return (Array.isArray(list) ? list : [])
+    .filter((entry) => entry && typeof entry.k === "string" && entry.k && !seen.has(entry.k) && seen.add(entry.k))
+    .slice(0, MY_FOCUS_MAX_ITEMS)
+    .map((entry) => ({
+      k: entry.k,
+      n: String(entry.n || "").slice(0, MY_FOCUS_NAME_MAX),
+      p: entry.p === "80" ? "80" : "20",
+      d: entry.d ? 1 : 0
+    }));
+}
+
+function loadMyFocusState() {
+  myFocusStorageKey = myFocusUserStorageKey();
+  // First visit on a phone starts as the bubble so the note does not cover the cards.
+  const firstView = window.matchMedia?.("(max-width: 768px)").matches ? "minimized" : "expanded";
+  const state = { items: [], notes: "", pos: null, view: firstView, large: false, mode: false };
+  if (myFocusStorageKey) {
+    try {
+      const parsed = JSON.parse(localStorage.getItem(myFocusStorageKey) || "null");
+      if (parsed && typeof parsed === "object") {
+        state.items = normalizeMyFocusItems(parsed.items);
+        state.notes = String(parsed.notes || "").slice(0, MY_FOCUS_NOTES_MAX);
+        const right = Number(parsed.pos?.r);
+        const bottom = Number(parsed.pos?.b);
+        state.pos = Number.isFinite(right) && Number.isFinite(bottom) ? { r: right, b: bottom } : null;
+        state.view = MY_FOCUS_VIEWS.includes(parsed.view) ? parsed.view : state.view;
+        state.large = Boolean(parsed.large);
+        state.mode = Boolean(parsed.mode);
+      }
+    } catch (error) {
+      console.warn("Could not read My Focus state.", error);
+    }
+  }
+  myFocusKeySet = new Set(state.items.map((entry) => entry.k));
+  return state;
+}
+
+function getMyFocusState() {
+  if (!myFocusState) myFocusState = loadMyFocusState();
+  return myFocusState;
+}
+
+function saveMyFocusState() {
+  if (!myFocusStorageKey) return false;
+  const state = getMyFocusState();
+  const payload = JSON.stringify({
+    v: 1,
+    items: state.items,
+    notes: state.notes,
+    pos: state.pos ? { r: Math.round(state.pos.r), b: Math.round(state.pos.b) } : null,
+    view: state.view,
+    large: state.large ? 1 : 0,
+    mode: state.mode ? 1 : 0
+  });
+  try {
+    localStorage.setItem(myFocusStorageKey, payload);
+    setMyFocusFootMessage("");
+    return true;
+  } catch (error) {
+    console.warn("Could not save My Focus (browser storage may be full).", error);
+    setMyFocusFootMessage("Not saved — browser storage is full. Changes stay until you reload.");
+    return false;
+  }
+}
+
+function setMyFocusFootMessage(message) {
+  const foot = myFocusEls?.foot;
+  if (!foot) return;
+  foot.textContent = message;
+  foot.hidden = !message;
+}
+
+function myFocusKeyForTicket(ticket) {
+  const id = ticketStableId(ticket);
+  if (id) return `id:${id}`;
+  const identity = ticketIdentityKey(ticket || {});
+  return identity && identity !== "||" ? `k:${identity}` : "";
+}
+
+function isMyFocusKey(key) {
+  if (!key) return false;
+  getMyFocusState();
+  return myFocusKeySet.has(key);
+}
+
+function isMyFocusTicket(ticket) {
+  return isMyFocusKey(myFocusKeyForTicket(ticket));
+}
+
+function isMyFocusModeOn() {
+  return Boolean(getMyFocusState().mode);
+}
+
+function getMyFocusCount() {
+  return getMyFocusState().items.length;
+}
+
+function myFocusButtonHtml(key, { inline = false } = {}) {
+  if (!key) return "";
+  const on = isMyFocusKey(key);
+  const label = on ? "Remove from My Focus" : "Add to My Focus";
+  return `<button class="ticket-focus-button${on ? " is-on" : ""}${inline ? " is-inline" : ""}" type="button" data-focus-key="${escapeHtml(key)}" aria-pressed="${on ? "true" : "false"}" aria-label="${label}" title="${label}"><span aria-hidden="true">${on ? "★" : "☆"}</span></button>`;
+}
+
+function findTicketByMyFocusKey(key, tickets = getValidTickets()) {
+  if (!key) return null;
+  return tickets.find((ticket) => myFocusKeyForTicket(ticket) === key) || null;
+}
+
+function syncMyFocusRowState(key) {
+  if (!key) return;
+  const on = isMyFocusKey(key);
+  const selector = `[data-focus-key="${CSS.escape(key)}"]`;
+  [rows, projectRows].forEach((bodyEl) => {
+    bodyEl?.querySelectorAll(`tr${selector}`).forEach((row) => row.classList.toggle("is-my-focus", on));
+    bodyEl?.querySelectorAll(`.ticket-focus-button${selector}`).forEach((button) => {
+      const label = on ? "Remove from My Focus" : "Add to My Focus";
+      button.classList.toggle("is-on", on);
+      button.setAttribute("aria-pressed", on ? "true" : "false");
+      button.setAttribute("aria-label", label);
+      button.title = label;
+      const glyph = button.querySelector("span");
+      if (glyph) glyph.textContent = on ? "★" : "☆";
+    });
+  });
+}
+
+function toggleMyFocusTicket(key) {
+  if (!key) return;
+  const state = getMyFocusState();
+  const index = state.items.findIndex((entry) => entry.k === key);
+  if (index >= 0) {
+    state.items.splice(index, 1);
+  } else {
+    if (state.items.length >= MY_FOCUS_MAX_ITEMS) {
+      setStatus("error", `My Focus holds up to ${MY_FOCUS_MAX_ITEMS} tickets. Remove one first.`);
+      return;
+    }
+    const ticket = findTicketByMyFocusKey(key);
+    state.items.push({
+      k: key,
+      n: String(ticket?.Task || "").slice(0, MY_FOCUS_NAME_MAX),
+      p: normalizePriority(ticket?.Priority),
+      d: 0
+    });
+  }
+  myFocusKeySet = new Set(state.items.map((entry) => entry.k));
+  saveMyFocusState();
+  syncMyFocusRowState(key);
+  renderMyFocusNote();
+  if (state.mode) scheduleRenderTickets({ immediate: true, activeOnly: true });
+}
+
+function setMyFocusMode(on, { render = true } = {}) {
+  const state = getMyFocusState();
+  const next = Boolean(on);
+  if (state.mode === next) return;
+  state.mode = next;
+  saveMyFocusState();
+  updateMyFocusCounters();
+  if (render) scheduleRenderTickets({ immediate: true, activeOnly: true });
+}
+
+function setMyFocusView(view) {
+  const state = getMyFocusState();
+  if (!MY_FOCUS_VIEWS.includes(view)) return;
+  state.view = view;
+  saveMyFocusState();
+  applyMyFocusView();
+}
+
+function applyMyFocusView() {
+  const els = myFocusEls;
+  if (!els) return;
+  const state = getMyFocusState();
+  els.note.dataset.view = state.view;
+  els.note.classList.toggle("is-large", state.large);
+  els.note.hidden = state.view === "closed";
+  els.card.hidden = state.view !== "expanded";
+  els.bubble.hidden = state.view !== "minimized";
+  els.expand.setAttribute("aria-pressed", state.large ? "true" : "false");
+  const expandLabel = state.large ? "Restore My Focus size" : "Expand My Focus";
+  els.expand.setAttribute("aria-label", expandLabel);
+  els.expand.title = state.large ? "Restore size" : "Expand";
+  clampMyFocusPosition();
+}
+
+function updateMyFocusCounters() {
+  const els = myFocusEls;
+  if (!els) return;
+  const state = getMyFocusState();
+  const count = state.items.length;
+  const doneCount = state.items.filter((entry) => entry.d).length;
+  if (els.modeButton) {
+    els.modeButton.textContent = `⭐ My Focus (${count})`;
+    els.modeButton.classList.toggle("is-active", state.mode);
+    els.modeButton.setAttribute("aria-pressed", state.mode ? "true" : "false");
+    els.modeButton.title = state.mode
+      ? "Focus Mode on — click to show all tickets"
+      : "Show only My Focus tickets (also reopens the My Focus note)";
+  }
+  els.count.textContent = count ? `${doneCount}/${count}` : "0";
+  els.count.title = `${doneCount} of ${count} done today`;
+  els.bubbleCount.textContent = String(count);
+  els.bubble.setAttribute("aria-label", `Expand My Focus (${count} task${count === 1 ? "" : "s"})`);
+}
+
+function myFocusListItemHtml(entry) {
+  const missing = myFocusMissingKeys.has(entry.k);
+  const name = entry.n || "(untitled ticket)";
+  const priorityClass = entry.p === "80" ? "high" : "low";
+  const nameHtml = missing
+    ? `<span class="my-focus-name" title="Not in the loaded tickets (deleted or not loaded yet)">${escapeHtml(name)} <em>(not loaded)</em></span>`
+    : `<button class="my-focus-name" type="button" data-focus-jump title="Go to ticket">${escapeHtml(name)}</button>`;
+  return `
+    <li class="my-focus-item${entry.d ? " is-done" : ""}${missing ? " is-missing" : ""}" data-focus-key="${escapeHtml(entry.k)}">
+      <input class="my-focus-check" type="checkbox" ${entry.d ? "checked" : ""} aria-label="Done for today: ${escapeHtml(name)}">
+      ${nameHtml}
+      <span class="priority-pill priority-${priorityClass} my-focus-priority">${entry.p === "80" ? "High" : "Low"}</span>
+      <button class="my-focus-remove" type="button" data-focus-remove aria-label="Remove ${escapeHtml(name)} from My Focus" title="Remove from My Focus">×</button>
+    </li>`;
+}
+
+function computeMyFocusListSignature() {
+  return getMyFocusState().items
+    .map((entry) => `${entry.k}\u0001${entry.n}\u0001${entry.p}\u0001${entry.d}\u0001${myFocusMissingKeys.has(entry.k) ? 1 : 0}`)
+    .join("\u0002");
+}
+
+function renderMyFocusNote({ force = false } = {}) {
+  const els = myFocusEls;
+  if (!els) return;
+  const state = getMyFocusState();
+  updateMyFocusCounters();
+  const signature = computeMyFocusListSignature();
+  if (!force && signature === myFocusListSignature) return;
+  myFocusListSignature = signature;
+  els.list.innerHTML = state.items.map(myFocusListItemHtml).join("");
+  els.empty.hidden = state.items.length > 0;
+}
+
+/** Re-resolve stored focus entries against freshly loaded tickets (names, priority, missing). */
+function refreshMyFocusFromTickets(tickets) {
+  if (!myFocusEls) return;
+  const state = getMyFocusState();
+  if (!state.items.length) {
+    myFocusMissingKeys = new Set();
+    renderMyFocusNote();
+    return;
+  }
+  const byKey = new Map();
+  const byIdentity = new Map();
+  (Array.isArray(tickets) ? tickets : []).forEach((ticket) => {
+    const key = myFocusKeyForTicket(ticket);
+    if (key && !byKey.has(key)) byKey.set(key, ticket);
+    const identity = ticketIdentityKey(ticket);
+    if (!byIdentity.has(identity)) byIdentity.set(identity, ticket);
+  });
+
+  let dirty = false;
+  const missing = new Set();
+  const upgradedKeys = [];
+  state.items.forEach((entry) => {
+    let ticket = byKey.get(entry.k);
+    // Older rows without a ticketId are keyed by Task||Owner; adopt the id once the sheet assigns one.
+    if (!ticket && entry.k.startsWith("k:")) {
+      const candidate = byIdentity.get(entry.k.slice(2));
+      const upgraded = candidate ? myFocusKeyForTicket(candidate) : "";
+      if (upgraded && !myFocusKeySet.has(upgraded)) {
+        upgradedKeys.push(entry.k, upgraded);
+        entry.k = upgraded;
+        ticket = candidate;
+        dirty = true;
+      }
+    }
+    if (!ticket) {
+      missing.add(entry.k);
+      return;
+    }
+    const name = String(ticket.Task || "").slice(0, MY_FOCUS_NAME_MAX);
+    const priority = normalizePriority(ticket.Priority);
+    if (name && name !== entry.n) {
+      entry.n = name;
+      dirty = true;
+    }
+    if (priority !== entry.p) {
+      entry.p = priority;
+      dirty = true;
+    }
+  });
+  myFocusMissingKeys = missing;
+  if (dirty) {
+    myFocusKeySet = new Set(state.items.map((entry) => entry.k));
+    saveMyFocusState();
+    upgradedKeys.forEach(syncMyFocusRowState);
+  }
+  renderMyFocusNote();
+}
+
+function jumpToMyFocusTicket(key) {
+  const selector = `tr[data-focus-key="${CSS.escape(key)}"]`;
+  const activeTab = getActiveTabName();
+  let row = null;
+  if (activeTab === "projects") row = projectRows?.querySelector(selector);
+  if (!row || row.hidden) {
+    if (getActiveTabName() !== "tickets") setActiveTab("tickets");
+    row = rows?.querySelector(selector);
+  }
+  if (!row || row.hidden) {
+    const ticket = findTicketByMyFocusKey(key);
+    if (ticket && Number(ticket.sheetRow) > 0 && canEditTickets()) {
+      openTicketEditor(ticket.sheetRow);
+      return;
+    }
+    setStatus("", "That focus ticket is hidden by the current filters.");
+    return;
+  }
+  row.scrollIntoView({ block: "center", behavior: "smooth" });
+  row.classList.remove("my-focus-flash");
+  void row.offsetWidth;
+  row.classList.add("my-focus-flash");
+  window.setTimeout(() => row.classList.remove("my-focus-flash"), 1700);
+}
+
+function flushMyFocusNotes() {
+  if (!myFocusNotesTimer) return;
+  window.clearTimeout(myFocusNotesTimer);
+  myFocusNotesTimer = 0;
+  saveMyFocusState();
+}
+
+function myFocusViewport() {
+  return {
+    width: document.documentElement.clientWidth || window.innerWidth,
+    height: window.innerHeight || document.documentElement.clientHeight
+  };
+}
+
+/** Positions are stored as right/bottom offsets so the bubble and note share a corner. */
+function setMyFocusOffsets(right, bottom) {
+  const note = myFocusEls?.note;
+  if (!note) return null;
+  const { width: vw, height: vh } = myFocusViewport();
+  const rect = note.getBoundingClientRect();
+  const maxRight = Math.max(MY_FOCUS_EDGE, vw - rect.width - MY_FOCUS_EDGE);
+  const maxBottom = Math.max(MY_FOCUS_EDGE, vh - rect.height - MY_FOCUS_EDGE);
+  const r = Math.min(Math.max(MY_FOCUS_EDGE, right), maxRight);
+  const b = Math.min(Math.max(MY_FOCUS_EDGE, bottom), maxBottom);
+  note.style.right = `${r}px`;
+  note.style.bottom = `${b}px`;
+  return { r, b };
+}
+
+function clampMyFocusPosition() {
+  const els = myFocusEls;
+  if (!els || els.note.hidden) return;
+  const state = getMyFocusState();
+  if (!state.pos) {
+    els.note.style.right = "";
+    els.note.style.bottom = "";
+    return;
+  }
+  const clamped = setMyFocusOffsets(state.pos.r, state.pos.b);
+  if (clamped) state.pos = clamped;
+}
+
+function startMyFocusDrag(event, handle) {
+  if (event.pointerType === "mouse" && event.button !== 0) return;
+  const note = myFocusEls.note;
+  const rect = note.getBoundingClientRect();
+  const { width: vw, height: vh } = myFocusViewport();
+  const startX = event.clientX;
+  const startY = event.clientY;
+  const startRight = vw - rect.right;
+  const startBottom = vh - rect.bottom;
+  let moved = false;
+  try { handle.setPointerCapture(event.pointerId); } catch { /* capture is optional */ }
+
+  const onMove = (moveEvent) => {
+    const dx = moveEvent.clientX - startX;
+    const dy = moveEvent.clientY - startY;
+    if (!moved && Math.hypot(dx, dy) < 5) return;
+    if (!moved) {
+      moved = true;
+      note.classList.add("is-dragging");
+    }
+    moveEvent.preventDefault();
+    setMyFocusOffsets(startRight - dx, startBottom - dy);
+  };
+  const onEnd = () => {
+    handle.removeEventListener("pointermove", onMove);
+    handle.removeEventListener("pointerup", onEnd);
+    handle.removeEventListener("pointercancel", onEnd);
+    try { handle.releasePointerCapture(event.pointerId); } catch { /* already released */ }
+    note.classList.remove("is-dragging");
+    if (!moved) return;
+    if (handle === myFocusEls.bubble) {
+      myFocusSuppressBubbleClick = true;
+      window.setTimeout(() => { myFocusSuppressBubbleClick = false; }, 0);
+    }
+    const r = parseFloat(note.style.right);
+    const b = parseFloat(note.style.bottom);
+    if (Number.isFinite(r) && Number.isFinite(b)) {
+      getMyFocusState().pos = { r, b };
+      saveMyFocusState();
+    }
+  };
+  handle.addEventListener("pointermove", onMove);
+  handle.addEventListener("pointerup", onEnd);
+  handle.addEventListener("pointercancel", onEnd);
+}
+
+function onMyFocusTableClick(event) {
+  const button = event.target.closest?.(".ticket-focus-button");
+  if (!button || !event.currentTarget.contains(button)) return;
+  event.stopPropagation();
+  toggleMyFocusTicket(button.dataset.focusKey || "");
+}
+
+function initMyFocus() {
+  const note = document.querySelector("#myFocusNote");
+  if (!note || !myFocusUserStorageKey()) return;
+  myFocusEls = {
+    note,
+    card: note.querySelector("#myFocusCard"),
+    head: note.querySelector("#myFocusHead"),
+    count: note.querySelector("#myFocusCount"),
+    list: note.querySelector("#myFocusList"),
+    empty: note.querySelector("#myFocusEmpty"),
+    notes: note.querySelector("#myFocusNotes"),
+    foot: note.querySelector("#myFocusFoot"),
+    bubble: note.querySelector("#myFocusBubble"),
+    bubbleCount: note.querySelector("#myFocusBubbleCount"),
+    minimize: note.querySelector("#myFocusMinimize"),
+    expand: note.querySelector("#myFocusExpand"),
+    close: note.querySelector("#myFocusClose"),
+    modeButton: document.querySelector("#myFocusModeButton")
+  };
+  const els = myFocusEls;
+  const state = getMyFocusState();
+
+  els.notes.value = state.notes;
+  els.notes.addEventListener("input", () => {
+    state.notes = els.notes.value.slice(0, MY_FOCUS_NOTES_MAX);
+    if (myFocusNotesTimer) window.clearTimeout(myFocusNotesTimer);
+    myFocusNotesTimer = window.setTimeout(() => {
+      myFocusNotesTimer = 0;
+      saveMyFocusState();
+    }, 500);
+  });
+  els.notes.addEventListener("blur", flushMyFocusNotes);
+  window.addEventListener("pagehide", flushMyFocusNotes);
+
+  els.list.addEventListener("change", (event) => {
+    const check = event.target.closest(".my-focus-check");
+    if (!check) return;
+    const item = check.closest(".my-focus-item");
+    const entry = state.items.find((candidate) => candidate.k === item?.dataset.focusKey);
+    if (!entry) return;
+    entry.d = check.checked ? 1 : 0;
+    item.classList.toggle("is-done", check.checked);
+    myFocusListSignature = computeMyFocusListSignature();
+    saveMyFocusState();
+    updateMyFocusCounters();
+  });
+  els.list.addEventListener("click", (event) => {
+    const item = event.target.closest(".my-focus-item");
+    const key = item?.dataset.focusKey;
+    if (!key) return;
+    if (event.target.closest("[data-focus-remove]")) {
+      toggleMyFocusTicket(key);
+    } else if (event.target.closest("[data-focus-jump]")) {
+      jumpToMyFocusTicket(key);
+    }
+  });
+
+  els.minimize.addEventListener("click", () => setMyFocusView("minimized"));
+  els.close.addEventListener("click", () => setMyFocusView("closed"));
+  els.expand.addEventListener("click", () => {
+    state.large = !state.large;
+    saveMyFocusState();
+    applyMyFocusView();
+  });
+  els.bubble.addEventListener("click", () => {
+    if (myFocusSuppressBubbleClick) return;
+    setMyFocusView("expanded");
+  });
+  els.bubble.addEventListener("pointerdown", (event) => startMyFocusDrag(event, els.bubble));
+  els.head.addEventListener("pointerdown", (event) => {
+    if (event.target.closest("button")) return;
+    startMyFocusDrag(event, els.head);
+  });
+
+  els.modeButton?.addEventListener("click", () => {
+    if (state.view === "closed") setMyFocusView("expanded");
+    setMyFocusMode(!state.mode);
+  });
+
+  rows?.addEventListener("click", onMyFocusTableClick);
+  projectRows?.addEventListener("click", onMyFocusTableClick);
+
+  window.addEventListener("resize", () => {
+    if (myFocusResizeFrame) return;
+    myFocusResizeFrame = window.requestAnimationFrame(() => {
+      myFocusResizeFrame = 0;
+      clampMyFocusPosition();
+    });
+  });
+
+  applyMyFocusView();
+  renderMyFocusNote({ force: true });
+}
+
 function renderTicketTable(tickets, options = {}) {
   const bodyEl = options.bodyEl || rows;
   const tableEl = options.tableEl || ticketTable;
@@ -8946,6 +9492,7 @@ function renderTicketTable(tickets, options = {}) {
   const showActions = canEdit;
   const showCompletedAt = Boolean(options.showCompletedAt);
   const keepAllRows = Boolean(options.keepAllRows);
+  const focusMode = Boolean(options.focusMode);
   if (tableEl) {
     tableEl.classList.toggle("ticket-table-can-edit", showActions);
     tableEl.classList.toggle("ticket-table-show-completed", showCompletedAt);
@@ -8986,8 +9533,17 @@ function renderTicketTable(tickets, options = {}) {
   });
   markCompletedParents(typeof getValidTickets === "function" ? getValidTickets() : null);
 
+  // Focus Mode can list a sub-task without its parent; never hide such orphans.
+  const listedParentRows = focusMode
+    ? new Set(tickets.filter((ticket) => !isSubtaskTicket(ticket)).map((ticket) => Number(ticket.sheetRow)))
+    : null;
+  const isFocusOrphanSubtask = (ticket) => Boolean(listedParentRows)
+    && isSubtaskTicket(ticket)
+    && !listedParentRows.has(Number(ticket.parentSheetRow));
+
   const isChildHiddenByCollapse = (ticket) => {
     if (!isSubtaskTicket(ticket)) return false;
+    if (isFocusOrphanSubtask(ticket)) return false;
     const parentRow = Number(ticket.parentSheetRow);
     if (isSubtaskParentCollapsed(parentRow, collapsePanel)) return true;
     if (isCompletedSubtaskHidden(ticket, collapsePanel)) return true;
@@ -9018,11 +9574,13 @@ function renderTicketTable(tickets, options = {}) {
       const hasCompletedChild = hasChildren && parentsWithCompletedChildren.has(parentRow);
       const collapsed = hasChildren && isSubtaskParentCollapsed(parentRow, collapsePanel);
       const showingCompleted = hasChildren && isSessionShowingCompletedSubtasks(parentRow, collapsePanel);
-      const parentCollapsed = !keepAllRows && subtask && isSubtaskParentCollapsed(
+      const parentCollapsed = !keepAllRows && subtask && !isFocusOrphanSubtask(ticket) && isSubtaskParentCollapsed(
         Number(ticket.parentSheetRow),
         collapsePanel
       );
       const serialLabel = parentCollapsed ? "" : String(++serialNo);
+      const focusKey = myFocusKeyForTicket(ticket);
+      const isFocus = isMyFocusKey(focusKey);
 
       let toggleTitle = "Hide sub-tasks";
       let toggleAria = `Collapse ${childCount} sub-task${childCount === 1 ? "" : "s"}`;
@@ -9069,13 +9627,14 @@ function renderTicketTable(tickets, options = {}) {
         subtask ? "subtask-row" : "",
         hasChildren ? "has-subtasks" : "",
         collapsed ? "subtasks-collapsed" : "",
-        parentCollapsed ? "subtask-hidden" : ""
+        parentCollapsed ? "subtask-hidden" : "",
+        isFocus ? "is-my-focus" : ""
       ].filter(Boolean).join(" ");
 
       return `
-      <tr class="${rowClasses}" ${parentCollapsed ? "hidden" : ""}>
+      <tr class="${rowClasses}" ${parentCollapsed ? "hidden" : ""} data-focus-key="${escapeHtml(focusKey)}">
         <td class="ticket-col-sno">${serialLabel}</td>
-        <td class="task-col">${taskCell}</td>
+        <td class="task-col">${canEdit ? "" : myFocusButtonHtml(focusKey, { inline: true })}${taskCell}</td>
         <td class="ticket-col-compact ticket-col-priority"><span class="priority-pill priority-${normalizePriority(ticket.Priority) === "80" ? "high" : "low"}">${escapeHtml(formatPriorityLabel(ticket.Priority))}</span></td>
         <td class="ticket-col-compact ticket-col-owner">${escapeHtml(ticket.Owner)}</td>
         <td class="ticket-col-compact ticket-col-raised">${escapeHtml(ticket["Raised By"])}</td>
@@ -9122,6 +9681,7 @@ function renderTicketTable(tickets, options = {}) {
             >
               <span class="edit-icon" aria-hidden="true"></span>
             </button>
+            ${myFocusButtonHtml(focusKey)}
           </div>
         </td>` : ""}
       </tr>
@@ -9311,17 +9871,31 @@ function renderTickets(options = {}) {
         ? `Showing ${filteredTickets.length} completed outside office hours (before 8:00 or at/after 5:30)`
         : "No tickets completed outside office hours";
 
+      const focusModeOn = isMyFocusModeOn();
+      const focusTotal = focusModeOn ? tickets.filter(isMyFocusTicket).length : 0;
+      const focusHidden = Math.max(0, focusTotal - filteredTickets.length);
+      const focusLabel = `Showing ${filteredTickets.length} focus ticket${filteredTickets.length === 1 ? "" : "s"}`
+        + (focusHidden ? ` — ${focusHidden} more hidden by other filters` : "");
+
       ticketFilterSummary.textContent = outsideHoursOnly
-        ? outsideLabel
-        : (sortLabels[sortKey] || defaultLabel);
+        ? (focusModeOn ? `${outsideLabel} (My Focus only)` : outsideLabel)
+        : (focusModeOn ? focusLabel : (sortLabels[sortKey] || defaultLabel));
     }
+    const focusModeOn = isMyFocusModeOn();
     renderTicketTable(filteredTickets, {
       pageLimit: ticketTableLimit,
       loadMoreKind: "tickets",
       collapsePanel: "tickets",
       showCompletedAt: outsideHoursOnly,
       keepAllRows: outsideHoursOnly,
-      emptyMessage: outsideHoursOnly ? "No completed tickets outside office hours." : ""
+      focusMode: focusModeOn,
+      emptyMessage: outsideHoursOnly
+        ? "No completed tickets outside office hours."
+        : (focusModeOn
+          ? (getMyFocusCount()
+            ? "No focus tickets match the current filters."
+            : "No focus tickets yet. Click ☆ on a ticket row to add it to My Focus.")
+          : "")
     });
   }
 
@@ -9368,6 +9942,7 @@ function renderTickets(options = {}) {
     renderSecondaryTicketPanels(tickets);
   }
 
+  refreshMyFocusFromTickets(tickets);
   lastRenderedTicketsSignature = dataSignature;
 }
 
@@ -10590,6 +11165,7 @@ bindClearTicketFiltersButtons();
 function bindClearTicketFiltersButtons() {
   clearTicketFilters?.addEventListener("click", () => {
     resetTicketFilters();
+    setMyFocusMode(false, { render: false });
     scheduleRenderTickets({ immediate: true });
   });
   clearProjectFilters?.addEventListener("click", () => {
@@ -10762,6 +11338,7 @@ initTopbarCollapse();
 initPerformanceFilterSidebar();
 initToolbarCollapse();
 initPresentationHeroCollapse();
+initMyFocus();
 const initialTab = document.querySelector(".tab-button.active")?.dataset.tab;
 if (initialTab) {
   setActiveTab(initialTab, { skipRender: true });
