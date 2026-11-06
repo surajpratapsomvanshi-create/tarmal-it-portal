@@ -8955,6 +8955,7 @@ let myFocusStorageKey = "";
 let myFocusEls = null;
 let myFocusNotesTimer = 0;
 let myFocusMissingKeys = new Set();
+let myFocusCompletedKeys = new Set();
 let myFocusListSignature = "";
 let myFocusSuppressBubbleClick = false;
 let myFocusResizeFrame = 0;
@@ -8970,12 +8971,33 @@ function normalizeMyFocusItems(list) {
   return (Array.isArray(list) ? list : [])
     .filter((entry) => entry && typeof entry.k === "string" && entry.k && !seen.has(entry.k) && seen.add(entry.k))
     .slice(0, MY_FOCUS_MAX_ITEMS)
-    .map((entry) => ({
-      k: entry.k,
-      n: String(entry.n || "").slice(0, MY_FOCUS_NAME_MAX),
-      p: entry.p === "80" ? "80" : "20",
-      d: entry.d ? 1 : 0
-    }));
+    .map((entry) => {
+      const item = {
+        k: entry.k,
+        n: String(entry.n || "").slice(0, MY_FOCUS_NAME_MAX),
+        p: entry.p === "80" ? "80" : "20",
+        d: entry.d ? 1 : 0
+      };
+      if (item.d) item.c = entry.c === "auto" ? "auto" : "manual";
+      return item;
+    });
+}
+
+/** One-way sync: a Completed ticket checks its focus entry; reopening only clears an auto check. */
+function applyMyFocusCompletion(entry, ticket) {
+  if (!entry || !ticket) return false;
+  if (isTicketCompleted(ticket)) {
+    if (entry.d) return false;
+    entry.d = 1;
+    entry.c = "auto";
+    return true;
+  }
+  if (entry.d && entry.c === "auto") {
+    entry.d = 0;
+    delete entry.c;
+    return true;
+  }
+  return false;
 }
 
 function loadMyFocusState() {
@@ -9106,12 +9128,14 @@ function toggleMyFocusTicket(key) {
       return;
     }
     const ticket = findTicketByMyFocusKey(key);
-    state.items.push({
+    const entry = {
       k: key,
       n: String(ticket?.Task || "").slice(0, MY_FOCUS_NAME_MAX),
       p: normalizePriority(ticket?.Priority),
       d: 0
-    });
+    };
+    applyMyFocusCompletion(entry, ticket);
+    state.items.push(entry);
   }
   myFocusKeySet = new Set(state.items.map((entry) => entry.k));
   saveMyFocusState();
@@ -9176,14 +9200,20 @@ function updateMyFocusCounters() {
 
 function myFocusListItemHtml(entry) {
   const missing = myFocusMissingKeys.has(entry.k);
+  const ticketCompleted = myFocusCompletedKeys.has(entry.k);
+  const done = Boolean(entry.d) || ticketCompleted;
   const name = entry.n || "(untitled ticket)";
   const priorityClass = entry.p === "80" ? "high" : "low";
   const nameHtml = missing
     ? `<span class="my-focus-name" title="Not in the loaded tickets (deleted or not loaded yet)">${escapeHtml(name)} <em>(not loaded)</em></span>`
     : `<button class="my-focus-name" type="button" data-focus-jump title="Go to ticket">${escapeHtml(name)}</button>`;
+  // A Completed ticket locks the box on; the note never writes ticket status, so unticking cannot reopen it.
+  const checkHtml = ticketCompleted
+    ? `<input class="my-focus-check" type="checkbox" checked disabled title="Completed in ticket" aria-label="Completed in ticket: ${escapeHtml(name)}">`
+    : `<input class="my-focus-check" type="checkbox" ${entry.d ? "checked" : ""} aria-label="Done for today: ${escapeHtml(name)}">`;
   return `
-    <li class="my-focus-item${entry.d ? " is-done" : ""}${missing ? " is-missing" : ""}" data-focus-key="${escapeHtml(entry.k)}">
-      <input class="my-focus-check" type="checkbox" ${entry.d ? "checked" : ""} aria-label="Done for today: ${escapeHtml(name)}">
+    <li class="my-focus-item${done ? " is-done" : ""}${ticketCompleted ? " is-ticket-completed" : ""}${missing ? " is-missing" : ""}" data-focus-key="${escapeHtml(entry.k)}">
+      ${checkHtml}
       ${nameHtml}
       <span class="priority-pill priority-${priorityClass} my-focus-priority">${entry.p === "80" ? "High" : "Low"}</span>
       <button class="my-focus-remove" type="button" data-focus-remove aria-label="Remove ${escapeHtml(name)} from My Focus" title="Remove from My Focus">×</button>
@@ -9192,7 +9222,7 @@ function myFocusListItemHtml(entry) {
 
 function computeMyFocusListSignature() {
   return getMyFocusState().items
-    .map((entry) => `${entry.k}\u0001${entry.n}\u0001${entry.p}\u0001${entry.d}\u0001${myFocusMissingKeys.has(entry.k) ? 1 : 0}`)
+    .map((entry) => `${entry.k}\u0001${entry.n}\u0001${entry.p}\u0001${entry.d}\u0001${myFocusMissingKeys.has(entry.k) ? 1 : 0}\u0001${myFocusCompletedKeys.has(entry.k) ? 1 : 0}`)
     .join("\u0002");
 }
 
@@ -9214,6 +9244,7 @@ function refreshMyFocusFromTickets(tickets) {
   const state = getMyFocusState();
   if (!state.items.length) {
     myFocusMissingKeys = new Set();
+    myFocusCompletedKeys = new Set();
     renderMyFocusNote();
     return;
   }
@@ -9228,6 +9259,7 @@ function refreshMyFocusFromTickets(tickets) {
 
   let dirty = false;
   const missing = new Set();
+  const completed = new Set();
   const upgradedKeys = [];
   state.items.forEach((entry) => {
     let ticket = byKey.get(entry.k);
@@ -9246,6 +9278,7 @@ function refreshMyFocusFromTickets(tickets) {
       missing.add(entry.k);
       return;
     }
+    if (isTicketCompleted(ticket)) completed.add(entry.k);
     const name = String(ticket.Task || "").slice(0, MY_FOCUS_NAME_MAX);
     const priority = normalizePriority(ticket.Priority);
     if (name && name !== entry.n) {
@@ -9256,8 +9289,10 @@ function refreshMyFocusFromTickets(tickets) {
       entry.p = priority;
       dirty = true;
     }
+    if (applyMyFocusCompletion(entry, ticket)) dirty = true;
   });
   myFocusMissingKeys = missing;
+  myFocusCompletedKeys = completed;
   if (dirty) {
     myFocusKeySet = new Set(state.items.map((entry) => entry.k));
     saveMyFocusState();
@@ -9425,8 +9460,10 @@ function initMyFocus() {
     if (!check) return;
     const item = check.closest(".my-focus-item");
     const entry = state.items.find((candidate) => candidate.k === item?.dataset.focusKey);
-    if (!entry) return;
+    if (!entry || myFocusCompletedKeys.has(entry.k)) return;
     entry.d = check.checked ? 1 : 0;
+    if (entry.d) entry.c = "manual";
+    else delete entry.c;
     item.classList.toggle("is-done", check.checked);
     myFocusListSignature = computeMyFocusListSignature();
     saveMyFocusState();
