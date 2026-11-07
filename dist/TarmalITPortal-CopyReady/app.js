@@ -195,6 +195,10 @@ const closeTicketDeleteConfirmButton = document.querySelector("#closeTicketDelet
 const ticketDeleteError = document.querySelector("#ticketDeleteError");
 const ticketEditSaveButton = document.querySelector("#ticketEditSaveButton");
 const ticketFormParentSheetRow = document.querySelector("#ticketFormParentSheetRow");
+const ticketFormFocusField = document.querySelector("#ticketFormFocusField");
+const ticketFormFocusToggle = document.querySelector("#ticketFormFocusToggle");
+const ticketEditFocusField = document.querySelector("#ticketEditFocusField");
+const ticketEditFocusToggle = document.querySelector("#ticketEditFocusToggle");
 const ticketCreateParentContext = document.querySelector("#ticketCreateParentContext");
 const ticketCreateParentLabel = document.querySelector("#ticketCreateParentLabel");
 const clearTicketCreateParentButton = document.querySelector("#clearTicketCreateParentButton");
@@ -6504,6 +6508,7 @@ function openSubtaskCreateModal(parentSheetRow) {
   }
   applyDefaultTicketFormOwner();
   applySurajTicketCreateDefaults({ force: true });
+  resetTicketFormFocusToggle();
   form?.elements.Task?.focus();
 }
 
@@ -6549,6 +6554,7 @@ function openTicketCreateModal() {
   if (form?.elements?.Status) {
     form.elements.Status.value = "Not started";
   }
+  resetTicketFormFocusToggle();
   form?.elements.Task?.focus();
 }
 
@@ -6564,6 +6570,7 @@ function closeTicketCreateModal() {
   if (!ticketCreateModal) return;
   ticketCreateModal.hidden = true;
   resetTicketCreateParent();
+  resetTicketFormFocusToggle();
   clearDuplicateTicketInFlight();
   if (ticketEditModal?.hidden && screenshotPreviewModal?.hidden) {
     document.body.classList.remove("modal-open");
@@ -6610,6 +6617,7 @@ function openTicketEditor(sheetRow) {
   setRecurrenceFormState("ticketEdit", activeEditTicket);
   populateTicketEditParentContext(ticket);
   populateTicketEditApprovalNote(ticket);
+  syncTicketEditFocusToggle(ticket);
 
   ticketEditModal.hidden = false;
   document.body.classList.add("modal-open");
@@ -9127,21 +9135,89 @@ function toggleMyFocusTicket(key) {
       setStatus("error", `My Focus holds up to ${MY_FOCUS_MAX_ITEMS} tickets. Remove one first.`);
       return;
     }
-    const ticket = findTicketByMyFocusKey(key);
-    const entry = {
-      k: key,
-      n: String(ticket?.Task || "").slice(0, MY_FOCUS_NAME_MAX),
-      p: normalizePriority(ticket?.Priority),
-      d: 0
-    };
-    applyMyFocusCompletion(entry, ticket);
-    state.items.push(entry);
+    state.items.push(buildMyFocusEntry(key, findTicketByMyFocusKey(key)));
   }
   myFocusKeySet = new Set(state.items.map((entry) => entry.k));
   saveMyFocusState();
   syncMyFocusRowState(key);
   renderMyFocusNote();
   if (state.mode) scheduleRenderTickets({ immediate: true, activeOnly: true });
+}
+
+function buildMyFocusEntry(key, ticket) {
+  const entry = {
+    k: key,
+    n: String(ticket?.Task || "").slice(0, MY_FOCUS_NAME_MAX),
+    p: normalizePriority(ticket?.Priority),
+    d: 0
+  };
+  applyMyFocusCompletion(entry, ticket);
+  return entry;
+}
+
+/** Of the tickets one create produced, keep the signed-in user's own; all of them when none are theirs. */
+function pickCreatedTicketsForMyFocus(tickets) {
+  const user = typeof Auth !== "undefined" ? Auth.currentUser?.() : null;
+  const names = [user?.name, user?.username].map((value) => cleanText(value).toLowerCase()).filter(Boolean);
+  const own = tickets.filter((ticket) => names.includes(cleanText(ticket.Owner).toLowerCase()));
+  return own.length ? own : tickets;
+}
+
+function addTicketsToMyFocus(tickets) {
+  if (!myFocusEls) return;
+  const state = getMyFocusState();
+  const added = [];
+  tickets.forEach((ticket) => {
+    const key = myFocusKeyForTicket(ticket);
+    if (!key || myFocusKeySet.has(key)) return;
+    if (state.items.length >= MY_FOCUS_MAX_ITEMS) return;
+    state.items.push(buildMyFocusEntry(key, ticket));
+    myFocusKeySet.add(key);
+    added.push(key);
+  });
+  if (!added.length) return;
+  saveMyFocusState();
+  added.forEach(syncMyFocusRowState);
+  renderMyFocusNote();
+}
+
+/** The sheet may answer a create with its own ticketId; follow it so the entry keeps matching the row. */
+function rekeyCreatedMyFocusTickets(createdTickets) {
+  if (!myFocusEls || !createdTickets.length) return;
+  const state = getMyFocusState();
+  const stored = readTickets();
+  const changed = [];
+  createdTickets.forEach((ticket) => {
+    const oldKey = myFocusKeyForTicket(ticket);
+    const entry = state.items.find((item) => item.k === oldKey);
+    const submissionId = cleanText(ticket.submissionId);
+    if (!entry || !submissionId) return;
+    const owner = cleanText(ticket.Owner).toLowerCase();
+    const saved = stored.find((candidate) => cleanText(candidate.submissionId) === submissionId
+      && cleanText(candidate.Owner).toLowerCase() === owner);
+    const newKey = saved ? myFocusKeyForTicket(saved) : "";
+    if (!newKey || newKey === oldKey || myFocusKeySet.has(newKey)) return;
+    entry.k = newKey;
+    changed.push(oldKey, newKey);
+  });
+  if (!changed.length) return;
+  myFocusKeySet = new Set(state.items.map((entry) => entry.k));
+  saveMyFocusState();
+  changed.forEach(syncMyFocusRowState);
+  renderMyFocusNote();
+}
+
+function resetTicketFormFocusToggle() {
+  if (ticketFormFocusField) ticketFormFocusField.hidden = !myFocusEls;
+  if (ticketFormFocusToggle) ticketFormFocusToggle.checked = true;
+}
+
+function syncTicketEditFocusToggle(ticket) {
+  const key = ticket ? myFocusKeyForTicket(ticket) : "";
+  if (ticketEditFocusField) ticketEditFocusField.hidden = !myFocusEls || !key;
+  if (!ticketEditFocusToggle) return;
+  ticketEditFocusToggle.dataset.focusKey = key;
+  ticketEditFocusToggle.checked = isMyFocusKey(key);
 }
 
 function setMyFocusMode(on, { render = true } = {}) {
@@ -9504,6 +9580,12 @@ function initMyFocus() {
 
   rows?.addEventListener("click", onMyFocusTableClick);
   projectRows?.addEventListener("click", onMyFocusTableClick);
+
+  ticketEditFocusToggle?.addEventListener("change", () => {
+    const key = ticketEditFocusToggle.dataset.focusKey || "";
+    if (isMyFocusKey(key) !== ticketEditFocusToggle.checked) toggleMyFocusTicket(key);
+    ticketEditFocusToggle.checked = isMyFocusKey(key);
+  });
 
   window.addEventListener("resize", () => {
     if (myFocusResizeFrame) return;
@@ -10733,6 +10815,10 @@ form?.addEventListener("submit", async (event) => {
     return;
   }
 
+  const focusTickets = ticketFormFocusToggle?.checked && !ticketFormFocusField?.hidden
+    ? pickCreatedTicketsForMyFocus(ticketsToCreate)
+    : [];
+
   startTicketSubmitProgress("Saving tickets locally...");
   await yieldToUi();
 
@@ -10746,6 +10832,7 @@ form?.addEventListener("submit", async (event) => {
     });
     writeTickets(tickets);
   }
+  addTicketsToMyFocus(focusTickets);
   renderTickets();
   setTicketSubmitProgress(22, "Tickets saved locally");
   await yieldToUi();
@@ -10768,6 +10855,7 @@ form?.addEventListener("submit", async (event) => {
         setTicketSubmitProgress(step, label);
       });
       setTicketSubmitProgress(96, "Ticket saved");
+      rekeyCreatedMyFocusTickets(focusTickets);
       renderTickets();
 
       form.reset();

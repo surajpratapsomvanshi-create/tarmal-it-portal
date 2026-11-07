@@ -3895,6 +3895,18 @@ body.modal-open {
   margin: 0;
 }
 
+.my-focus-form-field {
+  gap: 8px;
+}
+
+.my-focus-form-field[hidden] {
+  display: none !important;
+}
+
+.my-focus-form-field .ticket-form-grid-note {
+  margin: 0;
+}
+
 .recurrence-type-hint,
 .recurrence-instance-hint {
   margin: 0;
