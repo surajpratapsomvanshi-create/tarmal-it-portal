@@ -6106,7 +6106,7 @@ function verifyExternalLogin_(data) {
       ? emailFromGooglePayload_(payload)
       : emailFromMicrosoftPayload_(payload);
   } catch (error) {
-    Logger.log("verifyExternalLogin " + provider + " failed");
+    Logger.log("verifyExternalLogin " + provider + " failed: " + (error && error.message ? error.message : error));
     return {
       ok: false,
       error: provider === "google"
