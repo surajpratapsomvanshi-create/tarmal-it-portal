@@ -6128,6 +6128,31 @@ function verifyExternalLogin_(data) {
   };
 }
 
+/**
+ * Run from the Apps Script editor to grant the external-request permission
+ * and check the Microsoft sign-in setup. Read-only.
+ */
+function testExternalLoginSetup() {
+  var tenantId = String(EXTERNAL_LOGIN_MICROSOFT_TENANT_ID || "").trim().toLowerCase();
+  var clientId = String(EXTERNAL_LOGIN_MICROSOFT_CLIENT_ID || "").trim();
+  Logger.log("Microsoft client ID set: " + (clientId ? "yes (" + clientId + ")" : "NO"));
+  Logger.log("Microsoft tenant ID set: " + (tenantId ? "yes (" + tenantId + ")" : "NO"));
+  var keysUrl = tenantId
+    ? "https://login.microsoftonline.com/" + tenantId + "/discovery/v2.0/keys"
+    : "https://login.microsoftonline.com/common/discovery/v2.0/keys";
+  try {
+    var jwks = fetchJsonCached_(keysUrl, true);
+    Logger.log("Microsoft signing keys loaded: " + (jwks && jwks.keys ? jwks.keys.length : 0));
+  } catch (error) {
+    Logger.log("Microsoft signing keys FAILED: " + (error && error.message ? error.message : error));
+  }
+  var rows = readUserMaster_();
+  Logger.log("UserMaster rows: " + rows.length);
+  rows.forEach(function(row) {
+    Logger.log("  " + row.user + " <" + (row.email || "no email") + ">");
+  });
+}
+
 function findUserMasterByEmail_(email) {
   var needle = String(email || "").trim().toLowerCase();
   if (!needle) return null;
