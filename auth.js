@@ -29,6 +29,7 @@ const Auth = {
   // Directory (tenant) ID GUID of a single-tenant Entra app. Blank = /common.
   // Tarmal Wire Products Limited.
   MICROSOFT_TENANT_ID: "f495e0ee-7478-4c10-87ac-9281b4b96f4f",
+  MSAL_SCRIPT_SRC: "./vendor/msal-browser-2.38.3.min.js",
   // Same localStorage key app.js uses for UserMaster rows ({ user, manager, email }).
   USER_MASTER_KEY: "tarmal-user-hierarchy",
   LOGIN_NOTICE_KEY: "tarmal-login-notice",
@@ -1301,6 +1302,9 @@ const Auth = {
         resolve();
       }, { once: true });
       script.addEventListener("error", () => {
+        console.error(`Sign-in script failed to load: ${src}`);
+        delete this._externalScripts[src];
+        script.remove();
         reject(new Error("Could not load sign-in."));
       }, { once: true });
       if (!existing) {
@@ -1438,7 +1442,8 @@ const Auth = {
         width,
         logo_alignment: "left"
       });
-    }).catch(() => {
+    }).catch((error) => {
+      console.error("Google sign-in failed to load:", error);
       button.addEventListener("click", () => onError("Google sign-in failed to load. Try again."));
     });
   },
@@ -1466,7 +1471,9 @@ const Auth = {
     const authority = tenantId
       ? `https://login.microsoftonline.com/${encodeURIComponent(tenantId)}`
       : "https://login.microsoftonline.com/common";
-    this._microsoftAppPromise = this.loadExternalScript_("https://alcdn.msauth.net/browser/2.38.3/js/msal-browser.min.js").then(async () => {
+    // Self-hosted copy of @azure/msal-browser 2.38.3 (npm lib/msal-browser.min.js).
+    // Microsoft's alcdn.msauth.net CDN returns 404 for msal-browser builds.
+    this._microsoftAppPromise = this.loadExternalScript_(this.MSAL_SCRIPT_SRC).then(async () => {
       if (!window.msal || !window.msal.PublicClientApplication) {
         throw new Error("Microsoft sign-in failed to load.");
       }
@@ -1483,6 +1490,9 @@ const Auth = {
       });
       await app.initialize();
       return app;
+    });
+    this._microsoftAppPromise.catch(() => {
+      this._microsoftAppPromise = null;
     });
     return this._microsoftAppPromise;
   },
@@ -1513,6 +1523,7 @@ const Auth = {
           prompt: "select_account"
         });
       } catch (error) {
+        console.error("Microsoft sign-in could not be started:", error);
         button.disabled = false;
         onError(this.safeAuthError_(error && error.message, "Microsoft sign-in could not be started."));
       }
@@ -1525,6 +1536,7 @@ const Auth = {
           if (result && result.idToken) onCredential(result.idToken);
         })
         .catch((error) => {
+          console.error("Microsoft sign-in could not be completed:", error);
           onError(this.safeAuthError_(error && error.message, "Microsoft sign-in could not be completed."));
         });
     }
