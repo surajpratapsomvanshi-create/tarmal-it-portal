@@ -6287,6 +6287,10 @@ function fetchJsonCached_(url, bypassCache) {
     "https://login.microsoftonline.com/organizations/discovery/v2.0/keys": true,
     "https://login.microsoftonline.com/consumers/discovery/v2.0/keys": true
   };
+  var tenantId = String(EXTERNAL_LOGIN_MICROSOFT_TENANT_ID || "").trim().toLowerCase();
+  if (tenantId) {
+    allowed["https://login.microsoftonline.com/" + tenantId + "/discovery/v2.0/keys"] = true;
+  }
   if (!allowed[url]) throw new Error("Unexpected signing-key URL");
 
   var cache = CacheService.getScriptCache();
