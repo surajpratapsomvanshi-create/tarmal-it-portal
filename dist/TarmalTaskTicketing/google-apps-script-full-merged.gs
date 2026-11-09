@@ -19,8 +19,12 @@
    - verifyExternalLogin checks a Google or Microsoft ID token, then reads UserMaster.
    - It does not insert, update, or delete anything.
    - Paste the real client IDs into EXTERNAL_LOGIN_GOOGLE_CLIENT_ID and
-     EXTERNAL_LOGIN_MICROSOFT_CLIENT_ID (same values as auth.js), then
+     EXTERNAL_LOGIN_MICROSOFT_CLIENT_ID (same values as auth.js). For a
+     single-tenant Entra app also paste the Directory (tenant) ID into
+     EXTERNAL_LOGIN_MICROSOFT_TENANT_ID (same as Auth.MICROSOFT_TENANT_ID), then
      Deploy -> Manage deployments -> Edit -> New version.
+   - resource=users also returns the UserMaster rows (read-only) so password
+     login can require a UserMaster match.
 ===================================================== */
 
 const TASKS_SHEET = "Tasks";
@@ -37,6 +41,8 @@ const USER_MASTER_SHEET = "UserMaster";
 // Microsoft SPA redirect URI: https://surajpratapsomvanshi-create.github.io/tarmal-it-portal/login.html
 const EXTERNAL_LOGIN_GOOGLE_CLIENT_ID = "";
 const EXTERNAL_LOGIN_MICROSOFT_CLIENT_ID = "";
+// Directory (tenant) ID GUID for a single-tenant Entra app. Blank = accept any tenant.
+const EXTERNAL_LOGIN_MICROSOFT_TENANT_ID = "";
 
 const USER_HEADERS = [
   "Id", "Name", "Username", "Email", "Password", "Active",
@@ -542,7 +548,7 @@ function doGet(e) {
       || String(e.parameter.compact || "").toLowerCase() === "true");
 
     if (resource === "users") {
-      return buildResponse_({ ok: true, users: readUsers_() }, e);
+      return buildResponse_({ ok: true, users: readUsers_(), hierarchy: readUserMaster_() }, e);
     }
 
     if (resource === "assets") {
@@ -6110,7 +6116,7 @@ function verifyExternalLogin_(data) {
 
   var entry = findUserMasterByEmail_(email);
   if (!entry) {
-    return { ok: false, error: "This email is not on the UserMaster list." };
+    return { ok: false, error: "This account is not in UserMaster. Ask IT to add you." };
   }
 
   return {
@@ -6145,6 +6151,25 @@ function verifyGoogleIdToken_(idToken, clientId) {
 }
 
 function verifyMicrosoftIdToken_(idToken, clientId) {
+  var tenantId = String(EXTERNAL_LOGIN_MICROSOFT_TENANT_ID || "").trim().toLowerCase();
+  if (tenantId) {
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(tenantId)) {
+      throw new Error("EXTERNAL_LOGIN_MICROSOFT_TENANT_ID must be the Directory (tenant) ID GUID");
+    }
+    var tenantPayload = verifyRs256IdToken_(idToken, [
+      "https://login.microsoftonline.com/" + tenantId + "/discovery/v2.0/keys"
+    ]);
+    if (String(tenantPayload.tid || "").toLowerCase() !== tenantId) {
+      throw new Error("Unexpected Microsoft tenant");
+    }
+    if (String(tenantPayload.iss || "").toLowerCase() !== "https://login.microsoftonline.com/" + tenantId + "/v2.0") {
+      throw new Error("Unexpected Microsoft issuer");
+    }
+    if (!audienceMatches_(tenantPayload.aud, clientId)) throw new Error("Unexpected Microsoft audience");
+    if (!tokenTimeValid_(tenantPayload)) throw new Error("Microsoft token is expired");
+    return tenantPayload;
+  }
+
   var payload = verifyRs256IdToken_(idToken, [
     "https://login.microsoftonline.com/common/discovery/v2.0/keys",
     "https://login.microsoftonline.com/organizations/discovery/v2.0/keys",

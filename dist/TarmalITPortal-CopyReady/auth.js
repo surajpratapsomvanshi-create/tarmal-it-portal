@@ -21,10 +21,20 @@ const Auth = {
   //   https://surajpratapsomvanshi-create.github.io
   // Microsoft SPA redirect URI:
   //   https://surajpratapsomvanshi-create.github.io/tarmal-it-portal/login.html
-  // Paste the same values into EXTERNAL_LOGIN_GOOGLE_CLIENT_ID and
-  // EXTERNAL_LOGIN_MICROSOFT_CLIENT_ID in google-apps-script-full-merged.gs.
+  // Paste the same values into EXTERNAL_LOGIN_GOOGLE_CLIENT_ID,
+  // EXTERNAL_LOGIN_MICROSOFT_CLIENT_ID and EXTERNAL_LOGIN_MICROSOFT_TENANT_ID
+  // in google-apps-script-full-merged.gs.
   GOOGLE_CLIENT_ID: "",
   MICROSOFT_CLIENT_ID: "",
+  // Directory (tenant) ID GUID of a single-tenant Entra app. Blank = /common.
+  MICROSOFT_TENANT_ID: "",
+  // Same localStorage key app.js uses for UserMaster rows ({ user, manager, email }).
+  USER_MASTER_KEY: "tarmal-user-hierarchy",
+  LOGIN_NOTICE_KEY: "tarmal-login-notice",
+  NOT_IN_USER_MASTER_ERROR: "This account is not in UserMaster. Ask IT to add you.",
+  UNKNOWN_USER_MASTER_ERROR: "Could not check UserMaster right now. Try again in a moment.",
+  // Rights for someone in UserMaster with no AppUsers row.
+  DEFAULT_USER_RIGHTS: { dashboard: true },
   ADMIN_USER: {
     id: "user-admin",
     name: "Admin",
@@ -194,6 +204,131 @@ const Auth = {
         .flatMap((part) => part.split(/[\s._@-]+/).filter(Boolean))
     );
     return tokens.has(needle);
+  },
+
+  // Returns null when no UserMaster list has been loaded on this device yet.
+  readUserMaster() {
+    const saved = localStorage.getItem(this.USER_MASTER_KEY);
+    if (!saved) return null;
+    try {
+      const parsed = JSON.parse(saved);
+      if (!Array.isArray(parsed) || !parsed.length) return null;
+      const rows = parsed
+        .map((entry) => ({
+          user: String(entry && entry.user || "").trim(),
+          manager: String(entry && entry.manager || "").trim(),
+          email: String(entry && entry.email || "").trim()
+        }))
+        .filter((entry) => entry.user);
+      return rows.length ? rows : null;
+    } catch {
+      return null;
+    }
+  },
+
+  saveUserMaster_(rows) {
+    if (!Array.isArray(rows)) return;
+    const normalized = rows
+      .map((entry) => ({
+        user: String(entry && entry.user || "").trim(),
+        manager: String(entry && entry.manager || "").trim(),
+        email: String(entry && entry.email || "").trim()
+      }))
+      .filter((entry) => entry.user);
+    // An empty or missing sheet must not wipe the last good list.
+    if (!normalized.length) return;
+    localStorage.setItem(this.USER_MASTER_KEY, JSON.stringify(normalized));
+  },
+
+  findUserMasterEntry(user, rows = this.readUserMaster()) {
+    if (!user || !Array.isArray(rows)) return null;
+    const email = String(user.email || "").trim().toLowerCase();
+    if (email) {
+      const byEmail = rows.find((entry) => String(entry.email || "").trim().toLowerCase() === email);
+      if (byEmail) return byEmail;
+    }
+    const names = [user.username, user.name]
+      .map((value) => String(value || "").trim().toLowerCase())
+      .filter(Boolean);
+    return rows.find((entry) => names.includes(String(entry.user || "").trim().toLowerCase())) || null;
+  },
+
+  // Admin / Manage Users accounts may sign in even when missing from UserMaster
+  // so the portal can never lock its own administrators out.
+  bypassesUserMaster_(user) {
+    if (!user) return false;
+    if (this.isBuiltInAdmin(user)) return true;
+    return Boolean(user.rights && user.rights.manageUsers);
+  },
+
+  // { ok, entry } where entry is null for admin bypass accounts with no UserMaster row.
+  userMasterAccess(user) {
+    const rows = this.readUserMaster();
+    const entry = rows ? this.findUserMasterEntry(user, rows) : null;
+    if (entry) return { ok: true, entry };
+    if (this.bypassesUserMaster_(user)) return { ok: true, entry: null };
+    if (!rows) {
+      return { ok: false, reason: "userMasterUnavailable", error: this.UNKNOWN_USER_MASTER_ERROR };
+    }
+    return { ok: false, reason: "notInUserMaster", error: this.NOT_IN_USER_MASTER_ERROR };
+  },
+
+  findAppUserForUserMaster_(entry, users = this.readUsers()) {
+    if (!entry) return null;
+    const emailKey = String(entry.email || "").trim().toLowerCase();
+    const nameKey = String(entry.user || "").trim().toLowerCase();
+    return (emailKey && users.find((user) => String(user.email || "").trim().toLowerCase() === emailKey))
+      || (nameKey && users.find((user) =>
+        String(user.username || "").trim().toLowerCase() === nameKey
+        || String(user.name || "").trim().toLowerCase() === nameKey
+      ))
+      || users.find((user) => this.matchesIdentifier_(user, entry.user))
+      || null;
+  },
+
+  // One session shape for password and Microsoft/Google sign-in of the same person.
+  userMasterSessionUser_(entry, appUser, extra = {}) {
+    const email = String(entry.email || (appUser && appUser.email) || "").trim();
+    const emailKey = email.toLowerCase();
+    const fallbackId = emailKey
+      ? `user-${emailKey.replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "")}`
+      : `user-${String(entry.user).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "")}`;
+    return {
+      id: appUser && appUser.id ? appUser.id : fallbackId,
+      name: entry.user,
+      username: entry.user,
+      email,
+      password: appUser ? appUser.password : "",
+      active: true,
+      rights: appUser && appUser.rights ? appUser.rights : { ...this.DEFAULT_USER_RIGHTS },
+      manager: String(entry.manager || "").trim(),
+      userMaster: true,
+      ...extra
+    };
+  },
+
+  // Re-check a stored session against the latest UserMaster list.
+  sessionAllowedByUserMaster_(session) {
+    if (!session) return false;
+    const rows = this.readUserMaster();
+    // Without a list we cannot judge; the login screen already enforced it.
+    if (!rows) return true;
+    const stored = this.findStoredUser(session);
+    if (this.bypassesUserMaster_(session) || this.bypassesUserMaster_(stored)) return true;
+    return Boolean(this.findUserMasterEntry(session, rows) || (stored && this.findUserMasterEntry(stored, rows)));
+  },
+
+  rejectSessionNotInUserMaster_() {
+    this.clearSession();
+    this.clearRememberedSession();
+    try {
+      sessionStorage.setItem(this.LOGIN_NOTICE_KEY, this.NOT_IN_USER_MASTER_ERROR);
+    } catch {
+      // ignore
+    }
+    if (!/login\.html$/i.test(window.location.pathname)) {
+      window.location.href = "./login.html";
+    }
   },
 
   hasPermission(rightId) {
@@ -631,6 +766,10 @@ const Auth = {
       throw new Error(payload?.error || "Could not load users.");
     }
 
+    if (Array.isArray(payload.hierarchy)) {
+      this.saveUserMaster_(payload.hierarchy);
+    }
+
     // Read cache at apply-time so failed attempts never wipe local users.
     const localUsers = this.readUsers();
     const remoteUsers = (payload.users || []).map((user) => this.normalizeUser(user));
@@ -652,7 +791,7 @@ const Auth = {
     return syncPromise.then(() => merged).catch(() => merged);
   },
 
-  fetchUsersViaHttp_(timeoutMs) {
+  fetchUsersViaHttp_(timeoutMs, resource = "users") {
     if (!this.SHEET_WEB_APP_URL) {
       return Promise.reject(new Error("Sync is not configured."));
     }
@@ -661,7 +800,7 @@ const Auth = {
     const controller = typeof AbortController === "function" ? new AbortController() : null;
     let timer = null;
 
-    const request = fetch(`${this.SHEET_WEB_APP_URL}${separator}resource=users`, {
+    const request = fetch(`${this.SHEET_WEB_APP_URL}${separator}resource=${resource}`, {
       method: "GET",
       redirect: "follow",
       credentials: "omit",
@@ -692,7 +831,7 @@ const Auth = {
     });
   },
 
-  fetchUsersViaJsonp_(timeoutMs) {
+  fetchUsersViaJsonp_(timeoutMs, resource = "users") {
     return new Promise((resolve, reject) => {
       if (!this.SHEET_WEB_APP_URL) {
         reject(new Error("Sync is not configured."));
@@ -724,7 +863,7 @@ const Auth = {
         reject(new Error("Could not load users."));
       };
 
-      script.src = `${this.SHEET_WEB_APP_URL}${separator}resource=users&callback=${callbackName}`;
+      script.src = `${this.SHEET_WEB_APP_URL}${separator}resource=${resource}&callback=${callbackName}`;
       document.body.appendChild(script);
 
       if (timeoutMs > 0) {
@@ -791,6 +930,33 @@ const Auth = {
     };
 
     return runWithRetries();
+  },
+
+  // Read-only UserMaster refresh (resource=hierarchy). Never clears the cached list on failure.
+  async loadUserMasterFromSheet(options = {}) {
+    const timeoutMs = Number(options.timeoutMs) > 0 ? Number(options.timeoutMs) : 35000;
+    const attempts = [
+      this.fetchUsersViaHttp_(timeoutMs, "hierarchy"),
+      this.fetchUsersViaJsonp_(timeoutMs, "hierarchy")
+    ];
+    const payload = await new Promise((resolve, reject) => {
+      let pending = attempts.length;
+      attempts.forEach((attempt) => {
+        attempt.then((value) => {
+          if (value && value.ok !== false && Array.isArray(value.hierarchy)) {
+            resolve(value);
+            return;
+          }
+          pending -= 1;
+          if (pending === 0) reject(new Error("Could not load UserMaster."));
+        }, () => {
+          pending -= 1;
+          if (pending === 0) reject(new Error("Could not load UserMaster."));
+        });
+      });
+    });
+    this.saveUserMaster_(payload.hierarchy);
+    return this.readUserMaster();
   },
 
   async syncUsersToSheet(users) {
@@ -878,6 +1044,7 @@ const Auth = {
       rights: normalized.rights || {}
     };
     if (user && user.externalLogin) payload.externalLogin = true;
+    if (user && user.userMaster) payload.userMaster = true;
     if (user && Object.prototype.hasOwnProperty.call(user, "manager")) {
       payload.manager = String(user.manager ?? "").trim();
     }
@@ -979,8 +1146,13 @@ const Auth = {
       return { ok: false, error: "This account is disabled." };
     }
 
-    this.setSession(user);
-    return { ok: true, user };
+    const access = this.userMasterAccess(user);
+    if (!access.ok) {
+      return { ok: false, reason: access.reason, error: access.error };
+    }
+
+    this.setSession(access.entry ? this.userMasterSessionUser_(access.entry, user) : user);
+    return { ok: true, user: this.currentUser() };
   },
 
   logout() {
@@ -990,7 +1162,12 @@ const Auth = {
   },
 
   requireLogin() {
-    if (this.getSession()) return true;
+    const session = this.getSession();
+    if (session && this.sessionAllowedByUserMaster_(session)) return true;
+    if (session) {
+      this.rejectSessionNotInUserMaster_();
+      return false;
+    }
     window.location.href = "./login.html";
     return false;
   },
@@ -1056,6 +1233,11 @@ const Auth = {
     const session = this.getSession();
     if (!session) return;
 
+    if (!this.sessionAllowedByUserMaster_(session)) {
+      this.rejectSessionNotInUserMaster_();
+      return;
+    }
+
     const sessionName = String(session.name || "").toLowerCase();
     const updated = this.readUsers().find((user) =>
       user.id === session.id
@@ -1066,8 +1248,9 @@ const Auth = {
 
     if (updated) {
       const next = { ...updated };
-      if (session.externalLogin) {
-        next.externalLogin = true;
+      if (session.externalLogin || session.userMaster) {
+        if (session.externalLogin) next.externalLogin = true;
+        if (session.userMaster) next.userMaster = true;
         next.name = session.name;
         next.username = session.username;
         next.email = session.email;
@@ -1089,6 +1272,7 @@ const Auth = {
       rights: session.rights || {}
     };
     if (session.externalLogin) snapshot.externalLogin = true;
+    if (session.userMaster) snapshot.userMaster = true;
     if (Object.prototype.hasOwnProperty.call(session, "manager")) {
       snapshot.manager = String(session.manager ?? "").trim();
     }
@@ -1157,7 +1341,7 @@ const Auth = {
       if (!payload || payload.ok !== true || !payload.user || !payload.email) {
         return {
           ok: false,
-          error: this.safeAuthError_(payload && payload.error, "This email is not on the UserMaster list.")
+          error: this.safeAuthError_(payload && payload.error, this.NOT_IN_USER_MASTER_ERROR)
         };
       }
       return {
@@ -1185,31 +1369,20 @@ const Auth = {
     const email = String(profile && profile.email || "").trim();
     const manager = String(profile && profile.manager || "").trim();
     if (!displayName || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      return { ok: false, error: "This email is not on the UserMaster list." };
+      return { ok: false, error: this.NOT_IN_USER_MASTER_ERROR };
     }
 
-    const users = this.readUsers();
-    const emailKey = email.toLowerCase();
-    const byEmail = users.find((entry) => String(entry.email || "").trim().toLowerCase() === emailKey);
-    const byName = users.find((entry) => this.matchesIdentifier_(entry, displayName));
-    const matched = byEmail || byName || null;
+    const entry = { user: displayName, email, manager };
+    const cachedRows = this.readUserMaster();
+    if (cachedRows && !this.findUserMasterEntry({ name: displayName, email }, cachedRows)) {
+      this.saveUserMaster_(cachedRows.concat([entry]));
+    }
+    const matched = this.findAppUserForUserMaster_(entry);
     if (matched && matched.active === false) {
       return { ok: false, error: "This account is disabled." };
     }
 
-    this.setSession({
-      id: matched && matched.id
-        ? matched.id
-        : `user-${emailKey.replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "")}`,
-      name: displayName,
-      username: displayName,
-      email,
-      password: matched ? matched.password : "",
-      active: true,
-      rights: matched && matched.rights ? matched.rights : { dashboard: true },
-      externalLogin: true,
-      manager
-    });
+    this.setSession(this.userMasterSessionUser_(entry, matched, { externalLogin: true }));
     return { ok: true, user: this.currentUser() };
   },
 
@@ -1279,6 +1452,10 @@ const Auth = {
   microsoftApp_() {
     if (this._microsoftAppPromise) return this._microsoftAppPromise;
     const clientId = String(this.MICROSOFT_CLIENT_ID || "").trim();
+    const tenantId = String(this.MICROSOFT_TENANT_ID || "").trim();
+    const authority = tenantId
+      ? `https://login.microsoftonline.com/${encodeURIComponent(tenantId)}`
+      : "https://login.microsoftonline.com/common";
     this._microsoftAppPromise = this.loadExternalScript_("https://alcdn.msauth.net/browser/2.38.3/js/msal-browser.min.js").then(async () => {
       if (!window.msal || !window.msal.PublicClientApplication) {
         throw new Error("Microsoft sign-in failed to load.");
@@ -1286,7 +1463,7 @@ const Auth = {
       const app = new window.msal.PublicClientApplication({
         auth: {
           clientId,
-          authority: "https://login.microsoftonline.com/common",
+          authority,
           redirectUri: window.location.origin + window.location.pathname
         },
         cache: {

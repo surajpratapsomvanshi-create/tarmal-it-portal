@@ -165,7 +165,7 @@
       </div>
     </main>
 
-    <script src="./auth.js?v=27"></script>
+    <script src="./auth.js?v=29"></script>
     <script>
       (function initLoginPage() {
       const REMEMBER_KEY = "tarmal-login-remember";
@@ -209,6 +209,16 @@
       const loginPasswordToggle = document.querySelector("#loginPasswordToggle");
       const loginRemember = document.querySelector("#loginRemember");
       const loginForgot = document.querySelector("#loginForgot");
+      try {
+        const notice = sessionStorage.getItem(Auth.LOGIN_NOTICE_KEY);
+        if (notice) {
+          sessionStorage.removeItem(Auth.LOGIN_NOTICE_KEY);
+          loginError.hidden = false;
+          loginError.textContent = notice;
+        }
+      } catch {
+        // ignore
+      }
       const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || "");
       const userSyncOptions = {
         deferSync: true,
@@ -221,8 +231,11 @@
 
       function startUsersPreload() {
         preloadState = "pending";
-        usersPreload = Auth.loadUsersFromSheet(userSyncOptions)
-          .then((users) => {
+        usersPreload = Promise.all([
+          Auth.loadUsersFromSheet(userSyncOptions),
+          Auth.loadUserMasterFromSheet(userSyncOptions).catch(() => null)
+        ])
+          .then(([users]) => {
             preloadState = "ok";
             return users;
           })
@@ -370,7 +383,11 @@
 
           loginError.hidden = false;
           // Don't mask wrong passwords as sync failures when the account is already cached.
-          if (hadCachedUsers && identifierKnownLocally(identifier)) {
+          if (result.reason === "notInUserMaster") {
+            loginError.textContent = result.error;
+          } else if (result.reason === "userMasterUnavailable") {
+            loginError.textContent = syncFailureMessage(error);
+          } else if (hadCachedUsers && identifierKnownLocally(identifier)) {
             loginError.textContent = "Invalid username or password.";
           } else {
             loginError.textContent = syncFailureMessage(error);
@@ -414,13 +431,13 @@
         try {
           const verified = await Auth.verifyExternalLogin(provider, idToken);
           if (!verified || verified.ok !== true) {
-            showLoginError(verified && verified.error || "This email is not on the UserMaster list.");
+            showLoginError(verified && verified.error || "This account is not in UserMaster. Ask IT to add you.");
             setOauthBusy(false);
             return;
           }
           const established = Auth.establishExternalSession(verified);
           if (!established.ok) {
-            showLoginError(established.error || "This email is not on the UserMaster list.");
+            showLoginError(established.error || "This account is not in UserMaster. Ask IT to add you.");
             setOauthBusy(false);
             return;
           }
