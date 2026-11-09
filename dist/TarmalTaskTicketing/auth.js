@@ -25,9 +25,10 @@ const Auth = {
   // EXTERNAL_LOGIN_MICROSOFT_CLIENT_ID and EXTERNAL_LOGIN_MICROSOFT_TENANT_ID
   // in google-apps-script-full-merged.gs.
   GOOGLE_CLIENT_ID: "",
-  MICROSOFT_CLIENT_ID: "",
+  MICROSOFT_CLIENT_ID: "67b1d187-9adf-43a4-b98d-a80acaeba55c",
   // Directory (tenant) ID GUID of a single-tenant Entra app. Blank = /common.
-  MICROSOFT_TENANT_ID: "",
+  // Tarmal Wire Products Limited.
+  MICROSOFT_TENANT_ID: "f495e0ee-7478-4c10-87ac-9281b4b96f4f",
   // Same localStorage key app.js uses for UserMaster rows ({ user, manager, email }).
   USER_MASTER_KEY: "tarmal-user-hierarchy",
   LOGIN_NOTICE_KEY: "tarmal-login-notice",
@@ -1449,6 +1450,15 @@ const Auth = {
       || /(?:^|[?&])(code|error)=/.test(search);
   },
 
+  // Must equal a registered SPA redirect URI exactly, e.g.
+  // https://tarmalit.netlify.app/login.html or
+  // https://surajpratapsomvanshi-create.github.io/tarmal-it-portal/login.html.
+  // Resolves against the current folder so /login and /login.html both send /login.html.
+  microsoftRedirectUri_() {
+    const target = new URL("login.html", window.location.href);
+    return target.origin + target.pathname;
+  },
+
   microsoftApp_() {
     if (this._microsoftAppPromise) return this._microsoftAppPromise;
     const clientId = String(this.MICROSOFT_CLIENT_ID || "").trim();
@@ -1464,7 +1474,7 @@ const Auth = {
         auth: {
           clientId,
           authority,
-          redirectUri: window.location.origin + window.location.pathname
+          redirectUri: this.microsoftRedirectUri_()
         },
         cache: {
           cacheLocation: "sessionStorage",

@@ -40,9 +40,10 @@ const USER_MASTER_SHEET = "UserMaster";
 // Google authorized JavaScript origin: https://surajpratapsomvanshi-create.github.io
 // Microsoft SPA redirect URI: https://surajpratapsomvanshi-create.github.io/tarmal-it-portal/login.html
 const EXTERNAL_LOGIN_GOOGLE_CLIENT_ID = "";
-const EXTERNAL_LOGIN_MICROSOFT_CLIENT_ID = "";
+const EXTERNAL_LOGIN_MICROSOFT_CLIENT_ID = "67b1d187-9adf-43a4-b98d-a80acaeba55c";
 // Directory (tenant) ID GUID for a single-tenant Entra app. Blank = accept any tenant.
-const EXTERNAL_LOGIN_MICROSOFT_TENANT_ID = "";
+// Tarmal Wire Products Limited.
+const EXTERNAL_LOGIN_MICROSOFT_TENANT_ID = "f495e0ee-7478-4c10-87ac-9281b4b96f4f";
 
 const USER_HEADERS = [
   "Id", "Name", "Username", "Email", "Password", "Active",
