@@ -3865,6 +3865,70 @@ body.modal-open {
   margin-top: 0;
 }
 
+.unsynced-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  border: 1px solid #f59e0b;
+  background: #fffbeb;
+  color: #92400e;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  line-height: 1.4;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+tbody tr.is-unsynced > td:first-child {
+  box-shadow: inset 3px 0 0 #f59e0b;
+}
+
+.ticket-retry-sync-button,
+.ticket-discard-local-button {
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  min-width: 22px;
+  min-height: 22px;
+  padding: 0;
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  background: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+}
+
+.ticket-retry-sync-button {
+  color: #b45309;
+  border-color: #f59e0b;
+}
+
+.ticket-retry-sync-button:hover {
+  background: #fffbeb;
+}
+
+.ticket-retry-sync-button:disabled,
+.ticket-retry-sync-button.is-syncing {
+  opacity: 0.55;
+  cursor: wait;
+}
+
+.ticket-discard-local-button {
+  color: var(--ink-secondary);
+}
+
+.ticket-discard-local-button:hover {
+  background: #fef2f2;
+  border-color: #dc2626;
+  color: #dc2626;
+}
+
 .recurrence-form-field {
   display: grid;
   gap: 8px;

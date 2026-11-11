@@ -6585,7 +6585,9 @@ function openTicketEditor(sheetRow) {
 
   const ticket = findTicketBySheetRow(sheetRow);
   if (!ticket || !ticketEditForm || !ticketEditModal) {
-    alert("Could not find the selected ticket.");
+    alert(Number(sheetRow)
+      ? "Could not find the selected ticket. Click Refresh and try again."
+      : "This ticket has not been saved to Google Sheets yet, so it cannot be edited. Use Retry save on its row in Tickets.");
     return;
   }
 
@@ -8139,6 +8141,19 @@ function bindTicketEditButtons(root = rows) {
     button.addEventListener("click", (event) => {
       event.stopPropagation();
       openSubtaskCreateModal(button.dataset.sheetRow);
+    });
+  });
+  root.querySelectorAll(".ticket-retry-sync-button").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      if (button.disabled) return;
+      retryUnsyncedTicketFromRow(button.dataset.unsyncedKey, button).catch((error) => console.error(error));
+    });
+  });
+  root.querySelectorAll(".ticket-discard-local-button").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      discardUnsyncedTicketFromRow(button.dataset.unsyncedKey);
     });
   });
   root.querySelectorAll(".ticket-milestone-today-button").forEach((button) => {
@@ -9739,8 +9754,16 @@ function renderTicketTable(tickets, options = {}) {
           : escapeHtml(ticket.Task);
       }
 
+      const unsynced = isUnsyncedLocalTicket(ticket);
+      const unsyncedKey = unsynced ? unsyncedTicketKey(ticket) : "";
+      const retrying = unsynced && unsyncedCreateRetryInFlight;
+      if (unsynced) {
+        taskCell += `<span class="unsynced-badge" title="Only in this browser — not in Google Sheets yet">Not saved</span>`;
+      }
+
       const rowClasses = [
         statusClass(ticket.Status),
+        unsynced ? "is-unsynced" : "",
         showsMilestoneTodayHighlight(ticket) ? "milestone-today" : "",
         options.highlightImportantRemarks && hasImportantRemarks(ticket) ? "remarks-important" : "",
         subtask ? "subtask-row" : "",
@@ -9766,6 +9789,22 @@ function renderTicketTable(tickets, options = {}) {
         ${canEdit ? `
         <td class="actions-col">
           <div class="ticket-row-actions">
+            ${unsynced ? `
+            <button
+              class="ticket-retry-sync-button${retrying ? " is-syncing" : ""}"
+              type="button"
+              data-unsynced-key="${escapeHtml(unsyncedKey)}"
+              aria-label="Retry save to Google Sheets"
+              title="Retry save to Google Sheets"
+              ${retrying ? "disabled" : ""}
+            >↻</button>
+            <button
+              class="ticket-discard-local-button"
+              type="button"
+              data-unsynced-key="${escapeHtml(unsyncedKey)}"
+              aria-label="Discard unsaved ticket"
+              title="Discard — remove from this browser"
+            >✕</button>` : `
             ${!subtask ? `
             <button
               class="ticket-subtask-button"
@@ -9799,7 +9838,7 @@ function renderTicketTable(tickets, options = {}) {
               title="Edit ticket"
             >
               <span class="edit-icon" aria-hidden="true"></span>
-            </button>
+            </button>`}
             ${myFocusButtonHtml(focusKey)}
           </div>
         </td>` : ""}
@@ -10165,6 +10204,164 @@ async function sendToSheet(ticket, options = {}) {
   return { synced: true, ...result };
 }
 
+// A create that never got a sheet row lives only in this browser. Keep it
+// visible, retry it, and let the user discard it — never leave a silent ghost.
+const UNSYNCED_CREATE_MIN_AGE_MS = 45000;
+const UNSYNCED_CREATE_RETRY_GAP_MS = 120000;
+const unsyncedCreateLastAttempt = new Map();
+let unsyncedCreateRetryInFlight = false;
+let unsyncedCreateRetryTimer = 0;
+
+function isUnsyncedLocalTicket(ticket) {
+  return Boolean(ticket
+    && cleanText(ticket.Task)
+    && !Number(ticket.sheetRow)
+    && cleanText(ticket.Status) !== SOFT_DELETED_STATUS);
+}
+
+function unsyncedTicketKey(ticket) {
+  return ticketStableId(ticket) || cleanText(ticket?.submissionId) || ticketIdentityKey(ticket || {});
+}
+
+function findUnsyncedLocalTicket(key) {
+  const wanted = cleanText(key);
+  if (!wanted) return null;
+  return readTickets().map(normalizeTicket)
+    .find((ticket) => isUnsyncedLocalTicket(ticket) && unsyncedTicketKey(ticket) === wanted) || null;
+}
+
+function ensureUnsyncedTicketId(ticket) {
+  if (ticketStableId(ticket)) return ticket;
+  const key = unsyncedTicketKey(ticket);
+  const ticketId = createTicketId();
+  let updated = null;
+  writeTickets(readTickets().map((entry) => {
+    if (updated || !isUnsyncedLocalTicket(entry) || unsyncedTicketKey(entry) !== key) return entry;
+    updated = normalizeTicket({ ...entry, ticketId });
+    return updated;
+  }));
+  return updated || normalizeTicket({ ...ticket, ticketId });
+}
+
+function scheduleUnsyncedTicketRetry(delayMs = 1500) {
+  if (!SHEET_WEB_APP_URL) return;
+  if (unsyncedCreateRetryTimer) window.clearTimeout(unsyncedCreateRetryTimer);
+  unsyncedCreateRetryTimer = window.setTimeout(() => {
+    unsyncedCreateRetryTimer = 0;
+    retryUnsyncedTicketCreates().catch((error) => console.error(error));
+  }, delayMs);
+}
+
+async function retryUnsyncedTicketCreates({ onlyKey = "", force = false } = {}) {
+  if (!SHEET_WEB_APP_URL) return { attempted: 0, saved: 0 };
+  if (unsyncedCreateRetryInFlight) return { attempted: 0, saved: 0, busy: true };
+  if (!force && isTicketSaveInFlight()) {
+    scheduleUnsyncedTicketRetry(20000);
+    return { attempted: 0, saved: 0, deferred: true };
+  }
+
+  const now = Date.now();
+  const candidates = readTickets().map(normalizeTicket).filter((ticket) => {
+    if (!isUnsyncedLocalTicket(ticket)) return false;
+    if (!cleanText(ticket.Owner)) return false;
+    const key = unsyncedTicketKey(ticket);
+    if (onlyKey) return key === onlyKey;
+    if (force) return true;
+    const pending = Number(ticket.pendingSheetSync) || 0;
+    if (pending && now - pending < UNSYNCED_CREATE_MIN_AGE_MS) return false;
+    const last = unsyncedCreateLastAttempt.get(key) || 0;
+    return now - last >= UNSYNCED_CREATE_RETRY_GAP_MS;
+  });
+  if (!candidates.length) return { attempted: 0, saved: 0 };
+
+  unsyncedCreateRetryInFlight = true;
+  let saved = 0;
+  let failed = 0;
+  try {
+    for (const candidate of candidates) {
+      const ticket = ensureUnsyncedTicketId(candidate);
+      const key = unsyncedTicketKey(ticket);
+      unsyncedCreateLastAttempt.set(key, Date.now());
+      try {
+        const result = await sendNewTicketsToSheet([normalizeTicket({
+          ...ticket,
+          pendingSheetSync: Date.now(),
+          pendingFields: PENDING_SYNC_FIELD_KEYS.slice()
+        })]);
+        const outcome = Array.isArray(result?.outcomes) ? result.outcomes[0] : null;
+        if (result?.synced === false || outcome?.ok === false) {
+          failed += 1;
+        } else {
+          saved += 1;
+          unsyncedCreateLastAttempt.delete(key);
+        }
+      } catch (error) {
+        failed += 1;
+        console.error("Retry save failed for unsynced ticket", key, error);
+      }
+    }
+  } finally {
+    unsyncedCreateRetryInFlight = false;
+  }
+
+  renderTickets({ force: true });
+  if (saved && !failed) {
+    setStatus("online", saved === 1 ? "Unsaved ticket saved to Google Sheets" : `${saved} unsaved tickets saved to Google Sheets`);
+  } else if (failed) {
+    setStatus("error", failed === 1
+      ? "1 ticket is still not saved to Google Sheets. Use Retry save on its row."
+      : `${failed} tickets are still not saved to Google Sheets. Use Retry save on their rows.`);
+  }
+  return { attempted: candidates.length, saved, failed };
+}
+
+async function retryUnsyncedTicketFromRow(key, button) {
+  if (!Auth.hasPermission("createTicket") && !canEditTickets()) {
+    alert("You do not have permission to save tickets.");
+    return;
+  }
+  const ticket = findUnsyncedLocalTicket(key);
+  if (!ticket) {
+    renderTickets({ force: true });
+    return;
+  }
+  if (button) {
+    button.disabled = true;
+    button.classList.add("is-syncing");
+  }
+  setStatus("", `Saving "${ticket.Task}" to Google Sheets...`);
+  const result = await retryUnsyncedTicketCreates({ onlyKey: unsyncedTicketKey(ticket), force: true });
+  if (result.busy) {
+    setStatus("", "A save is already running. Try again in a moment.");
+    if (button) {
+      button.disabled = false;
+      button.classList.remove("is-syncing");
+    }
+  }
+}
+
+function discardUnsyncedTicketFromRow(key) {
+  const ticket = findUnsyncedLocalTicket(key);
+  if (!ticket) {
+    renderTickets({ force: true });
+    return;
+  }
+  const ok = window.confirm(
+    `"${ticket.Task}" was never saved to Google Sheets. It only exists in this browser.\n\nRemove it from this browser?`
+  );
+  if (!ok) return;
+  let removed = false;
+  writeTickets(readTickets().filter((entry) => {
+    if (removed) return true;
+    const match = isUnsyncedLocalTicket(normalizeTicket(entry)) && unsyncedTicketKey(normalizeTicket(entry)) === key;
+    if (match) removed = true;
+    return !match;
+  }));
+  unsyncedCreateLastAttempt.delete(key);
+  setStatus("online", "Unsaved ticket removed from this browser");
+  renderTickets({ force: true });
+}
+
 async function sendNewTicketsToSheet(tickets, onProgress) {
   if (!SHEET_WEB_APP_URL) {
     setStatus("", "Saved locally. Sync is not configured.");
@@ -10477,6 +10674,7 @@ async function refreshFromSheet(options = {}) {
       });
     }
     if (!options.silent) setStatus("online", `Loaded ${tickets.length} tickets`);
+    if (tickets.some(isUnsyncedLocalTicket)) scheduleUnsyncedTicketRetry();
 
     if (!options.skipScreenshotSync) {
       const syncPromise = syncPendingScreenshotsToDrive(getValidTickets());
