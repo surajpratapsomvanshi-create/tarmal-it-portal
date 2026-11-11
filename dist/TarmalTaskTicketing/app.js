@@ -9610,8 +9610,22 @@ function initMyFocus() {
     });
   });
 
+  // The note is anchored by its bottom edge, so it grows upward when items load,
+  // items are added, or the notes box is resized. Re-clamp so the drag handle stays on screen.
+  if (typeof ResizeObserver === "function") {
+    let sizeFrame = 0;
+    new ResizeObserver(() => {
+      if (sizeFrame) return;
+      sizeFrame = window.requestAnimationFrame(() => {
+        sizeFrame = 0;
+        if (!els.note.classList.contains("is-dragging")) clampMyFocusPosition();
+      });
+    }).observe(els.note);
+  }
+
   applyMyFocusView();
   renderMyFocusNote({ force: true });
+  clampMyFocusPosition();
 }
 
 function renderTicketTable(tickets, options = {}) {
