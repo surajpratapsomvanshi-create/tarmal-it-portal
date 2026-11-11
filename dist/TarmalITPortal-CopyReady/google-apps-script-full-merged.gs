@@ -5819,6 +5819,99 @@ function processRecurringTickets() {
   }
 }
 
+/**
+ * One-time cleanup, run from the editor. Preview first: logs which older open
+ * copies of each recurring task would be removed. Changes nothing.
+ */
+function previewOlderOpenRecurringCopies() {
+  return cleanupOlderOpenRecurringCopies_(false);
+}
+
+/**
+ * One-time cleanup, run from the editor. For each recurring task (same Task +
+ * Owner, part of a series), keeps the newest open copy and soft-deletes the
+ * older open copies (Status = Deleted, row hidden). Completed rows are untouched.
+ */
+function cleanupOlderOpenRecurringCopies() {
+  return cleanupOlderOpenRecurringCopies_(true);
+}
+
+function cleanupOlderOpenRecurringCopies_(apply) {
+  const lock = LockService.getScriptLock();
+  var lockAcquired = false;
+  try {
+    lockAcquired = lock.tryLock(WRITE_LOCK_WAIT_MS_);
+    if (!lockAcquired) {
+      Logger.log("Could not acquire lock. Try again in a minute.");
+      return { ok: false, error: "locked" };
+    }
+
+    invalidateTasksHeaderCache_();
+    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(TASKS_SHEET);
+    if (!sheet) return { ok: false, error: "Tasks sheet missing" };
+    const columnMap = ensureTasksColumns_(sheet);
+    const lastRow = sheet.getLastRow();
+    if (lastRow < 2) return { ok: true, removed: 0 };
+
+    const sheetInfo = getTasksSheetHeaders_(sheet);
+    const values = sheet.getRange(2, 1, lastRow - 1, sheetInfo.lastColumn).getValues();
+    const tickets = [];
+    for (let i = 0; i < values.length; i++) {
+      tickets.push(rowToTicket_(values[i], columnMap, i + 2));
+    }
+
+    const groups = {};
+    for (let i = 0; i < tickets.length; i++) {
+      const ticket = tickets[i];
+      if (!isOpenOccurrenceCandidate_(ticket)) continue;
+      const taskKey = normalizeLooseIdentity_(ticket.Task);
+      if (!taskKey) continue;
+      const key = taskKey + "\n" + normalizeLooseIdentity_(ticket.Owner);
+      if (!groups[key]) groups[key] = [];
+      groups[key].push(ticket);
+    }
+
+    let removed = 0;
+    let seriesCount = 0;
+    const keys = Object.keys(groups);
+    for (let g = 0; g < keys.length; g++) {
+      const members = groups[keys[g]];
+      if (!members || members.length < 2) continue;
+      const sample = members[0];
+      const seriesLinked = members.some(function(member) {
+        return ticketHasRecurrenceValue_(member) || String(member.RecurrenceParentId || "").trim();
+      }) || lookupSeriesRecurrence_(tickets, normalizeLooseIdentity_(sample.Task), normalizeLooseIdentity_(sample.Owner));
+      if (!seriesLinked) continue;
+
+      const heads = members.filter(ticketHasRecurrenceValue_);
+      const pool = (heads.length ? heads : members).slice().sort(compareRecurringOccurrenceNewestFirst_);
+      const keeper = pool[0];
+      seriesCount += 1;
+      Logger.log("Keep row " + keeper.sheetRow + ": " + keeper.Task + " (" + keeper.Owner + ")");
+
+      for (let m = 0; m < members.length; m++) {
+        const member = members[m];
+        if (member === keeper) continue;
+        Logger.log((apply ? "  Removed row " : "  Would remove row ") + member.sheetRow
+          + " (start " + (calendarDayKey_(member["Start date"]) || "?") + ")");
+        if (apply && softDeleteDuplicateOccurrence_(sheet, columnMap, member)) removed += 1;
+        if (!apply) removed += 1;
+      }
+    }
+
+    if (apply) {
+      repairRecurringSeriesHeads_(sheet, columnMap, tickets);
+      SpreadsheetApp.flush();
+    }
+    const summary = (apply ? "Removed " : "Would remove ") + removed
+      + " older open copies across " + seriesCount + " recurring tasks.";
+    Logger.log(summary);
+    return { ok: true, removed: removed, series: seriesCount, applied: Boolean(apply) };
+  } finally {
+    releaseWriteLock_(lock, lockAcquired);
+  }
+}
+
 /* =====================================================
    OPEN MILESTONE ROLLOVER
    Yesterday-only: when the calendar day ends, bump Milestone to today ONLY for
