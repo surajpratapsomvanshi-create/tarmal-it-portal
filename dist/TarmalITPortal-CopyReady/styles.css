@@ -7757,7 +7757,6 @@ body.view-focus .dashboard-layout {
   }
 
   .ticket-filters,
-  .ticket-filters[aria-label="Ticket filters"],
   .kanban-filters,
   .asset-filters {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -7778,14 +7777,19 @@ body.view-focus .dashboard-layout {
     min-height: 44px;
   }
 
+  /* Tablet: keep ticket filter bar readable — do not crush to 32px */
+  .ticket-filters[aria-label="Ticket filters"] {
+    gap: 8px 10px;
+  }
+
   .ticket-filters[aria-label="Ticket filters"] .filter-field input,
   .ticket-filters[aria-label="Ticket filters"] .filter-field select,
   .ticket-filters[aria-label="Ticket filters"] .multi-select-trigger,
   .ticket-filters[aria-label="Ticket filters"] .filter-clear {
-    height: 32px;
-    min-height: 32px;
-    max-height: 32px;
-    line-height: 30px;
+    height: 36px;
+    min-height: 36px;
+    max-height: none;
+    line-height: 1.2;
   }
 
   .table-wrap,
@@ -8141,10 +8145,114 @@ body.view-focus .dashboard-layout {
   }
 
   .ticket-filters,
-  .ticket-filters[aria-label="Ticket filters"],
   .kanban-filters,
   .asset-filters {
     grid-template-columns: 1fr;
+  }
+
+  /*
+   * Ticket filters are display:flex + min-width:max-content on desktop.
+   * grid-template-columns alone does nothing — rebuild as a neat 2-col grid.
+   */
+  .ticket-filters[aria-label="Ticket filters"] {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: end;
+    gap: 10px 8px;
+    padding: 12px;
+    margin-bottom: 10px;
+  }
+
+  .ticket-filters[aria-label="Ticket filters"] > .filter-field,
+  .ticket-filters[aria-label="Ticket filters"] > .filter-clear,
+  .ticket-filters[aria-label="Ticket filters"] > .clear-filters-button,
+  .ticket-filters[aria-label="Ticket filters"] > .my-focus-mode-button {
+    flex: none;
+    width: 100%;
+    min-width: 0;
+    max-width: none;
+  }
+
+  .ticket-filters[aria-label="Ticket filters"] > .filter-search,
+  .ticket-filters[aria-label="Ticket filters"] > .filter-field:has(#ticketSortFilter) {
+    grid-column: 1 / -1;
+  }
+
+  .ticket-filters[aria-label="Ticket filters"] .filter-field > span {
+    font-size: 11px;
+    line-height: 1.2;
+  }
+
+  .ticket-filters[aria-label="Ticket filters"] .filter-field input,
+  .ticket-filters[aria-label="Ticket filters"] .filter-field select,
+  .ticket-filters[aria-label="Ticket filters"] .multi-select-trigger,
+  .ticket-filters[aria-label="Ticket filters"] .filter-clear,
+  .ticket-filters[aria-label="Ticket filters"] .clear-filters-button,
+  .ticket-filters[aria-label="Ticket filters"] .my-focus-mode-button {
+    width: 100%;
+    height: 40px;
+    min-height: 40px;
+    max-height: none;
+    box-sizing: border-box;
+    padding: 0 10px;
+    font-size: 13px;
+    line-height: 1.2;
+  }
+
+  .ticket-filters[aria-label="Ticket filters"] .filter-field select {
+    min-width: 0;
+    max-width: none;
+    field-sizing: fixed;
+  }
+
+  .ticket-filters[aria-label="Ticket filters"] .multi-select {
+    width: 100%;
+  }
+
+  .ticket-filters[aria-label="Ticket filters"] .multi-select-trigger {
+    display: flex;
+    align-items: center;
+    min-width: 0;
+    max-width: none;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .ticket-filters[aria-label="Ticket filters"] > .clear-filters-button,
+  .ticket-filters[aria-label="Ticket filters"] > .my-focus-mode-button {
+    align-self: stretch;
+    white-space: nowrap;
+  }
+
+  .board-header {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+
+  .board-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    width: 100%;
+    justify-content: stretch;
+  }
+
+  .board-actions .primary-button {
+    grid-column: 1 / -1;
+  }
+
+  .board-actions .primary-button,
+  .board-actions .secondary-button {
+    width: 100%;
+    min-height: 40px;
+    justify-content: center;
+    padding: 0 10px;
+    font-size: 13px;
+  }
+
+  .ticket-board {
+    padding: 12px;
   }
 
   .multi-select-panel {
@@ -8486,6 +8594,23 @@ body.view-focus .dashboard-layout {
     text-overflow: clip;
   }
 
+  #ticketTable .ticket-col-priority,
+  #projectTable .ticket-col-priority,
+  #ticketTable .ticket-col-owner,
+  #projectTable .ticket-col-owner,
+  #ticketTable .ticket-col-status,
+  #projectTable .ticket-col-status,
+  #ticketTable .ticket-col-type,
+  #projectTable .ticket-col-type,
+  #ticketTable .ticket-col-date,
+  #projectTable .ticket-col-date,
+  #ticketTable .ticket-col-raised,
+  #projectTable .ticket-col-raised,
+  #ticketTable .ticket-col-original,
+  #projectTable .ticket-col-original {
+    margin: 0 2px 4px 0;
+  }
+
   #ticketTable .ticket-type-label,
   #projectTable .ticket-type-label,
   #ticketTable .ticket-completed-label {
@@ -8503,9 +8628,9 @@ body.view-focus .dashboard-layout {
     width: 100% !important;
     font-size: 13px;
     color: var(--ink-secondary);
-    white-space: nowrap !important;
+    white-space: normal !important;
     word-break: normal !important;
-    overflow-wrap: normal !important;
+    overflow-wrap: break-word !important;
   }
 
   #ticketTable .actions-col,
@@ -8517,7 +8642,7 @@ body.view-focus .dashboard-layout {
     min-width: 0 !important;
     max-width: none !important;
     text-align: left;
-    padding-top: 4px !important;
+    padding-top: 8px !important;
     border-top: 1px solid var(--line) !important;
   }
 
@@ -8526,8 +8651,27 @@ body.view-focus .dashboard-layout {
     display: flex;
     flex-wrap: wrap;
     justify-content: flex-start;
-    gap: 6px;
+    gap: 8px;
     max-width: 100%;
+  }
+
+  #ticketTable .ticket-row-actions > button,
+  #projectTable .ticket-row-actions > button,
+  #ticketTable .ticket-edit-button,
+  #projectTable .ticket-edit-button,
+  #ticketTable .ticket-focus-button,
+  #projectTable .ticket-focus-button,
+  #ticketTable .ticket-subtask-button,
+  #projectTable .ticket-subtask-button,
+  #ticketTable .ticket-milestone-today-button,
+  #projectTable .ticket-milestone-today-button,
+  #ticketTable .ticket-duplicate-button,
+  #projectTable .ticket-duplicate-button {
+    width: 36px;
+    height: 36px;
+    min-width: 36px;
+    min-height: 36px;
+    border-radius: 8px;
   }
 
   #ticketTable .subtask-row .task-col,
@@ -8578,6 +8722,16 @@ body.view-focus .dashboard-layout {
     min-height: 30px;
     font-size: 11px;
     padding: 0 8px;
+  }
+
+  .ticket-filters[aria-label="Ticket filters"] {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .ticket-filters[aria-label="Ticket filters"] > .clear-filters-button,
+  .ticket-filters[aria-label="Ticket filters"] > .my-focus-mode-button {
+    grid-column: 1 / -1;
   }
 
   .brand-tagline {
@@ -10341,6 +10495,15 @@ tbody tr.my-focus-flash > td {
   flex: 0 0 auto;
   width: auto;
   min-width: max-content;
+}
+
+@media (max-width: 768px) {
+  .ticket-filters[aria-label="Ticket filters"] > .my-focus-mode-button {
+    flex: none;
+    width: 100%;
+    min-width: 0;
+    max-width: none;
+  }
 }
 
 .my-focus-mode-button.is-active {
