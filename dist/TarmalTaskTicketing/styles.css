@@ -4405,7 +4405,7 @@ tbody tr.milestone-today:not(.status-blocked):hover {
   white-space: nowrap;
 }
 
-.ticket-filters[aria-label="Ticket filters"] .filter-field input,
+.ticket-filters[aria-label="Ticket filters"] .filter-field input:not([type="checkbox"]),
 .ticket-filters[aria-label="Ticket filters"] .filter-field select,
 .ticket-filters[aria-label="Ticket filters"] .multi-select-trigger,
 .ticket-filters[aria-label="Ticket filters"] .filter-clear {
@@ -4438,7 +4438,7 @@ tbody tr.milestone-today:not(.status-blocked):hover {
   width: 100%;
 }
 
-.filter-field input,
+.filter-field input:not([type="checkbox"]),
 .filter-field select,
 .multi-select-trigger {
   width: 100%;
@@ -4575,11 +4575,21 @@ tbody tr.milestone-today:not(.status-blocked):hover {
   background: var(--soft);
 }
 
-.multi-select-option input {
+.multi-select-option input,
+.multi-select-option input[type="checkbox"] {
+  flex: 0 0 16px;
   width: 16px;
   height: 16px;
+  min-width: 16px;
+  min-height: 16px;
+  max-width: 16px;
+  max-height: 16px;
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
   accent-color: var(--blue);
   cursor: pointer;
+  align-self: center;
 }
 
 .multi-select-option span {
@@ -7769,7 +7779,7 @@ body.view-focus .dashboard-layout {
     grid-column: 1 / -1;
   }
 
-  .filter-field input,
+  .filter-field input:not([type="checkbox"]),
   .filter-field select,
   .multi-select-trigger,
   .primary-button,
@@ -7782,7 +7792,7 @@ body.view-focus .dashboard-layout {
     gap: 8px 10px;
   }
 
-  .ticket-filters[aria-label="Ticket filters"] .filter-field input,
+  .ticket-filters[aria-label="Ticket filters"] .filter-field input:not([type="checkbox"]),
   .ticket-filters[aria-label="Ticket filters"] .filter-field select,
   .ticket-filters[aria-label="Ticket filters"] .multi-select-trigger,
   .ticket-filters[aria-label="Ticket filters"] .filter-clear {
@@ -8183,7 +8193,7 @@ body.view-focus .dashboard-layout {
     line-height: 1.2;
   }
 
-  .ticket-filters[aria-label="Ticket filters"] .filter-field input,
+  .ticket-filters[aria-label="Ticket filters"] .filter-field input:not([type="checkbox"]),
   .ticket-filters[aria-label="Ticket filters"] .filter-field select,
   .ticket-filters[aria-label="Ticket filters"] .multi-select-trigger,
   .ticket-filters[aria-label="Ticket filters"] .filter-clear,
@@ -8260,11 +8270,36 @@ body.view-focus .dashboard-layout {
     width: max-content;
     min-width: max(100%, max-content);
     max-width: calc(100vw - 16px);
+    background: #fff;
+    z-index: 80;
+    box-shadow: 0 10px 28px rgba(15, 23, 42, 0.18);
   }
 
   .multi-select-option {
+    display: flex;
+    align-items: center;
+    gap: 10px;
     min-height: 44px;
     padding: 10px 12px;
+  }
+
+  .multi-select-option input,
+  .multi-select-option input[type="checkbox"],
+  .ticket-filters[aria-label="Ticket filters"] .multi-select-option input,
+  .ticket-filters[aria-label="Ticket filters"] .filter-field .multi-select-option input[type="checkbox"] {
+    flex: 0 0 18px;
+    width: 18px !important;
+    height: 18px !important;
+    min-width: 18px !important;
+    min-height: 18px !important;
+    max-width: 18px !important;
+    max-height: 18px !important;
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+    align-self: center;
+    appearance: auto;
+    -webkit-appearance: checkbox;
   }
 
   /* Phone: stacked card rows — full-width task title, meta chips, actions */
