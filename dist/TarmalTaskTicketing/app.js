@@ -5604,13 +5604,26 @@ function isOutsideHoursMarked(ticket) {
   return Boolean(normalizeOutsideHoursFlag(ticket?.["Outside Hours"] || ticket?.outsideHours));
 }
 
+function userHasFullAdminRights(user = Auth.currentUser()) {
+  if (!user || typeof Auth === "undefined") return false;
+  if (Auth.isBuiltInAdmin(user) || Auth.isAdminUser(user) || Auth.isAdminLevelUser(user)) {
+    return true;
+  }
+  if (Auth.hasPermission?.("manageUsers") || Auth.hasRight?.("manageUsers")) {
+    return true;
+  }
+  const rights = user.rights || Auth.findStoredUser?.(user)?.rights || {};
+  if (rights.manageUsers) return true;
+  // Same effective rights as Admin (every Admin right granted).
+  const required = Auth.allRights?.() || {};
+  const keys = Object.keys(required);
+  if (!keys.length) return false;
+  return keys.every((key) => Boolean(rights[key]));
+}
+
 function canMarkOutsideOfficeHours(user = Auth.currentUser()) {
   if (!user) return false;
-  if (typeof Auth !== "undefined") {
-    if (Auth.isBuiltInAdmin(user) || Auth.isAdminLevelUser(user) || Auth.isAdminUser(user)) {
-      return true;
-    }
-  }
+  if (userHasFullAdminRights(user)) return true;
   const name = cleanText(user.name || user.username).toLowerCase();
   const email = cleanText(user.email).toLowerCase();
   if (name === "suraj" || name.startsWith("suraj ")) return true;
@@ -6736,7 +6749,7 @@ function syncOutsideHoursFormField(formKind = "create", ticket = null) {
   if (!field || !toggle) return;
 
   const allowed = canMarkOutsideOfficeHours();
-  // Always show for Admin / Suraj — do not wait for Status = Completed.
+  // Always show for Admin-level / Suraj — do not wait for Status = Completed.
   field.hidden = !allowed;
   if (!allowed) {
     toggle.checked = false;
