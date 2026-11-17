@@ -811,6 +811,7 @@ function slimTicketForDraftStorage(ticket) {
     Notes: notes,
     Remarks: notes,
     "Bhanu List": cleanText(ticket["Bhanu List"]),
+    "Outside Hours": normalizeOutsideHoursFlag(ticket["Outside Hours"]),
     ticketId: cleanText(ticket.ticketId || ticket.TicketId || ""),
     Recurrence: resolveTicketRecurrenceValue(ticket),
     RecurrenceNext: ticket.RecurrenceNext || ticket["Recurrence Next"] || "",
@@ -1937,6 +1938,7 @@ const PENDING_SYNC_FIELD_KEYS = [
   "Notes",
   "Remarks",
   "Bhanu List",
+  "Outside Hours",
   "parentSheetRow",
   "Recurrence",
   "RecurrenceNext",
@@ -1971,6 +1973,8 @@ function ticketFieldMatches(field, local, remote) {
       return normalizeNotesForCompare(local) === normalizeNotesForCompare(remote);
     case "Bhanu List":
       return cleanText(local["Bhanu List"]) === cleanText(remote["Bhanu List"]);
+    case "Outside Hours":
+      return normalizeOutsideHoursFlag(local["Outside Hours"]) === normalizeOutsideHoursFlag(remote["Outside Hours"]);
     case "parentSheetRow":
       return Number(local.parentSheetRow || 0) === Number(remote.parentSheetRow || 0);
     case "Recurrence":
@@ -2772,6 +2776,7 @@ function buildTicketSheetPayload(ticket, options = {}) {
     Notes: notesText,
     Remarks: notesText,
     "Bhanu List": ticket["Bhanu List"],
+    "Outside Hours": normalizeOutsideHoursFlag(ticket["Outside Hours"]),
     ticketId: ticketStableId(ticket) || undefined,
     identityTask: identity.identityTask,
     identityOwner: identity.identityOwner,
@@ -3241,6 +3246,7 @@ function normalizeTicket(ticket) {
     NotesRaw: notesRaw,
     ScreenshotUrls: screenshotUrls,
     "Bhanu List": cleanText(ticket["Bhanu List"]),
+    "Outside Hours": normalizeOutsideHoursFlag(ticket["Outside Hours"] || ticket.outsideHours),
     ticketId: cleanText(ticket.ticketId || ticket.TicketId || ticket["Ticket ID"] || ""),
     Recurrence: resolveTicketRecurrenceValue(ticket),
     RecurrenceNext: canonicalizeTicketDate(ticket.RecurrenceNext || ticket["Recurrence Next"] || ""),
@@ -4703,8 +4709,8 @@ function applyTicketFilters(tickets) {
     return ticketSearchHaystack(ticket).includes(search);
   });
 
-  // Outside-hours mode stays strictly on completed clock times. Do not pull in
-  // open parents or in-hours siblings just to keep a family together.
+  // Outside-hours mode stays on completed clock times / explicit marks only.
+  // Do not pull in open parents or in-hours siblings just to keep a family together.
   if (outsideHoursOnly) return filtered;
   // Focus Mode lists only starred tickets; do not pull in unstarred parents or siblings.
   if (focusOnly) return filtered;
@@ -5587,6 +5593,28 @@ function isTicketCompleted(ticket) {
 const OFFICE_START_MINUTES = 8 * 60;
 const OFFICE_END_MINUTES = 17 * 60 + 30;
 
+function normalizeOutsideHoursFlag(value) {
+  const text = cleanText(value).toLowerCase();
+  if (!text) return "";
+  if (text === "yes" || text === "y" || text === "true" || text === "1") return "Yes";
+  return "";
+}
+
+function isOutsideHoursMarked(ticket) {
+  return Boolean(normalizeOutsideHoursFlag(ticket?.["Outside Hours"] || ticket?.outsideHours));
+}
+
+function canMarkOutsideOfficeHours(user = Auth.currentUser()) {
+  if (!user) return false;
+  if (typeof Auth !== "undefined") {
+    if (Auth.isBuiltInAdmin?.(user) || Auth.isAdminLevelUser?.(user) || Auth.isAdminUser?.(user)) {
+      return true;
+    }
+  }
+  const name = cleanText(user.name || user.username).toLowerCase();
+  return name === "suraj" || name.startsWith("suraj ");
+}
+
 function completionTimestampHasTime(value) {
   const match = cleanText(value).match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2}))?/);
   if (!match) return false;
@@ -5607,6 +5635,12 @@ function localIsoDateTime(date = new Date()) {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
 }
 
+function forceClosedOnOutsideOffice(value = localIsoDateTime()) {
+  const match = cleanText(value).match(/^(\d{4}-\d{2}-\d{2})/);
+  const datePart = match ? match[1] : localIsoDateTime().slice(0, 10);
+  return `${datePart}T18:00:00`;
+}
+
 function formatCompletionStamp(value) {
   const match = cleanText(value).match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})/);
   if (!match) return cleanText(value);
@@ -5617,16 +5651,31 @@ function formatCompletionStamp(value) {
 /** Keep an existing completion time. Stamp local time only when status becomes Completed. */
 function stampTicketCompletion(ticket, previousTicket = null) {
   const next = { ...ticket };
+  const marked = normalizeOutsideHoursFlag(next["Outside Hours"] || next.outsideHours
+    || previousTicket?.["Outside Hours"]);
   if (!isTicketCompleted(next)) {
+    // Keep the mark through Pending Approval so it is not lost before manager approve.
+    if (isPendingApprovalStatus(next.Status)) {
+      next["Outside Hours"] = marked;
+      return next;
+    }
+    next["Outside Hours"] = "";
     next.closedOn = "";
     return next;
   }
+  next["Outside Hours"] = marked;
   if (previousTicket && isTicketCompleted(previousTicket) && completionTimestampHasTime(previousTicket.closedOn)) {
     next.closedOn = previousTicket.closedOn;
-    return next;
+  } else if (!completionTimestampHasTime(next.closedOn)) {
+    next.closedOn = localIsoDateTime();
   }
-  if (completionTimestampHasTime(next.closedOn)) return next;
-  next.closedOn = localIsoDateTime();
+  // Retroactive mark: work done after hours, ticket saved during office hours.
+  if (isOutsideHoursMarked(next)) {
+    const minutes = completionClockMinutes(next.closedOn);
+    if (minutes == null || (minutes >= OFFICE_START_MINUTES && minutes < OFFICE_END_MINUTES)) {
+      next.closedOn = forceClosedOnOutsideOffice(next.closedOn);
+    }
+  }
   return next;
 }
 
@@ -5641,7 +5690,9 @@ function mergedClosedOn(local, remote, preservePendingEdits, pendingFields) {
 }
 
 function completionOutsideOffice(ticket) {
-  if (!isTicketCompleted(ticket) || !completionTimestampHasTime(ticket?.closedOn)) return "";
+  if (!isTicketCompleted(ticket)) return "";
+  if (isOutsideHoursMarked(ticket)) return "marked";
+  if (!completionTimestampHasTime(ticket?.closedOn)) return "";
   const minutes = completionClockMinutes(ticket.closedOn);
   if (minutes == null) return "";
   if (minutes < OFFICE_START_MINUTES) return "before";
@@ -5675,8 +5726,11 @@ function getTicketCompletionError(ticket) {
 /** When the user selects Status = Completed, default End date to today (overwrite). */
 function onTicketStatusChangeForEndDate(event) {
   const statusField = event?.target;
-  if (!statusField || statusClass(statusField.value) !== "status-completed") return;
+  if (!statusField) return;
   const formElement = statusField.form;
+  const formKind = formElement === ticketEditForm ? "edit" : "create";
+  syncOutsideHoursFormField(formKind, formKind === "edit" ? activeEditTicket : null);
+  if (statusClass(statusField.value) !== "status-completed") return;
   const endDateField = formElement?.elements?.["End date"];
   if (!endDateField) return;
   endDateField.value = getTodayDateValue();
@@ -6509,6 +6563,7 @@ function openSubtaskCreateModal(parentSheetRow) {
   applyDefaultTicketFormOwner();
   applySurajTicketCreateDefaults({ force: true });
   resetTicketFormFocusToggle();
+  syncOutsideHoursFormField("create");
   form?.elements.Task?.focus();
 }
 
@@ -6555,6 +6610,7 @@ function openTicketCreateModal() {
     form.elements.Status.value = "Not started";
   }
   resetTicketFormFocusToggle();
+  syncOutsideHoursFormField("create");
   form?.elements.Task?.focus();
 }
 
@@ -6620,6 +6676,7 @@ function openTicketEditor(sheetRow) {
   populateTicketEditParentContext(ticket);
   populateTicketEditApprovalNote(ticket);
   syncTicketEditFocusToggle(ticket);
+  syncOutsideHoursFormField("edit", ticket);
 
   ticketEditModal.hidden = false;
   document.body.classList.add("modal-open");
@@ -6660,10 +6717,35 @@ function ticketFromEditForm() {
     ticketId: ticketStableId(activeEditTicket) || "",
     lastUpdated: cleanText(activeEditTicket?.lastUpdated) || ""
   }, ticketEditNotesEditor));
+  if (!canMarkOutsideOfficeHours()) {
+    payload["Outside Hours"] = normalizeOutsideHoursFlag(activeEditTicket?.["Outside Hours"]);
+  }
   if (!payload.Recurrence && activeEditTicket?.RecurrenceParentId) {
     payload.RecurrenceParentId = cleanText(activeEditTicket.RecurrenceParentId);
   }
   return payload;
+}
+
+function syncOutsideHoursFormField(formKind = "create", ticket = null) {
+  const isEdit = formKind === "edit";
+  const field = document.querySelector(isEdit ? "#ticketEditOutsideHoursField" : "#ticketFormOutsideHoursField");
+  const toggle = document.querySelector(isEdit ? "#ticketEditOutsideHoursToggle" : "#ticketFormOutsideHoursToggle");
+  const formElement = isEdit ? ticketEditForm : form;
+  if (!field || !toggle) return;
+
+  const allowed = canMarkOutsideOfficeHours();
+  const statusValue = cleanText(formElement?.elements?.Status?.value || ticket?.Status);
+  const completed = statusClass(statusValue) === "status-completed";
+  field.hidden = !(allowed && completed);
+  if (!allowed) {
+    toggle.checked = false;
+    return;
+  }
+  if (ticket) {
+    toggle.checked = isOutsideHoursMarked(ticket);
+  } else if (!completed) {
+    toggle.checked = false;
+  }
 }
 
 function ticketFromFormData(data, owner = "") {
@@ -6687,7 +6769,8 @@ function ticketFromFormData(data, owner = "") {
     RecurrenceNext: recurrence.next,
     RecurrenceParentId: cleanText(data.get("RecurrenceParentId") || ""),
     Notes: cleanNotesText(data.get("Notes") || ""),
-    "Bhanu List": data.has("originalOwnerBhanu") ? "Bhanu" : ""
+    "Bhanu List": data.has("originalOwnerBhanu") ? "Bhanu" : "",
+    "Outside Hours": canMarkOutsideOfficeHours() && data.has("outsideHoursMarked") ? "Yes" : ""
   };
 }
 
@@ -7101,6 +7184,9 @@ function applyTicketSyncResult(sheetRow, result = {}, expected = {}) {
     "Raised By": expected["Raised By"] ?? ticket["Raised By"],
     Type: expected.Type ?? ticket.Type,
     "Bhanu List": expected["Bhanu List"] ?? ticket["Bhanu List"],
+    "Outside Hours": Object.prototype.hasOwnProperty.call(expected, "Outside Hours")
+      ? normalizeOutsideHoursFlag(expected["Outside Hours"])
+      : normalizeOutsideHoursFlag(ticket["Outside Hours"]),
     parentSheetRow: expected.parentSheetRow ?? ticket.parentSheetRow,
     Recurrence: Object.prototype.hasOwnProperty.call(expected, "Recurrence")
       ? normalizeRecurrenceValue(expected.Recurrence)
@@ -10040,7 +10126,7 @@ function renderTickets(options = {}) {
         ? `Showing ${tickets.length} ticket${tickets.length === 1 ? "" : "s"} sorted by date`
         : `Showing ${filteredTickets.length} of ${tickets.length} tickets`;
       const outsideLabel = filteredTickets.length
-        ? `Showing ${filteredTickets.length} completed outside office hours (before 8:00 or at/after 5:30)`
+        ? `Showing ${filteredTickets.length} completed outside office hours (before 8:00, at/after 5:30, or marked)`
         : "No tickets completed outside office hours";
 
       const focusModeOn = isMyFocusModeOn();

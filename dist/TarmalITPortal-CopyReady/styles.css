@@ -3959,15 +3959,18 @@ tbody tr.is-unsynced > td:first-child {
   margin: 0;
 }
 
-.my-focus-form-field {
+.my-focus-form-field,
+.outside-hours-form-field {
   gap: 8px;
 }
 
-.my-focus-form-field[hidden] {
+.my-focus-form-field[hidden],
+.outside-hours-form-field[hidden] {
   display: none !important;
 }
 
-.my-focus-form-field .ticket-form-grid-note {
+.my-focus-form-field .ticket-form-grid-note,
+.outside-hours-form-field .ticket-form-grid-note {
   margin: 0;
 }
 

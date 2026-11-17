@@ -136,7 +136,8 @@ const COLUMN_ALIASES = {
   ticketId: ["ticket id", "ticketid", "ticket uuid"],
   recurrence: ["recurrence", "recurring", "repeat"],
   recurrenceNext: ["recurrence next", "recurrencenext", "next recurrence", "recurrence due"],
-  recurrenceParentId: ["recurrence parent id", "recurrenceparentid", "recurrence template id", "recurring parent id"]
+  recurrenceParentId: ["recurrence parent id", "recurrenceparentid", "recurrence template id", "recurring parent id"],
+  outsideHours: ["outside hours", "outside office hours", "outsidehours", "after hours"]
 };
 
 const SOFT_DELETED_STATUS_ = "Deleted";
@@ -144,6 +145,7 @@ const TICKET_ID_HEADER_ = "Ticket ID";
 const RECURRENCE_HEADER_ = "Recurrence";
 const RECURRENCE_NEXT_HEADER_ = "Recurrence Next";
 const RECURRENCE_PARENT_ID_HEADER_ = "Recurrence Parent Id";
+const OUTSIDE_HOURS_HEADER_ = "Outside Hours";
 const RECURRING_TICKETS_HANDLER_ = "processRecurringTickets";
 const MILESTONE_ROLLOVER_HANDLER_ = "processOpenMilestoneRollover";
 const RECURRING_CATCH_UP_PER_TEMPLATE_ = 5;
@@ -1236,8 +1238,16 @@ function getTicketFieldValues_(data) {
       || data["Recurrence Parent Id"]
       || data.recurrenceParentId
       || ""
-    ).trim()
+    ).trim(),
+    outsideHours: normalizeOutsideHoursFlag_(data["Outside Hours"] || data.outsideHours || "")
   };
+}
+
+function normalizeOutsideHoursFlag_(value) {
+  const text = String(value || "").trim().toLowerCase();
+  if (!text) return "";
+  if (text === "yes" || text === "y" || text === "true" || text === "1") return "Yes";
+  return "";
 }
 
 const COLUMN_FALLBACK_INDICES_ = {
@@ -1281,7 +1291,8 @@ function applyTicketFieldsToRow_(row, columnMap, fields) {
     ticketId: fields.ticketId || "",
     recurrence: fields.recurrence || "",
     recurrenceNext: fields.recurrenceNext || "",
-    recurrenceParentId: fields.recurrenceParentId || ""
+    recurrenceParentId: fields.recurrenceParentId || "",
+    outsideHours: fields.outsideHours || ""
   };
 
   let requiredLength = row.length;
@@ -1453,6 +1464,11 @@ function ensureTasksColumns_(sheet) {
   const mapAfterRecurrenceNext = buildColumnMap_(headers);
   if (mapAfterRecurrenceNext.recurrenceParentId < 0) {
     headers.push(RECURRENCE_PARENT_ID_HEADER_);
+    changed = true;
+  }
+  const mapAfterRecurrenceParent = buildColumnMap_(headers);
+  if (mapAfterRecurrenceParent.outsideHours < 0) {
+    headers.push(OUTSIDE_HOURS_HEADER_);
     changed = true;
   }
 
@@ -2851,6 +2867,7 @@ function rowToTicket_(row, columnMap, sheetRow) {
     Recurrence: recurrence,
     RecurrenceNext: recurrenceNext,
     RecurrenceParentId: recurrenceParentId,
+    "Outside Hours": normalizeOutsideHoursFlag_(readCell_(row, columnMap.outsideHours, -1) || ""),
     sheetRow: sheetRow
   };
 }

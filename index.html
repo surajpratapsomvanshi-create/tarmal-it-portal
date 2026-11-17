@@ -6,11 +6,11 @@
     <title>Tarmal IT Portal</title>
     <link rel="icon" href="./assets/tarmal-mark.png?v=1" type="image/png">
     <link rel="apple-touch-icon" href="./assets/apple-touch-icon.png?v=1">
-    <link rel="stylesheet" href="./styles.css?v=218">
+    <link rel="stylesheet" href="./styles.css?v=219">
     <!-- auth stays blocking so requireLogin runs before app chrome paints -->
     <script src="./auth.js?v=31"></script>
     <!-- Defer main bundles so HTML can parse while ~210KB+ app.js downloads -->
-    <script src="./app.js?v=239" defer></script>
+    <script src="./app.js?v=240" defer></script>
     <script src="./assets.js?v=21" defer></script>
     <script src="./documents.js?v=12" defer></script>
     <script src="./procurement.js?v=6" defer></script>
@@ -1415,6 +1415,15 @@
                 </label>
                 <p class="ticket-form-grid-note">Personal list on this browser only — nothing is saved to the ticket. With several owners, only your own ticket is added.</p>
               </div>
+
+              <div class="field field-span-all outside-hours-form-field" id="ticketFormOutsideHoursField" hidden>
+                <span>Outside office hours</span>
+                <label class="multi-select-option outside-hours-form-option">
+                  <input type="checkbox" id="ticketFormOutsideHoursToggle" name="outsideHoursMarked" value="Yes">
+                  <span>Done outside office hours (before 8:00 or after 5:30)</span>
+                </label>
+                <p class="ticket-form-grid-note">Admin / Suraj only — use when the work was finished outside hours but the ticket is logged later.</p>
+              </div>
             </div>
           </div>
 
@@ -1595,6 +1604,15 @@
                   <span>⭐ In My Focus</span>
                 </label>
                 <p class="ticket-form-grid-note">Applies right away, like the row star — personal list, not saved to the ticket.</p>
+              </div>
+
+              <div class="field field-span-all outside-hours-form-field" id="ticketEditOutsideHoursField" hidden>
+                <span>Outside office hours</span>
+                <label class="multi-select-option outside-hours-form-option">
+                  <input type="checkbox" id="ticketEditOutsideHoursToggle" name="outsideHoursMarked" value="Yes">
+                  <span>Done outside office hours (before 8:00 or after 5:30)</span>
+                </label>
+                <p class="ticket-form-grid-note">Admin / Suraj only — tick when work finished outside hours but the ticket is saved during office hours.</p>
               </div>
             </div>
           </div>
