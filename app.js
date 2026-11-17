@@ -5607,12 +5607,15 @@ function isOutsideHoursMarked(ticket) {
 function canMarkOutsideOfficeHours(user = Auth.currentUser()) {
   if (!user) return false;
   if (typeof Auth !== "undefined") {
-    if (Auth.isBuiltInAdmin?.(user) || Auth.isAdminLevelUser?.(user) || Auth.isAdminUser?.(user)) {
+    if (Auth.isBuiltInAdmin(user) || Auth.isAdminLevelUser(user) || Auth.isAdminUser(user)) {
       return true;
     }
   }
   const name = cleanText(user.name || user.username).toLowerCase();
-  return name === "suraj" || name.startsWith("suraj ");
+  const email = cleanText(user.email).toLowerCase();
+  if (name === "suraj" || name.startsWith("suraj ")) return true;
+  if (email === "sap@tarmalsteel.com" || email.startsWith("suraj")) return true;
+  return false;
 }
 
 function completionTimestampHasTime(value) {
@@ -6730,21 +6733,29 @@ function syncOutsideHoursFormField(formKind = "create", ticket = null) {
   const isEdit = formKind === "edit";
   const field = document.querySelector(isEdit ? "#ticketEditOutsideHoursField" : "#ticketFormOutsideHoursField");
   const toggle = document.querySelector(isEdit ? "#ticketEditOutsideHoursToggle" : "#ticketFormOutsideHoursToggle");
-  const formElement = isEdit ? ticketEditForm : form;
   if (!field || !toggle) return;
 
   const allowed = canMarkOutsideOfficeHours();
-  const statusValue = cleanText(formElement?.elements?.Status?.value || ticket?.Status);
-  const completed = statusClass(statusValue) === "status-completed";
-  field.hidden = !(allowed && completed);
+  // Always show for Admin / Suraj — do not wait for Status = Completed.
+  field.hidden = !allowed;
   if (!allowed) {
     toggle.checked = false;
     return;
   }
   if (ticket) {
     toggle.checked = isOutsideHoursMarked(ticket);
-  } else if (!completed) {
-    toggle.checked = false;
+  }
+}
+
+function onOutsideHoursToggleChange(event) {
+  const toggle = event?.target;
+  if (!toggle?.checked) return;
+  const formElement = toggle.closest("form");
+  if (!formElement) return;
+  const statusField = formElement.elements?.Status;
+  if (statusField && statusClass(statusField.value) !== "status-completed") {
+    statusField.value = "Completed";
+    statusField.dispatchEvent(new Event("change", { bubbles: true }));
   }
 }
 
@@ -11747,6 +11758,8 @@ ticketEditForm?.elements?.["Raised By"]?.addEventListener("input", () => onRaise
 ticketEditForm?.elements?.["Raised By"]?.addEventListener("change", () => onRaisedByFieldManualInput("edit"));
 form?.elements?.Status?.addEventListener("change", onTicketStatusChangeForEndDate);
 ticketEditForm?.elements?.Status?.addEventListener("change", onTicketStatusChangeForEndDate);
+document.querySelector("#ticketFormOutsideHoursToggle")?.addEventListener("change", onOutsideHoursToggleChange);
+document.querySelector("#ticketEditOutsideHoursToggle")?.addEventListener("change", onOutsideHoursToggleChange);
 
 if (form?.elements["Start date"]) {
 form.elements["Start date"].valueAsDate = new Date();
