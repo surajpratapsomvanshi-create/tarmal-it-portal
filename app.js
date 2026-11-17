@@ -6756,7 +6756,10 @@ function syncOutsideHoursFormField(formKind = "create", ticket = null) {
     return;
   }
   if (ticket) {
-    toggle.checked = isOutsideHoursMarked(ticket);
+    // Match the outside-hours list: explicit mark OR completion clock before 8:00 / at-after 5:30.
+    // Leaving checked on save writes Outside Hours=Yes so the ticket stays in the list.
+    // Unchecking clears the explicit mark only (does not rewrite closedOn).
+    toggle.checked = isOutsideHoursMarked(ticket) || Boolean(completionOutsideOffice(ticket));
   }
 }
 
