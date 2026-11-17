@@ -228,6 +228,8 @@ const screenshotPreviewNotice = document.querySelector("#screenshotPreviewNotice
 
 let screenshotPreviewState = { urls: [], index: 0, title: "", eyebrow: "Attachment" };
 let activeEditTicket = null;
+/** Sheet rows currently shown in the outside-hours ticket list (for edit-checkbox prefill). */
+let lastOutsideHoursSheetRows = new Set();
 
 const TAB_LABELS = {
   dashboard: "Dashboard",
@@ -6655,7 +6657,7 @@ function closeTicketCreateModal() {
   }
 }
 
-function openTicketEditor(sheetRow) {
+function openTicketEditor(sheetRow, options = {}) {
   if (!canEditTickets()) {
     alert("You do not have permission to edit tickets.");
     return;
@@ -6669,7 +6671,18 @@ function openTicketEditor(sheetRow) {
     return;
   }
 
-  activeEditTicket = repairTicketRecurrenceForEdit({ ...ticket });
+  const rowNum = Number(ticket.sheetRow || sheetRow) || 0;
+  const forceOutsideHours = Boolean(options.outsideHours)
+    || (rowNum > 0 && lastOutsideHoursSheetRows.has(rowNum))
+    || (isTicketOutsideHoursFilterOn() && isTicketCompleted(ticket))
+    || Boolean(completionOutsideOffice(ticket))
+    || isOutsideHoursMarked(ticket);
+
+  activeEditTicket = repairTicketRecurrenceForEdit({
+    ...ticket,
+    closedOn: ticket.closedOn || ticket["Closed On"] || "",
+    "Outside Hours": normalizeOutsideHoursFlag(ticket["Outside Hours"] || ticket.outsideHours)
+  });
   resetTicketDeleteUi();
   resetTicketEditRaisedByTracking();
   if (ticketEditSheetRow) {
@@ -6698,11 +6711,17 @@ function openTicketEditor(sheetRow) {
   populateTicketEditParentContext(ticket);
   populateTicketEditApprovalNote(ticket);
   syncTicketEditFocusToggle(ticket);
-  // Use activeEditTicket (copy) so closedOn / Outside Hours survive any form field writes.
-  syncOutsideHoursFormField("edit", activeEditTicket || ticket);
 
   ticketEditModal.hidden = false;
   document.body.classList.add("modal-open");
+  // Prefill after the modal is visible — some browsers drop checked state while the
+  // outside-hours field is still display:none from the [hidden] attribute.
+  const syncEditOutsideHours = () => {
+    syncOutsideHoursFormField("edit", activeEditTicket || ticket, { forceOutsideHours });
+  };
+  syncEditOutsideHours();
+  queueMicrotask(syncEditOutsideHours);
+  window.requestAnimationFrame(syncEditOutsideHours);
   ticketEditForm.elements.Task.focus();
   maybeAutofillRaisedByFromTask("edit");
 }
@@ -6749,7 +6768,7 @@ function ticketFromEditForm() {
   return payload;
 }
 
-function syncOutsideHoursFormField(formKind = "create", ticket = null) {
+function syncOutsideHoursFormField(formKind = "create", ticket = null, options = {}) {
   const isEdit = formKind === "edit";
   const field = document.querySelector(isEdit ? "#ticketEditOutsideHoursField" : "#ticketFormOutsideHoursField");
   const toggle = document.querySelector(isEdit ? "#ticketEditOutsideHoursToggle" : "#ticketFormOutsideHoursToggle");
@@ -6760,19 +6779,25 @@ function syncOutsideHoursFormField(formKind = "create", ticket = null) {
   field.hidden = !allowed;
   if (!allowed) {
     toggle.checked = false;
+    toggle.defaultChecked = false;
     return;
   }
-  if (ticket) {
-    // Match the outside-hours list: explicit mark OR completion clock before 8:00 / at-after 5:30.
-    // If the outside-hours filter is on, also check — list membership can outlive a missing
-    // closedOn on the edit object (lite poll skipped TaskAudit) until the next full refresh.
-    // Leaving checked on save writes Outside Hours=Yes so the ticket stays in the list.
-    // Unchecking clears the explicit mark only (does not rewrite closedOn).
-    const fromOutsideHoursView = isTicketOutsideHoursFilterOn() && isTicketCompleted(ticket);
-    toggle.checked = isOutsideHoursMarked(ticket)
-      || Boolean(completionOutsideOffice(ticket))
-      || fromOutsideHoursView;
-  }
+  if (!ticket) return;
+
+  // Match the outside-hours list: explicit mark OR completion clock before 8:00 / at-after 5:30.
+  // Also honor list membership / edit-button flag when closedOn was dropped by a lite poll.
+  // Leaving checked on save writes Outside Hours=Yes so the ticket stays in the list.
+  // Unchecking clears the explicit mark only (does not rewrite closedOn).
+  const rowNum = Number(ticket.sheetRow) || 0;
+  const shouldCheck = isOutsideHoursMarked(ticket)
+    || Boolean(completionOutsideOffice(ticket))
+    || Boolean(options.forceOutsideHours)
+    || (rowNum > 0 && lastOutsideHoursSheetRows.has(rowNum))
+    || (isTicketOutsideHoursFilterOn() && isTicketCompleted(ticket));
+  toggle.checked = shouldCheck;
+  toggle.defaultChecked = shouldCheck;
+  if (shouldCheck) toggle.setAttribute("checked", "checked");
+  else toggle.removeAttribute("checked");
 }
 
 function onOutsideHoursToggleChange(event) {
@@ -8252,7 +8277,9 @@ function bindTicketEditButtons(root = rows) {
   root.querySelectorAll(".ticket-edit-button").forEach((button) => {
     button.addEventListener("click", (event) => {
       event.stopPropagation();
-      openTicketEditor(button.dataset.sheetRow);
+      openTicketEditor(button.dataset.sheetRow, {
+        outsideHours: button.dataset.outsideHours === "1"
+      });
     });
   });
   root.querySelectorAll(".ticket-duplicate-button").forEach((button) => {
@@ -9973,6 +10000,7 @@ function renderTicketTable(tickets, options = {}) {
               class="ticket-edit-button"
               type="button"
               data-sheet-row="${ticket.sheetRow}"
+              data-outside-hours="${completionOutsideOffice(ticket) || isOutsideHoursMarked(ticket) ? "1" : "0"}"
               aria-label="Edit ticket"
               title="Edit ticket"
             >
@@ -10998,10 +11026,15 @@ function getFilteredDisplayedTickets() {
   const outsideHoursOnly = isTicketOutsideHoursFilterOn();
   const filtered = applyTicketFilters(getValidTickets());
   if (outsideHoursOnly) {
-    return filtered
+    const outsideHoursTickets = filtered
       .filter((ticket) => completionOutsideOffice(ticket))
       .sort((a, b) => String(b.closedOn || "").localeCompare(String(a.closedOn || "")));
+    lastOutsideHoursSheetRows = new Set(
+      outsideHoursTickets.map((ticket) => Number(ticket.sheetRow)).filter((row) => row > 0)
+    );
+    return outsideHoursTickets;
   }
+  lastOutsideHoursSheetRows = new Set();
   let displayed = sortTickets(
     filtered,
     ticketSortFilter?.value || DEFAULT_TICKET_SORT,
@@ -11612,6 +11645,10 @@ setSelectedPerformancePeriod(selectedPerformancePeriod);
 ticketSearchFilter?.addEventListener("input", () => scheduleRenderTickets());
 ticketSortFilter?.addEventListener("change", () => {
   scheduleRenderTickets({ immediate: true });
+  // Outside-hours needs TaskAudit closedOn — force a full (non-lite) refresh.
+  if (isTicketOutsideHoursFilterOn() && SHEET_WEB_APP_URL) {
+    refreshFromSheet({ skipScreenshotSync: true, silent: true, lite: false, retries: 1 }).catch(() => {});
+  }
 });
 projectSearchFilter?.addEventListener("input", () => scheduleRenderTickets());
 projectSortFilter?.addEventListener("change", () => scheduleRenderTickets({ immediate: true }));
