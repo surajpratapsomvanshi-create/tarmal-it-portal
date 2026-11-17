@@ -5637,7 +5637,7 @@ function canMarkOutsideOfficeHours(user = Auth.currentUser()) {
 
 function completionTimestampHasTime(value) {
   // Groups: 1=year 2=month 3=day 4=hh 5=mm 6=ss — midnight (00:00:00) means date-only.
-  // Must use [4]/[5]/[6] (clock), never [2]/[3] (month/day).
+  // Clock is groups 4/5/6 only — never month/day (2/3).
   const match = cleanText(value).match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2}))?/);
   if (!match) return false;
   const hh = Number(match[4]);
@@ -6684,9 +6684,11 @@ function openTicketEditor(sheetRow, options = {}) {
     || isOutsideHoursMarked(ticket);
   activeEditForceOutsideHours = forceOutsideHours;
 
+  // Retain TaskAudit closedOn from merge so outside-hours checkbox can clock-check.
   activeEditTicket = repairTicketRecurrenceForEdit({
     ...ticket,
     closedOn: ticket.closedOn || ticket["Closed On"] || "",
+    "Closed On": ticket.closedOn || ticket["Closed On"] || "",
     "Outside Hours": normalizeOutsideHoursFlag(ticket["Outside Hours"] || ticket.outsideHours)
   });
   resetTicketDeleteUi();
@@ -6796,21 +6798,13 @@ function syncOutsideHoursFormField(formKind = "create", ticket = null, options =
   }
   if (!ticket) return;
 
-  // Match the outside-hours list: explicit mark OR completion clock before 8:00 / at-after 5:30.
-  // Also honor list membership / edit-button flag when closedOn was dropped by a lite poll.
-  // Leaving checked on save writes Outside Hours=Yes so the ticket stays in the list.
-  // Unchecking clears the explicit mark only (does not rewrite closedOn).
-  const rowNum = Number(ticket.sheetRow) || 0;
+  // Explicit mark OR completion clock outside office hours (needs audit closedOn).
   const closedOn = ticket.closedOn || ticket["Closed On"] || "";
-  const ticketForClock = closedOn && ticket.closedOn !== closedOn
+  const ticketForClock = closedOn
     ? { ...ticket, closedOn }
     : ticket;
   const shouldCheck = isOutsideHoursMarked(ticketForClock)
-    || Boolean(completionOutsideOffice(ticketForClock))
-    || Boolean(options.forceOutsideHours)
-    || (isEdit && activeEditForceOutsideHours)
-    || (rowNum > 0 && lastOutsideHoursSheetRows.has(rowNum))
-    || (isTicketOutsideHoursFilterOn() && isTicketCompleted(ticketForClock));
+    || Boolean(completionOutsideOffice(ticketForClock));
   toggle.checked = shouldCheck;
   toggle.defaultChecked = shouldCheck;
   if (shouldCheck) toggle.setAttribute("checked", "checked");
