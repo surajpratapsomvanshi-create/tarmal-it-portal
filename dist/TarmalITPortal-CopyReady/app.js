@@ -3262,7 +3262,7 @@ function normalizeTicket(ticket) {
     pendingFields: normalizePendingFieldsList(ticket.pendingFields),
     createdOn: ticket.createdOn || "",
     lastUpdated: ticket.lastUpdated || "",
-    closedOn: ticket.closedOn || ""
+    closedOn: ticket.closedOn || ticket["Closed On"] || ""
   };
 }
 
@@ -5632,11 +5632,12 @@ function canMarkOutsideOfficeHours(user = Auth.currentUser()) {
 }
 
 function completionTimestampHasTime(value) {
+  // Groups: 1=year 2=month 3=day 4=hh 5=mm 6=ss — midnight (00:00:00) means date-only.
   const match = cleanText(value).match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2}))?/);
   if (!match) return false;
-  const hh = Number(match[2]);
-  const mm = Number(match[3]);
-  const ss = Number(match[4] || 0);
+  const hh = Number(match[4]);
+  const mm = Number(match[5]);
+  const ss = Number(match[6] || 0);
   return !(hh === 0 && mm === 0 && ss === 0);
 }
 
@@ -5699,17 +5700,22 @@ function mergedClosedOn(local, remote, preservePendingEdits, pendingFields) {
   const pendingStatus = Boolean(preservePendingEdits && pendingFields?.includes("Status") && local?.Status);
   const status = pendingStatus ? local.Status : (remote?.Status || local?.Status || "");
   if (!isTicketCompleted({ Status: status })) return "";
-  const remoteStamp = completionTimestampHasTime(remote?.closedOn) ? cleanText(remote.closedOn) : "";
-  const localStamp = completionTimestampHasTime(local?.closedOn) ? cleanText(local.closedOn) : "";
-  if (pendingStatus && localStamp) return localStamp;
-  return remoteStamp || localStamp;
+  const remoteRaw = cleanText(remote?.closedOn || remote?.["Closed On"]);
+  const localRaw = cleanText(local?.closedOn || local?.["Closed On"]);
+  const remoteStamp = completionTimestampHasTime(remoteRaw) ? remoteRaw : "";
+  const localStamp = completionTimestampHasTime(localRaw) ? localRaw : "";
+  // Prefer a real clock stamp; otherwise keep any closedOn (incl. date-only / lite-gap)
+  // so edit + outside-hours detection still see the audit value after a lite poll.
+  if (pendingStatus && (localStamp || localRaw)) return localStamp || localRaw;
+  return remoteStamp || localStamp || remoteRaw || localRaw;
 }
 
 function completionOutsideOffice(ticket) {
   if (!isTicketCompleted(ticket)) return "";
   if (isOutsideHoursMarked(ticket)) return "marked";
-  if (!completionTimestampHasTime(ticket?.closedOn)) return "";
-  const minutes = completionClockMinutes(ticket.closedOn);
+  const closedOn = ticket?.closedOn || ticket?.["Closed On"] || "";
+  if (!completionTimestampHasTime(closedOn)) return "";
+  const minutes = completionClockMinutes(closedOn);
   if (minutes == null) return "";
   if (minutes < OFFICE_START_MINUTES) return "before";
   if (minutes >= OFFICE_END_MINUTES) return "after";
@@ -6692,7 +6698,8 @@ function openTicketEditor(sheetRow) {
   populateTicketEditParentContext(ticket);
   populateTicketEditApprovalNote(ticket);
   syncTicketEditFocusToggle(ticket);
-  syncOutsideHoursFormField("edit", ticket);
+  // Use activeEditTicket (copy) so closedOn / Outside Hours survive any form field writes.
+  syncOutsideHoursFormField("edit", activeEditTicket || ticket);
 
   ticketEditModal.hidden = false;
   document.body.classList.add("modal-open");
@@ -6757,9 +6764,14 @@ function syncOutsideHoursFormField(formKind = "create", ticket = null) {
   }
   if (ticket) {
     // Match the outside-hours list: explicit mark OR completion clock before 8:00 / at-after 5:30.
+    // If the outside-hours filter is on, also check — list membership can outlive a missing
+    // closedOn on the edit object (lite poll skipped TaskAudit) until the next full refresh.
     // Leaving checked on save writes Outside Hours=Yes so the ticket stays in the list.
     // Unchecking clears the explicit mark only (does not rewrite closedOn).
-    toggle.checked = isOutsideHoursMarked(ticket) || Boolean(completionOutsideOffice(ticket));
+    const fromOutsideHoursView = isTicketOutsideHoursFilterOn() && isTicketCompleted(ticket);
+    toggle.checked = isOutsideHoursMarked(ticket)
+      || Boolean(completionOutsideOffice(ticket))
+      || fromOutsideHoursView;
   }
 }
 
