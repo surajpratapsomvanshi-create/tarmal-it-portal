@@ -6,12 +6,12 @@
     <title>Tarmal IT Portal</title>
     <link rel="icon" href="./assets/tarmal-mark.png?v=1" type="image/png">
     <link rel="apple-touch-icon" href="./assets/apple-touch-icon.png?v=1">
-    <link rel="stylesheet" href="./styles.css?v=219">
+    <link rel="stylesheet" href="./styles.css?v=220">
     <!-- auth stays blocking so requireLogin runs before app chrome paints -->
     <script src="./auth.js?v=31"></script>
     <!-- Defer main bundles so HTML can parse while ~210KB+ app.js downloads -->
     <script src="./app.js?v=242" defer></script>
-    <script src="./assets.js?v=21" defer></script>
+    <script src="./assets.js?v=22" defer></script>
     <script src="./documents.js?v=12" defer></script>
     <script src="./procurement.js?v=6" defer></script>
   </head>
@@ -1037,12 +1037,14 @@
                     <th>Warranty / Expiry</th>
                     <th>Vendor</th>
                     <th>Status</th>
+                    <th class="asset-declaration-col">Declaration</th>
                     <th class="asset-actions-col">Actions</th>
                   </tr>
                 </thead>
                 <tbody id="assetRows"></tbody>
               </table>
             </div>
+            <input type="file" id="assetDeclarationUploadFile" accept=".pdf,image/*,.png,.jpg,.jpeg,.webp,.heic" hidden>
           </section>
       </section>
 

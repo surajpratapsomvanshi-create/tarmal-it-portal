@@ -128,7 +128,12 @@ const Assets = {
       status: this.mapLegacyStatus(asset.status),
       notes: String(asset.notes || "").trim(),
       history: this.parseJsonArray(asset.history).map((entry) => this.normalizeHistoryEntry(entry)),
-      handovers: this.parseJsonArray(asset.handovers).map((entry) => this.normalizeHandoverEntry(entry))
+      handovers: this.parseJsonArray(asset.handovers).map((entry) => this.normalizeHandoverEntry(entry)),
+      declarationGeneratedAt: String(asset.declarationGeneratedAt || "").trim(),
+      declarationSignedFileName: String(asset.declarationSignedFileName || "").trim(),
+      declarationSignedDriveFileId: String(asset.declarationSignedDriveFileId || "").trim(),
+      declarationSignedDriveUrl: String(asset.declarationSignedDriveUrl || "").trim(),
+      declarationSignedUploadedAt: String(asset.declarationSignedUploadedAt || "").trim()
     };
   },
 
@@ -197,13 +202,25 @@ const Assets = {
       }
       // Preserve locally held full license keys (sheet only stores last-4).
       const remote = merged.get(local.id);
+      const next = { ...remote };
+      let changed = false;
       if (local.licenseKey && !remote.licenseKey) {
-        merged.set(local.id, {
-          ...remote,
-          licenseKey: local.licenseKey,
-          licenseKeyLast4: local.licenseKeyLast4 || remote.licenseKeyLast4
-        });
+        next.licenseKey = local.licenseKey;
+        next.licenseKeyLast4 = local.licenseKeyLast4 || remote.licenseKeyLast4;
+        changed = true;
       }
+      if (local.declarationSignedDriveUrl && !remote.declarationSignedDriveUrl) {
+        next.declarationSignedFileName = local.declarationSignedFileName;
+        next.declarationSignedDriveFileId = local.declarationSignedDriveFileId;
+        next.declarationSignedDriveUrl = local.declarationSignedDriveUrl;
+        next.declarationSignedUploadedAt = local.declarationSignedUploadedAt;
+        changed = true;
+      }
+      if (local.declarationGeneratedAt && !remote.declarationGeneratedAt) {
+        next.declarationGeneratedAt = local.declarationGeneratedAt;
+        changed = true;
+      }
+      if (changed) merged.set(local.id, this.normalize(next));
     });
     return [...merged.values()];
   },
@@ -325,7 +342,12 @@ const Assets = {
     "Status",
     "Notes",
     "History JSON",
-    "Handovers JSON"
+    "Handovers JSON",
+    "Declaration Generated At",
+    "Declaration Signed File Name",
+    "Declaration Signed Drive File Id",
+    "Declaration Signed Drive URL",
+    "Declaration Signed Uploaded At"
   ]
 };
 
@@ -587,7 +609,12 @@ function assetFromForm() {
     status: String(assetStatus?.value || "In use").trim(),
     notes: String(assetNotes?.value || "").trim(),
     history: existing?.history || [],
-    handovers: existing?.handovers || []
+    handovers: existing?.handovers || [],
+    declarationGeneratedAt: existing?.declarationGeneratedAt || "",
+    declarationSignedFileName: existing?.declarationSignedFileName || "",
+    declarationSignedDriveFileId: existing?.declarationSignedDriveFileId || "",
+    declarationSignedDriveUrl: existing?.declarationSignedDriveUrl || "",
+    declarationSignedUploadedAt: existing?.declarationSignedUploadedAt || ""
   };
 
   if (assetType === "Phone") {
@@ -728,11 +755,316 @@ function updateExpiryBadge(assets) {
   assetExpiryBadge.textContent = `${count90} expiring ≤90d (30d: ${count30} · 60d: ${count60})`;
 }
 
+function declarationStatusInfo(asset) {
+  if (asset?.declarationSignedDriveUrl) {
+    return {
+      key: "signed",
+      label: "Signed uploaded",
+      className: "declaration-status-signed"
+    };
+  }
+  if (asset?.employeeName || asset?.declarationGeneratedAt) {
+    return {
+      key: "ready",
+      label: "Declaration ready",
+      className: "declaration-status-ready"
+    };
+  }
+  return {
+    key: "none",
+    label: "Not assigned",
+    className: "declaration-status-none"
+  };
+}
+
+function declarationDisplayValue(value, fallback = "NA") {
+  const text = String(value || "").trim();
+  return text || fallback;
+}
+
+function formatDeclarationDate(value) {
+  const raw = String(value || "").trim();
+  const date = raw ? new Date(raw) : new Date();
+  if (Number.isNaN(date.getTime())) {
+    const today = new Date();
+    const dd = String(today.getDate()).padStart(2, "0");
+    const mm = String(today.getMonth() + 1).padStart(2, "0");
+    return `${dd}-${mm}-${today.getFullYear()}`;
+  }
+  const dd = String(date.getDate()).padStart(2, "0");
+  const mm = String(date.getMonth() + 1).padStart(2, "0");
+  return `${dd}-${mm}-${date.getFullYear()}`;
+}
+
+function declarationProductDetails(asset) {
+  const parts = [asset.assetType, asset.desktopSpecs].map((part) => String(part || "").trim()).filter(Boolean);
+  if (parts.length) return parts.join(" - ");
+  return declarationDisplayValue(asset.deviceModel);
+}
+
+function buildDeclarationFormHtml(asset) {
+  const employeeName = declarationDisplayValue(asset.employeeName, "________________");
+  const assetType = declarationDisplayValue(asset.assetType, "asset");
+  const modelNumber = declarationDisplayValue(asset.deviceModel);
+  const productDetails = declarationProductDetails(asset);
+  const serialNumber = Assets.isLicense(asset)
+    ? declarationDisplayValue(Assets.maskSerialDisplay(asset))
+    : declarationDisplayValue(asset.serialImei);
+  const accessories = declarationDisplayValue(asset.notes);
+  const formDate = formatDeclarationDate(asset.declarationGeneratedAt || new Date().toISOString());
+  const title = `Declaration Cum Undertaking — ${asset.assetCode || asset.id || "Asset"}`;
+
+  return `<!doctype html>
+<html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title>
+<style>
+  @page { margin: 18mm 16mm; }
+  body { font-family: "Times New Roman", Times, serif; color: #111; margin: 28px; line-height: 1.45; font-size: 13.5px; }
+  h1 { text-align: center; font-size: 20px; letter-spacing: 0.04em; margin: 0 0 18px; text-transform: uppercase; }
+  .intro { margin: 0 0 12px; }
+  .specs { margin: 0 0 18px 18px; padding: 0; }
+  .specs li { margin: 4px 0; }
+  .sign-row { display: grid; grid-template-columns: 1.2fr 0.9fr 0.9fr 1.2fr; gap: 12px; margin: 18px 0 22px; align-items: end; }
+  .sign-box { min-height: 64px; }
+  .sign-line { border-bottom: 1px solid #222; min-height: 36px; margin-bottom: 4px; }
+  .thumb-box { border: 1px solid #222; min-height: 64px; width: 72px; }
+  .label { font-size: 12px; }
+  .terms-intro { margin: 0 0 8px; }
+  .terms { margin: 0 0 14px 18px; padding: 0; }
+  .terms li { margin: 5px 0; }
+  .liability { margin: 0 0 10px; }
+  .note { margin: 0 0 16px; font-weight: 700; }
+  .final { margin: 0 0 14px; }
+  .final-sign { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-bottom: 22px; }
+  .return-table { width: 100%; border-collapse: collapse; border: 1px solid #222; }
+  .return-table td { border: 1px solid #222; vertical-align: top; padding: 10px; width: 50%; }
+  .return-line { border-bottom: 1px solid #222; min-height: 22px; margin: 8px 0 4px; }
+  .meta { color: #555; font-size: 12px; margin-top: 16px; }
+  .actions { margin-top: 20px; }
+  @media print { .actions { display: none; } body { margin: 0; } }
+</style></head><body>
+  <h1>DECLARATION CUM UNDERTAKING</h1>
+  <p class="intro">I, <strong>${escapeHtml(employeeName)}</strong>, employee of Tarmal wire products Ltd. acknowledge receipt of company
+    <strong>${escapeHtml(assetType)}</strong> with the following specification:</p>
+  <ul class="specs">
+    <li>Model Number: <strong>${escapeHtml(modelNumber)}</strong></li>
+    <li>Product Details: <strong>${escapeHtml(productDetails)}</strong></li>
+    <li>Serial Number: <strong>${escapeHtml(serialNumber)}</strong></li>
+    <li>Other accessories: <strong>${escapeHtml(accessories)}</strong></li>
+  </ul>
+  <div class="sign-row">
+    <div class="sign-box"><div class="sign-line"></div><div class="label">Signature</div></div>
+    <div class="sign-box"><div class="sign-line"></div><div class="label">Date: ${escapeHtml(formDate)}</div></div>
+    <div class="sign-box"><div class="thumb-box"></div><div class="label">Thumbprint</div></div>
+    <div class="sign-box"><div class="sign-line"></div><div class="label">Issuing Authority</div></div>
+  </div>
+  <p class="terms-intro">This <strong>${escapeHtml(assetType)}</strong> has been issued to <strong>${escapeHtml(employeeName)}</strong> with the below mentioned understanding:</p>
+  <ul class="terms">
+    <li>The ${escapeHtml(assetType)} issued is for solely official purpose.</li>
+    <li>The employee shall be fully accountable for theft, loss or damage of the property due to personal negligence.</li>
+    <li>The ${escapeHtml(assetType)} requisition form has to be signed before taking possession of the ${escapeHtml(assetType)}.</li>
+    <li>Employee can mention necessary specifications needed for their job function before taking handover from the Systems Admin Department.</li>
+    <li>Any additional software/hardware required by employee (before or after taking handover) should be clearly communicated through mail to the Systems Admin Department.</li>
+    <li>The ${escapeHtml(assetType)} should be returned to the Systems Admin Department in case of leaving the organization or if they do not intend to use it for any reason.</li>
+  </ul>
+  <p class="liability">In case of any loss or damage to the above mentioned property due to personal negligence, the employee will be liable to replace or pay the equivalent amount of the property and the organization will have the rights to deduct the amount from the employee's salary.</p>
+  <p class="note">Note: Company will avail insurance of above property to safeguard from any theft, loss or damage.</p>
+  <p class="final">I, <strong>${escapeHtml(employeeName)}</strong>, have read and understood the terms and conditions and declare to abide by them.</p>
+  <div class="final-sign">
+    <div class="sign-box"><div class="sign-line"></div><div class="label">Signature</div></div>
+    <div class="sign-box"><div class="sign-line"></div><div class="label">Date: ${escapeHtml(formDate)}</div></div>
+  </div>
+  <table class="return-table" aria-label="Return details">
+    <tr>
+      <td>
+        <div><strong>Reason for returning:</strong></div>
+        <div class="return-line"></div>
+        <div><strong>Return Date:</strong></div>
+        <div class="return-line"></div>
+        <div><strong>Sign:</strong></div>
+        <div class="return-line"></div>
+      </td>
+      <td>
+        <div><strong>${escapeHtml(assetType)} Condition (IT Person Receiving):</strong></div>
+        <div class="return-line"></div>
+        <div><strong>Receipt Date:</strong></div>
+        <div class="return-line"></div>
+        <div><strong>Sign:</strong></div>
+        <div class="return-line"></div>
+      </td>
+    </tr>
+  </table>
+  <p class="meta">Asset ID: ${escapeHtml(asset.assetCode || "—")} · Generated ${escapeHtml(new Date().toLocaleString())}</p>
+  <div class="actions">
+    <button type="button" onclick="window.print()">Print / Save as PDF</button>
+  </div>
+</body></html>`;
+}
+
+function downloadDeclarationForm(assetId) {
+  const asset = Assets.read().find((entry) => entry.id === assetId);
+  if (!asset) return;
+
+  if (!asset.employeeName && !asset.declarationGeneratedAt) {
+    alert("Assign an employee before downloading the declaration form.");
+    return;
+  }
+
+  const html = buildDeclarationFormHtml(asset);
+  const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  const safeCode = String(asset.assetCode || asset.id || "asset").replace(/[^\w.-]+/g, "_");
+  link.href = url;
+  link.download = `Declaration-Cum-Undertaking-${safeCode}.html`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+
+  // Also open a print-ready window for immediate Print → PDF.
+  const printWindow = window.open("", "_blank");
+  if (printWindow) {
+    printWindow.document.open();
+    printWindow.document.write(html);
+    printWindow.document.close();
+  }
+}
+
+async function ensureDeclarationReady(asset, options = {}) {
+  const force = options.force === true;
+  if (!asset) return asset;
+  if (!asset.employeeName) return Assets.normalize(asset);
+
+  const next = { ...asset };
+  if (!next.declarationGeneratedAt || force) {
+    next.declarationGeneratedAt = new Date().toISOString();
+  }
+  return Assets.normalize(next);
+}
+
+async function postAssetDeclarationRequest(payload) {
+  let body;
+  try {
+    body = JSON.stringify(payload);
+  } catch (error) {
+    console.error("Declaration payload stringify failed:", error);
+    throw new Error("Could not prepare declaration upload.");
+  }
+
+  const response = await fetch(Auth.SHEET_WEB_APP_URL, {
+    method: "POST",
+    redirect: "follow",
+    headers: {
+      "Content-Type": "text/plain;charset=utf-8"
+    },
+    body
+  });
+
+  const text = await response.text();
+  const raw = String(text ?? "").replace(/^\uFEFF/, "").trim();
+  if (!raw) throw new Error("Empty response from Apps Script.");
+  if (/^(ok|success|true)$/i.test(raw)) return { ok: true, assumedOk: true };
+
+  try {
+    return JSON.parse(raw);
+  } catch {
+    const okMatch = raw.match(/\{\s*"ok"\s*:[\s\S]*\}/);
+    if (okMatch) {
+      try { return JSON.parse(okMatch[0]); } catch { /* fall through */ }
+    }
+    console.error("Apps Script non-JSON response:", raw.slice(0, 240));
+    throw new Error("Could not read a response from Apps Script.");
+  }
+}
+
+function readFileAsDataUrlForAsset(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(new Error("Could not read the selected file."));
+    reader.readAsDataURL(file);
+  });
+}
+
+function triggerDeclarationUpload(assetId) {
+  if (!canManageAssets()) {
+    alert("You do not have permission to upload signed declarations.");
+    return;
+  }
+  const input = document.querySelector("#assetDeclarationUploadFile");
+  if (!input) {
+    alert("Upload control is missing from the page.");
+    return;
+  }
+  input.dataset.assetId = assetId;
+  input.value = "";
+  input.click();
+}
+
+async function uploadSignedDeclarationForAsset(assetId, file) {
+  if (!canManageAssets()) {
+    alert("You do not have permission to upload signed declarations.");
+    return;
+  }
+  if (!assetId || !file) return;
+
+  if (!Auth.SHEET_WEB_APP_URL) {
+    alert("Sheet endpoint is not configured. Cannot upload to Drive.");
+    return;
+  }
+
+  const assets = Assets.read();
+  const index = assets.findIndex((entry) => entry.id === assetId);
+  if (index < 0) {
+    alert("Asset record not found.");
+    return;
+  }
+
+  const maxBytes = 12 * 1024 * 1024;
+  if (file.size > maxBytes) {
+    alert("Signed declaration file is too large (max 12 MB).");
+    return;
+  }
+
+  try {
+    const dataUrl = await readFileAsDataUrlForAsset(file);
+    const response = await postAssetDeclarationRequest({
+      action: "uploadAssetDeclaration",
+      assetId,
+      assetCode: assets[index].assetCode || "",
+      employeeName: assets[index].employeeName || "",
+      title: `Signed-Declaration-${assets[index].assetCode || assetId}`,
+      fileName: file.name,
+      dataUrl
+    });
+
+    if (!response?.ok || !response.file) {
+      throw new Error(response?.error || "Upload failed.");
+    }
+
+    const updated = Assets.normalize({
+      ...assets[index],
+      declarationGeneratedAt: assets[index].declarationGeneratedAt || new Date().toISOString(),
+      declarationSignedFileName: response.file.fileName || file.name,
+      declarationSignedDriveFileId: response.file.driveFileId || "",
+      declarationSignedDriveUrl: response.file.driveUrl || "",
+      declarationSignedUploadedAt: new Date().toISOString()
+    });
+    assets[index] = updated;
+    await Assets.write(assets);
+    renderAssets();
+    alert("Signed declaration uploaded.");
+  } catch (error) {
+    console.error(error);
+    alert(error?.message || "Could not upload signed declaration.");
+  }
+}
+
 function renderAssets() {
   if (!assetRows) return;
 
   if (!canViewAssets()) {
-    assetRows.innerHTML = '<tr class="empty-row"><td colspan="12">You do not have permission to view IT assets.</td></tr>';
+    assetRows.innerHTML = '<tr class="empty-row"><td colspan="13">You do not have permission to view IT assets.</td></tr>';
     return;
   }
 
@@ -742,7 +1074,7 @@ function renderAssets() {
 
   const assets = applyAssetFilters(allAssets);
   const showActions = canManageAssets();
-  const colCount = showActions ? 12 : 11;
+  const colCount = showActions ? 13 : 12;
 
   updateAssetTableHeader();
 
@@ -767,6 +1099,11 @@ function renderAssets() {
       const seats = Assets.isLicense(asset) && asset.licenseSeats !== ""
         ? `<br><small>${escapeHtml(asset.licenseSeats)} seat(s)</small>`
         : "";
+      const declaration = declarationStatusInfo(asset);
+      const canDownloadDeclaration = Boolean(asset.employeeName || asset.declarationGeneratedAt);
+      const signedLink = asset.declarationSignedDriveUrl
+        ? `<a class="text-button" href="${escapeHtml(asset.declarationSignedDriveUrl)}" target="_blank" rel="noopener">View signed</a>`
+        : "";
 
       return `
         <tr class="asset-row asset-type-${escapeHtml(String(asset.assetType || "other").toLowerCase())}">
@@ -780,12 +1117,26 @@ function renderAssets() {
           <td class="${warrantyClass}">${escapeHtml(warrantyLabel(asset))}</td>
           <td>${escapeHtml(asset.vendor || "—")}</td>
           <td>${escapeHtml(asset.status || "—")}</td>
+          <td class="asset-declaration-cell">
+            <span class="declaration-status-pill ${declaration.className}">${escapeHtml(declaration.label)}</span>
+            <div class="asset-actions asset-declaration-actions">
+              ${canDownloadDeclaration
+                ? `<button class="text-button asset-declaration-download" type="button" data-asset-id="${escapeHtml(asset.id)}">Download declaration</button>`
+                : `<span class="muted-text">Assign employee first</span>`}
+              ${showActions && canDownloadDeclaration
+                ? `<button class="text-button asset-declaration-upload" type="button" data-asset-id="${escapeHtml(asset.id)}">Upload signed</button>`
+                : ""}
+              ${signedLink}
+            </div>
+          </td>
           <td>
-            <button class="text-button asset-view-button" type="button" data-asset-id="${escapeHtml(asset.id)}">View</button>
-            ${showActions ? `
-              <button class="text-button asset-edit-button" type="button" data-asset-id="${escapeHtml(asset.id)}">Edit</button>
-              <button class="text-button asset-delete-button" type="button" data-asset-id="${escapeHtml(asset.id)}">Delete</button>
-            ` : ""}
+            <div class="asset-actions">
+              <button class="text-button asset-view-button" type="button" data-asset-id="${escapeHtml(asset.id)}">View</button>
+              ${showActions ? `
+                <button class="text-button asset-edit-button" type="button" data-asset-id="${escapeHtml(asset.id)}">Edit</button>
+                <button class="text-button asset-delete-button" type="button" data-asset-id="${escapeHtml(asset.id)}">Delete</button>
+              ` : ""}
+            </div>
           </td>
         </tr>
       `;
@@ -801,11 +1152,28 @@ function renderAssets() {
   assetRows.querySelectorAll(".asset-delete-button").forEach((button) => {
     button.addEventListener("click", () => deleteAsset(button.dataset.assetId));
   });
+  assetRows.querySelectorAll(".asset-declaration-download").forEach((button) => {
+    button.addEventListener("click", () => downloadDeclarationForm(button.dataset.assetId));
+  });
+  assetRows.querySelectorAll(".asset-declaration-upload").forEach((button) => {
+    button.addEventListener("click", () => triggerDeclarationUpload(button.dataset.assetId));
+  });
 }
 
 function updateAssetTableHeader() {
-  const headerRow = document.querySelector(".asset-table thead tr");
+  const headerRow = assetRows?.closest("table")?.querySelector("thead tr")
+    || document.querySelector(".asset-table:not(.consumable-table) thead tr");
   if (!headerRow) return;
+
+  if (!headerRow.querySelector(".asset-declaration-col")) {
+    const actionHeader = headerRow.querySelector(".asset-actions-col");
+    const declarationHeader = '<th class="asset-declaration-col">Declaration</th>';
+    if (actionHeader) {
+      actionHeader.insertAdjacentHTML("beforebegin", declarationHeader);
+    } else {
+      headerRow.insertAdjacentHTML("beforeend", declarationHeader);
+    }
+  }
 
   const actionHeader = headerRow.querySelector(".asset-actions-col");
   if (!actionHeader) {
@@ -923,6 +1291,22 @@ function openAssetDetail(assetId) {
 
     <div class="asset-detail-section">
       <div class="asset-detail-section-head">
+        <h3>Declaration Cum Undertaking</h3>
+        ${(asset.employeeName || asset.declarationGeneratedAt)
+          ? `<button class="secondary-button" type="button" id="assetDetailDownloadDeclaration">Download declaration</button>`
+          : ""}
+      </div>
+      <p><span class="declaration-status-pill ${escapeHtml(declarationStatusInfo(asset).className)}">${escapeHtml(declarationStatusInfo(asset).label)}</span></p>
+      ${asset.declarationSignedDriveUrl
+        ? `<p><a href="${escapeHtml(asset.declarationSignedDriveUrl)}" target="_blank" rel="noopener">Open signed copy${asset.declarationSignedFileName ? ` (${escapeHtml(asset.declarationSignedFileName)})` : ""}</a></p>`
+        : '<p class="muted-text">No signed copy uploaded yet.</p>'}
+      ${manage && (asset.employeeName || asset.declarationGeneratedAt)
+        ? `<div class="asset-inline-actions"><button class="text-button" type="button" id="assetDetailUploadDeclaration">Upload signed declaration</button></div>`
+        : ""}
+    </div>
+
+    <div class="asset-detail-section">
+      <div class="asset-detail-section-head">
         <h3>Handover / return</h3>
         ${manage && (Assets.isLaptop(asset) || asset.assetType === "Phone" || asset.assetType === "Desktop" || asset.assetType === "Monitor" || asset.assetType === "Other")
           ? `<button class="secondary-button" type="button" id="assetOpenHandoverButton">Record handover / return</button>`
@@ -968,6 +1352,8 @@ function openAssetDetail(assetId) {
   assetDetailBody.querySelector("#assetOpenHistoryButton")?.addEventListener("click", () => openHistoryModal(asset.id));
   assetDetailBody.querySelector("#assetDetailEditButton")?.addEventListener("click", () => startAssetEdit(asset.id));
   assetDetailBody.querySelector("#assetDetailDeleteButton")?.addEventListener("click", () => deleteAsset(asset.id));
+  assetDetailBody.querySelector("#assetDetailDownloadDeclaration")?.addEventListener("click", () => downloadDeclarationForm(asset.id));
+  assetDetailBody.querySelector("#assetDetailUploadDeclaration")?.addEventListener("click", () => triggerDeclarationUpload(asset.id));
   assetDetailBody.querySelectorAll(".asset-print-handover").forEach((button) => {
     button.addEventListener("click", () => printHandoverReport(asset.id, button.dataset.handoverId));
   });
@@ -1018,12 +1404,20 @@ async function saveHandoverFromForm(event) {
     return;
   }
 
-  const asset = { ...assets[index] };
+  const previousAssignee = String(assets[index].employeeName || "").trim();
+  let asset = { ...assets[index] };
   asset.handovers = [...(asset.handovers || []), entry];
 
   if (kind === "Handover" && entry.toUser) {
     asset.employeeName = entry.toUser;
     asset.status = "In use";
+    if (previousAssignee && previousAssignee !== entry.toUser) {
+      asset.declarationSignedFileName = "";
+      asset.declarationSignedDriveFileId = "";
+      asset.declarationSignedDriveUrl = "";
+      asset.declarationSignedUploadedAt = "";
+    }
+    asset = await ensureDeclarationReady(asset, { force: true });
   }
   if (kind === "Return") {
     if (entry.toUser) asset.employeeName = entry.toUser;
@@ -1278,7 +1672,12 @@ function assetToCsvValues(asset, includeId = true) {
     asset.status,
     asset.notes,
     JSON.stringify(asset.history || []),
-    JSON.stringify(asset.handovers || [])
+    JSON.stringify(asset.handovers || []),
+    asset.declarationGeneratedAt || "",
+    asset.declarationSignedFileName || "",
+    asset.declarationSignedDriveFileId || "",
+    asset.declarationSignedDriveUrl || "",
+    asset.declarationSignedUploadedAt || ""
   ];
 
   return includeId ? [asset.id, ...values] : values;
@@ -1400,7 +1799,12 @@ function assetFromCsvRow(headerIndex, values) {
     status: csvField(headerIndex, values, "Status") || "In use",
     notes: csvField(headerIndex, values, "Notes"),
     history: csvField(headerIndex, values, "History JSON", "History"),
-    handovers: csvField(headerIndex, values, "Handovers JSON", "Handovers")
+    handovers: csvField(headerIndex, values, "Handovers JSON", "Handovers"),
+    declarationGeneratedAt: csvField(headerIndex, values, "Declaration Generated At"),
+    declarationSignedFileName: csvField(headerIndex, values, "Declaration Signed File Name"),
+    declarationSignedDriveFileId: csvField(headerIndex, values, "Declaration Signed Drive File Id"),
+    declarationSignedDriveUrl: csvField(headerIndex, values, "Declaration Signed Drive URL"),
+    declarationSignedUploadedAt: csvField(headerIndex, values, "Declaration Signed Uploaded At")
   });
 }
 
@@ -1572,15 +1976,35 @@ async function saveAssetFromPanel() {
 
   const assets = Assets.read();
   const editIndex = assets.findIndex((entry) => entry.id === asset.id);
+  let nextAsset = { ...asset };
+  const previousAssignee = editIndex >= 0
+    ? String(assets[editIndex].employeeName || "").trim()
+    : "";
+  const nextAssignee = String(nextAsset.employeeName || "").trim();
+  const assigneeChanged = Boolean(nextAssignee) && previousAssignee !== nextAssignee;
+  const isNewAsset = editIndex < 0;
 
   if (editIndex >= 0) {
-    assets[editIndex] = {
-      ...asset,
-      history: assets[editIndex].history || [],
-      handovers: assets[editIndex].handovers || []
-    };
+    const previous = assets[editIndex];
+    if (previousAssignee && nextAssignee && previousAssignee !== nextAssignee) {
+      nextAsset.declarationSignedFileName = "";
+      nextAsset.declarationSignedDriveFileId = "";
+      nextAsset.declarationSignedDriveUrl = "";
+      nextAsset.declarationSignedUploadedAt = "";
+      nextAsset.declarationGeneratedAt = "";
+    }
+    nextAsset.history = previous.history || [];
+    nextAsset.handovers = previous.handovers || [];
+  }
+
+  if (nextAsset.employeeName) {
+    nextAsset = await ensureDeclarationReady(nextAsset, { force: assigneeChanged });
+  }
+
+  if (editIndex >= 0) {
+    assets[editIndex] = Assets.normalize(nextAsset);
   } else {
-    assets.push(asset);
+    assets.push(Assets.normalize(nextAsset));
   }
 
   await Assets.write(assets);
@@ -1588,6 +2012,12 @@ async function saveAssetFromPanel() {
   renderAssets();
   if (typeof setActiveTab === "function") {
     setActiveTab("asset-list");
+  }
+
+  if (nextAssignee && (isNewAsset || assigneeChanged)) {
+    if (confirm("Declaration Cum Undertaking is ready. Download / print it now?")) {
+      downloadDeclarationForm(nextAsset.id);
+    }
   }
 }
 
@@ -1615,6 +2045,18 @@ function initAssetsModule() {
     const file = event.target.files?.[0];
     event.target.value = "";
     if (file) await importAssetsFromFile(file);
+  });
+
+  document.querySelector("#assetDeclarationUploadFile")?.addEventListener("change", async (event) => {
+    const input = event.target;
+    const file = input.files?.[0];
+    const assetId = input.dataset.assetId || "";
+    input.value = "";
+    if (file && assetId) {
+      await uploadSignedDeclarationForAsset(assetId, file);
+      const detailOpen = assetDetailModal && !assetDetailModal.hidden;
+      if (detailOpen) openAssetDetail(assetId);
+    }
   });
 
   [

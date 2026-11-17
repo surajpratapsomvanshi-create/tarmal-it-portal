@@ -103,7 +103,12 @@ const ASSET_HEADERS = [
   "License Seats",
   "License Key Last4",
   "History JSON",
-  "Handovers JSON"
+  "Handovers JSON",
+  "Declaration Generated At",
+  "Declaration Signed File Name",
+  "Declaration Signed Drive File Id",
+  "Declaration Signed Drive URL",
+  "Declaration Signed Uploaded At"
 ];
 
 const CONSUMABLE_HEADERS = [
@@ -136,7 +141,8 @@ const COLUMN_ALIASES = {
   ticketId: ["ticket id", "ticketid", "ticket uuid"],
   recurrence: ["recurrence", "recurring", "repeat"],
   recurrenceNext: ["recurrence next", "recurrencenext", "next recurrence", "recurrence due"],
-  recurrenceParentId: ["recurrence parent id", "recurrenceparentid", "recurrence template id", "recurring parent id"]
+  recurrenceParentId: ["recurrence parent id", "recurrenceparentid", "recurrence template id", "recurring parent id"],
+  outsideHours: ["outside hours", "outside office hours", "outsidehours", "after hours"]
 };
 
 const SOFT_DELETED_STATUS_ = "Deleted";
@@ -144,6 +150,7 @@ const TICKET_ID_HEADER_ = "Ticket ID";
 const RECURRENCE_HEADER_ = "Recurrence";
 const RECURRENCE_NEXT_HEADER_ = "Recurrence Next";
 const RECURRENCE_PARENT_ID_HEADER_ = "Recurrence Parent Id";
+const OUTSIDE_HOURS_HEADER_ = "Outside Hours";
 const RECURRING_TICKETS_HANDLER_ = "processRecurringTickets";
 const MILESTONE_ROLLOVER_HANDLER_ = "processOpenMilestoneRollover";
 const RECURRING_CATCH_UP_PER_TEMPLATE_ = 5;
@@ -154,6 +161,8 @@ const DOCUMENTS_FOLDER_NAME = "Tarmal IT Documents";
 const DOCUMENTS_FOLDER_ID_KEY = "DOCUMENTS_FOLDER_ID";
 const PROCUREMENT_FOLDER_NAME = "Tarmal Procurement Quotes";
 const PROCUREMENT_FOLDER_ID_KEY = "PROCUREMENT_FOLDER_ID";
+const ASSET_DECLARATIONS_FOLDER_NAME = "Tarmal Asset Declarations";
+const ASSET_DECLARATIONS_FOLDER_ID_KEY = "ASSET_DECLARATIONS_FOLDER_ID";
 
 // Post-save audit / Projects sync / pending email scans are deferred so doPost
 // can return as soon as ticket rows are written.
@@ -301,6 +310,44 @@ function getOrCreateProcurementFolder_() {
   return folder;
 }
 
+function getOrCreateAssetDeclarationsFolder_() {
+  const props = PropertiesService.getScriptProperties();
+  const savedFolderId = props.getProperty(ASSET_DECLARATIONS_FOLDER_ID_KEY);
+
+  if (savedFolderId) {
+    try {
+      return DriveApp.getFolderById(savedFolderId);
+    } catch (error) {
+      Logger.log(error);
+    }
+  }
+
+  const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  const spreadsheetFile = DriveApp.getFileById(spreadsheet.getId());
+  const parents = spreadsheetFile.getParents();
+  const parentFolder = parents.hasNext() ? parents.next() : DriveApp.getRootFolder();
+  const existingFolders = parentFolder.getFoldersByName(ASSET_DECLARATIONS_FOLDER_NAME);
+  const folderExists = existingFolders.hasNext();
+  const folder = folderExists
+    ? existingFolders.next()
+    : parentFolder.createFolder(ASSET_DECLARATIONS_FOLDER_NAME);
+
+  if (!folderExists) {
+    folder.createFile(
+      "README - Asset Declarations.txt",
+      [
+        "Tarmal IT Portal stores signed asset Declaration Cum Undertaking scans in this folder.",
+        "Spreadsheet: " + spreadsheet.getName(),
+        "Created: " + new Date().toString()
+      ].join("\n"),
+      MimeType.PLAIN_TEXT
+    );
+  }
+
+  props.setProperty(ASSET_DECLARATIONS_FOLDER_ID_KEY, folder.getId());
+  return folder;
+}
+
 function extensionFromMime_(mimeType, fileName) {
   const mime = String(mimeType || "").toLowerCase();
   const name = String(fileName || "").toLowerCase();
@@ -359,6 +406,37 @@ function saveProcurementFile_(data) {
   const bytes = Utilities.base64Decode(match[2]);
   const folder = getOrCreateProcurementFolder_();
   const safeTitle = sanitizeAttachmentName_(data.title || data.fileName || "quote");
+  const extension = extensionFromMime_(mimeType, data.fileName);
+  const stamp = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyyMMdd-HHmmss");
+  const fileName = `${safeTitle}_${stamp}.${extension}`;
+  const file = folder.createFile(Utilities.newBlob(bytes, mimeType, fileName));
+
+  try {
+    file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+  } catch (shareError) {
+    Logger.log(shareError);
+  }
+
+  return {
+    driveFileId: file.getId(),
+    driveUrl: file.getUrl(),
+    fileName: file.getName(),
+    mimeType: mimeType
+  };
+}
+
+function saveAssetDeclarationFile_(data) {
+  const dataUrl = String(data.dataUrl || "");
+  const match = dataUrl.match(/^data:([^;]+);base64,(.+)$/i);
+  if (!match) {
+    throw new Error("Invalid signed declaration file data.");
+  }
+
+  const mimeType = match[1];
+  const bytes = Utilities.base64Decode(match[2]);
+  const folder = getOrCreateAssetDeclarationsFolder_();
+  const assetCode = sanitizeAttachmentName_(data.assetCode || data.assetId || "asset");
+  const safeTitle = sanitizeAttachmentName_(data.title || data.fileName || ("Signed-Declaration-" + assetCode));
   const extension = extensionFromMime_(mimeType, data.fileName);
   const stamp = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyyMMdd-HHmmss");
   const fileName = `${safeTitle}_${stamp}.${extension}`;
@@ -922,6 +1000,12 @@ function doPost(e) {
       return buildResponse_({ ok: true, file: fileInfo }, e);
     }
 
+    if (data.action === "uploadAssetDeclaration") {
+      lockAcquired = releaseWriteLock_(lock, lockAcquired);
+      const fileInfo = saveAssetDeclarationFile_(data);
+      return buildResponse_({ ok: true, file: fileInfo }, e);
+    }
+
     if (data.action === "deleteTicket") {
       const result = deleteTicket_(data);
       try {
@@ -1236,8 +1320,16 @@ function getTicketFieldValues_(data) {
       || data["Recurrence Parent Id"]
       || data.recurrenceParentId
       || ""
-    ).trim()
+    ).trim(),
+    outsideHours: normalizeOutsideHoursFlag_(data["Outside Hours"] || data.outsideHours || "")
   };
+}
+
+function normalizeOutsideHoursFlag_(value) {
+  const text = String(value || "").trim().toLowerCase();
+  if (!text) return "";
+  if (text === "yes" || text === "y" || text === "true" || text === "1") return "Yes";
+  return "";
 }
 
 const COLUMN_FALLBACK_INDICES_ = {
@@ -1281,7 +1373,8 @@ function applyTicketFieldsToRow_(row, columnMap, fields) {
     ticketId: fields.ticketId || "",
     recurrence: fields.recurrence || "",
     recurrenceNext: fields.recurrenceNext || "",
-    recurrenceParentId: fields.recurrenceParentId || ""
+    recurrenceParentId: fields.recurrenceParentId || "",
+    outsideHours: fields.outsideHours || ""
   };
 
   let requiredLength = row.length;
@@ -1453,6 +1546,11 @@ function ensureTasksColumns_(sheet) {
   const mapAfterRecurrenceNext = buildColumnMap_(headers);
   if (mapAfterRecurrenceNext.recurrenceParentId < 0) {
     headers.push(RECURRENCE_PARENT_ID_HEADER_);
+    changed = true;
+  }
+  const mapAfterRecurrenceParent = buildColumnMap_(headers);
+  if (mapAfterRecurrenceParent.outsideHours < 0) {
+    headers.push(OUTSIDE_HOURS_HEADER_);
     changed = true;
   }
 
@@ -2478,7 +2576,12 @@ function assetToRow_(asset) {
     asset.licenseSeats === 0 || asset.licenseSeats ? String(asset.licenseSeats) : "",
     asset.licenseKeyLast4 || "",
     assetJsonCell_(asset.history),
-    assetJsonCell_(asset.handovers)
+    assetJsonCell_(asset.handovers),
+    asset.declarationGeneratedAt || "",
+    asset.declarationSignedFileName || "",
+    asset.declarationSignedDriveFileId || "",
+    asset.declarationSignedDriveUrl || "",
+    asset.declarationSignedUploadedAt || ""
   ];
 }
 
@@ -2505,7 +2608,12 @@ function rowToAsset_(row) {
     licenseSeats: String(row[18] || ""),
     licenseKeyLast4: String(row[19] || ""),
     history: String(row[20] || "[]"),
-    handovers: String(row[21] || "[]")
+    handovers: String(row[21] || "[]"),
+    declarationGeneratedAt: String(row[22] || ""),
+    declarationSignedFileName: String(row[23] || ""),
+    declarationSignedDriveFileId: String(row[24] || ""),
+    declarationSignedDriveUrl: String(row[25] || ""),
+    declarationSignedUploadedAt: String(row[26] || "")
   };
 }
 
@@ -2851,6 +2959,7 @@ function rowToTicket_(row, columnMap, sheetRow) {
     Recurrence: recurrence,
     RecurrenceNext: recurrenceNext,
     RecurrenceParentId: recurrenceParentId,
+    "Outside Hours": normalizeOutsideHoursFlag_(readCell_(row, columnMap.outsideHours, -1) || ""),
     sheetRow: sheetRow
   };
 }
