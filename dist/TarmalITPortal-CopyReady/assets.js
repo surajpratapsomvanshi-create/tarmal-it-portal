@@ -1115,25 +1115,27 @@ function renderAssets() {
           <td><span class="asset-type-pill">${escapeHtml(asset.assetType || "—")}</span>${seats}</td>
           <td>${escapeHtml(asset.deviceModel || "—")}</td>
           <td>${escapeHtml(serialDisplay)}</td>
-          <td>${escapeHtml(asset.employeeName || "—")}${asset.employeeId ? `<br><small>${escapeHtml(asset.employeeId)}</small>` : ""}</td>
+          <td class="asset-assigned-cell">${escapeHtml(asset.employeeName || "—")}${asset.employeeId ? `<small>${escapeHtml(asset.employeeId)}</small>` : ""}</td>
           <td>${escapeHtml(asset.department || "—")}</td>
           <td>${escapeHtml(formatAssetDate(asset.purchaseDate))}</td>
           <td class="${warrantyClass}">${escapeHtml(warrantyLabel(asset))}</td>
           <td>${escapeHtml(asset.vendor || "—")}</td>
           <td>${escapeHtml(asset.status || "—")}</td>
           <td class="asset-declaration-cell">
-            <span class="declaration-status-pill ${declaration.className}">${escapeHtml(declaration.label)}</span>
-            <div class="asset-actions asset-declaration-actions">
-              ${canDownloadDeclaration
-                ? `<button class="text-button asset-declaration-download" type="button" data-asset-id="${escapeHtml(asset.id)}">Download declaration</button>`
-                : `<span class="muted-text">Assign employee first</span>`}
-              ${showActions && canDownloadDeclaration
-                ? `<button class="text-button asset-declaration-upload" type="button" data-asset-id="${escapeHtml(asset.id)}">Upload signed</button>`
-                : ""}
-              ${signedLink}
+            <div class="asset-declaration-inline">
+              <span class="declaration-status-pill ${declaration.className}">${escapeHtml(declaration.label)}</span>
+              <div class="asset-actions asset-declaration-actions">
+                ${canDownloadDeclaration
+                  ? `<button class="text-button asset-declaration-download" type="button" data-asset-id="${escapeHtml(asset.id)}">Download</button>`
+                  : `<span class="muted-text">Assign employee first</span>`}
+                ${showActions && canDownloadDeclaration
+                  ? `<button class="text-button asset-declaration-upload" type="button" data-asset-id="${escapeHtml(asset.id)}">Upload</button>`
+                  : ""}
+                ${signedLink}
+              </div>
             </div>
           </td>
-          <td>
+          <td class="asset-actions-cell">
             <div class="asset-actions">
               <button class="text-button asset-view-button" type="button" data-asset-id="${escapeHtml(asset.id)}">View</button>
               ${showActions ? `

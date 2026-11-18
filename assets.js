@@ -802,7 +802,35 @@ function declarationProductDetails(asset) {
   return declarationDisplayValue(asset.deviceModel);
 }
 
-function buildDeclarationFormHtml(asset) {
+/** Cached data-URL of assets/tarmal-logo.png so blob/print HTML still shows the logo. */
+let declarationLogoDataUrlPromise = null;
+
+function loadDeclarationLogoDataUrl() {
+  if (!declarationLogoDataUrlPromise) {
+    declarationLogoDataUrlPromise = fetch("./assets/tarmal-logo.png")
+      .then((response) => {
+        if (!response.ok) throw new Error(`Logo HTTP ${response.status}`);
+        return response.blob();
+      })
+      .then(
+        (blob) =>
+          new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(String(reader.result || ""));
+            reader.onerror = () => reject(reader.error || new Error("Logo read failed"));
+            reader.readAsDataURL(blob);
+          })
+      )
+      .catch((error) => {
+        console.warn("Declaration logo embed failed:", error);
+        declarationLogoDataUrlPromise = null;
+        return "";
+      });
+  }
+  return declarationLogoDataUrlPromise;
+}
+
+function buildDeclarationFormHtml(asset, logoDataUrl = "") {
   const employeeName = declarationDisplayValue(asset.employeeName, "________________");
   const assetType = declarationDisplayValue(asset.assetType, "asset");
   const modelNumber = declarationDisplayValue(asset.deviceModel);
@@ -813,32 +841,37 @@ function buildDeclarationFormHtml(asset) {
   const accessories = declarationDisplayValue(asset.notes);
   const formDate = formatDeclarationDate(asset.declarationGeneratedAt || new Date().toISOString());
   const title = `Declaration Cum Undertaking — ${asset.assetCode || asset.id || "Asset"}`;
+  const logoHtml = logoDataUrl
+    ? `<div class="brand-header"><img class="brand-logo" src="${logoDataUrl}" alt="Tarmal"></div>`
+    : "";
 
   return `<!doctype html>
 <html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title>
 <style>
-  @page { size: A4; margin: 11mm 12mm; }
-  body { font-family: "Times New Roman", Times, serif; color: #111; margin: 12px; line-height: 1.28; font-size: 11.5px; }
-  h1 { text-align: center; font-size: 16px; letter-spacing: 0.04em; margin: 0 0 8px; text-transform: uppercase; }
-  .intro { margin: 0 0 6px; }
-  .specs { margin: 0 0 8px 16px; padding: 0; }
-  .specs li { margin: 2px 0; }
-  .sign-row { display: grid; grid-template-columns: 1.2fr 0.9fr 0.9fr 1.2fr; gap: 10px; margin: 8px 0 10px; align-items: end; page-break-inside: avoid; }
-  .sign-box { min-height: 42px; }
-  .sign-line { border-bottom: 1px solid #222; min-height: 22px; margin-bottom: 2px; }
-  .thumb-box { border: 1px solid #222; min-height: 42px; width: 56px; }
+  @page { size: A4; margin: 10mm 12mm; }
+  body { font-family: "Times New Roman", Times, serif; color: #111; margin: 10px; line-height: 1.26; font-size: 11.5px; }
+  .brand-header { text-align: center; margin: 0 0 4px; }
+  .brand-logo { display: inline-block; width: 48mm; max-width: 48mm; height: auto; }
+  h1 { text-align: center; font-size: 15.5px; letter-spacing: 0.04em; margin: 0 0 6px; text-transform: uppercase; }
+  .intro { margin: 0 0 5px; }
+  .specs { margin: 0 0 6px 16px; padding: 0; }
+  .specs li { margin: 1px 0; }
+  .sign-row { display: grid; grid-template-columns: 1.2fr 0.9fr 0.9fr 1.2fr; gap: 10px; margin: 6px 0 8px; align-items: end; page-break-inside: avoid; }
+  .sign-box { min-height: 38px; }
+  .sign-line { border-bottom: 1px solid #222; min-height: 20px; margin-bottom: 2px; }
+  .thumb-box { border: 1px solid #222; min-height: 38px; width: 52px; }
   .label { font-size: 10.5px; }
-  .terms-intro { margin: 0 0 4px; }
-  .terms { margin: 0 0 6px 16px; padding: 0; }
-  .terms li { margin: 2px 0; }
-  .liability { margin: 0 0 4px; }
-  .note { margin: 0 0 6px; font-weight: 700; }
-  .final { margin: 0 0 6px; }
-  .final-sign { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; margin-bottom: 8px; page-break-inside: avoid; }
+  .terms-intro { margin: 0 0 3px; }
+  .terms { margin: 0 0 5px 16px; padding: 0; }
+  .terms li { margin: 1px 0; }
+  .liability { margin: 0 0 3px; }
+  .note { margin: 0 0 5px; font-weight: 700; }
+  .final { margin: 0 0 5px; }
+  .final-sign { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; margin-bottom: 6px; page-break-inside: avoid; }
   .return-table { width: 100%; border-collapse: collapse; border: 1px solid #222; page-break-inside: avoid; page-break-before: avoid; }
-  .return-table td { border: 1px solid #222; vertical-align: top; padding: 5px 7px; width: 50%; }
-  .return-line { border-bottom: 1px solid #222; min-height: 14px; margin: 3px 0 2px; }
-  .meta { color: #555; font-size: 10px; margin-top: 6px; }
+  .return-table td { border: 1px solid #222; vertical-align: top; padding: 4px 7px; width: 50%; }
+  .return-line { border-bottom: 1px solid #222; min-height: 12px; margin: 2px 0 2px; }
+  .meta { color: #555; font-size: 10px; margin-top: 5px; }
   .actions { margin-top: 12px; }
   @media print {
     .actions { display: none; }
@@ -846,6 +879,7 @@ function buildDeclarationFormHtml(asset) {
     .return-table, .sign-row, .final-sign { page-break-inside: avoid; }
   }
 </style></head><body>
+  ${logoHtml}
   <h1>DECLARATION CUM UNDERTAKING</h1>
   <p class="intro">I, <strong>${escapeHtml(employeeName)}</strong>, employee of Tarmal wire products Ltd. acknowledge receipt of company
     <strong>${escapeHtml(assetType)}</strong> with the following specification:</p>
@@ -1115,25 +1149,27 @@ function renderAssets() {
           <td><span class="asset-type-pill">${escapeHtml(asset.assetType || "—")}</span>${seats}</td>
           <td>${escapeHtml(asset.deviceModel || "—")}</td>
           <td>${escapeHtml(serialDisplay)}</td>
-          <td>${escapeHtml(asset.employeeName || "—")}${asset.employeeId ? `<br><small>${escapeHtml(asset.employeeId)}</small>` : ""}</td>
+          <td class="asset-assigned-cell">${escapeHtml(asset.employeeName || "—")}${asset.employeeId ? `<small>${escapeHtml(asset.employeeId)}</small>` : ""}</td>
           <td>${escapeHtml(asset.department || "—")}</td>
           <td>${escapeHtml(formatAssetDate(asset.purchaseDate))}</td>
           <td class="${warrantyClass}">${escapeHtml(warrantyLabel(asset))}</td>
           <td>${escapeHtml(asset.vendor || "—")}</td>
           <td>${escapeHtml(asset.status || "—")}</td>
           <td class="asset-declaration-cell">
-            <span class="declaration-status-pill ${declaration.className}">${escapeHtml(declaration.label)}</span>
-            <div class="asset-actions asset-declaration-actions">
-              ${canDownloadDeclaration
-                ? `<button class="text-button asset-declaration-download" type="button" data-asset-id="${escapeHtml(asset.id)}">Download declaration</button>`
-                : `<span class="muted-text">Assign employee first</span>`}
-              ${showActions && canDownloadDeclaration
-                ? `<button class="text-button asset-declaration-upload" type="button" data-asset-id="${escapeHtml(asset.id)}">Upload signed</button>`
-                : ""}
-              ${signedLink}
+            <div class="asset-declaration-inline">
+              <span class="declaration-status-pill ${declaration.className}">${escapeHtml(declaration.label)}</span>
+              <div class="asset-actions asset-declaration-actions">
+                ${canDownloadDeclaration
+                  ? `<button class="text-button asset-declaration-download" type="button" data-asset-id="${escapeHtml(asset.id)}">Download</button>`
+                  : `<span class="muted-text">Assign employee first</span>`}
+                ${showActions && canDownloadDeclaration
+                  ? `<button class="text-button asset-declaration-upload" type="button" data-asset-id="${escapeHtml(asset.id)}">Upload</button>`
+                  : ""}
+                ${signedLink}
+              </div>
             </div>
           </td>
-          <td>
+          <td class="asset-actions-cell">
             <div class="asset-actions">
               <button class="text-button asset-view-button" type="button" data-asset-id="${escapeHtml(asset.id)}">View</button>
               ${showActions ? `
