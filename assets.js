@@ -938,7 +938,7 @@ function buildDeclarationFormHtml(asset, logoDataUrl = "") {
 </body></html>`;
 }
 
-function downloadDeclarationForm(assetId) {
+async function downloadDeclarationForm(assetId) {
   const asset = Assets.read().find((entry) => entry.id === assetId);
   if (!asset) return;
 
@@ -947,7 +947,8 @@ function downloadDeclarationForm(assetId) {
     return;
   }
 
-  const html = buildDeclarationFormHtml(asset);
+  const logoDataUrl = await loadDeclarationLogoDataUrl();
+  const html = buildDeclarationFormHtml(asset, logoDataUrl);
   const blob = new Blob([html], { type: "text/html;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
