@@ -1,4 +1,4 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="en">
   <head>
     <meta charset="utf-8">
@@ -10,7 +10,7 @@
     <!-- auth stays blocking so requireLogin runs before app chrome paints -->
     <script src="./auth.js?v=31"></script>
     <!-- Defer main bundles so HTML can parse while ~210KB+ app.js downloads -->
-    <script src="./app.js?v=247" defer></script>
+    <script src="./app.js?v=249" defer></script>
     <script src="./assets.js?v=22" defer></script>
     <script src="./documents.js?v=12" defer></script>
     <script src="./procurement.js?v=6" defer></script>
@@ -450,6 +450,7 @@
                 <option value="infra-status">Infra — completed, in progress, not started</option>
                 <option value="milestone-open-desc" selected>Today's milestone first, then newest milestone</option>
                 <option value="outside-hours">Completed outside office hours</option>
+                <option value="completed-today">Completed today</option>
               </select>
             </label>
             <button class="secondary-button filter-clear clear-filters-button" id="clearTicketFilters" type="button">Clear Filters</button>
