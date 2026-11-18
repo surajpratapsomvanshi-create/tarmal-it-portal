@@ -817,30 +817,34 @@ function buildDeclarationFormHtml(asset) {
   return `<!doctype html>
 <html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title>
 <style>
-  @page { margin: 18mm 16mm; }
-  body { font-family: "Times New Roman", Times, serif; color: #111; margin: 28px; line-height: 1.45; font-size: 13.5px; }
-  h1 { text-align: center; font-size: 20px; letter-spacing: 0.04em; margin: 0 0 18px; text-transform: uppercase; }
-  .intro { margin: 0 0 12px; }
-  .specs { margin: 0 0 18px 18px; padding: 0; }
-  .specs li { margin: 4px 0; }
-  .sign-row { display: grid; grid-template-columns: 1.2fr 0.9fr 0.9fr 1.2fr; gap: 12px; margin: 18px 0 22px; align-items: end; }
-  .sign-box { min-height: 64px; }
-  .sign-line { border-bottom: 1px solid #222; min-height: 36px; margin-bottom: 4px; }
-  .thumb-box { border: 1px solid #222; min-height: 64px; width: 72px; }
-  .label { font-size: 12px; }
-  .terms-intro { margin: 0 0 8px; }
-  .terms { margin: 0 0 14px 18px; padding: 0; }
-  .terms li { margin: 5px 0; }
-  .liability { margin: 0 0 10px; }
-  .note { margin: 0 0 16px; font-weight: 700; }
-  .final { margin: 0 0 14px; }
-  .final-sign { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-bottom: 22px; }
-  .return-table { width: 100%; border-collapse: collapse; border: 1px solid #222; }
-  .return-table td { border: 1px solid #222; vertical-align: top; padding: 10px; width: 50%; }
-  .return-line { border-bottom: 1px solid #222; min-height: 22px; margin: 8px 0 4px; }
-  .meta { color: #555; font-size: 12px; margin-top: 16px; }
-  .actions { margin-top: 20px; }
-  @media print { .actions { display: none; } body { margin: 0; } }
+  @page { size: A4; margin: 11mm 12mm; }
+  body { font-family: "Times New Roman", Times, serif; color: #111; margin: 12px; line-height: 1.28; font-size: 11.5px; }
+  h1 { text-align: center; font-size: 16px; letter-spacing: 0.04em; margin: 0 0 8px; text-transform: uppercase; }
+  .intro { margin: 0 0 6px; }
+  .specs { margin: 0 0 8px 16px; padding: 0; }
+  .specs li { margin: 2px 0; }
+  .sign-row { display: grid; grid-template-columns: 1.2fr 0.9fr 0.9fr 1.2fr; gap: 10px; margin: 8px 0 10px; align-items: end; page-break-inside: avoid; }
+  .sign-box { min-height: 42px; }
+  .sign-line { border-bottom: 1px solid #222; min-height: 22px; margin-bottom: 2px; }
+  .thumb-box { border: 1px solid #222; min-height: 42px; width: 56px; }
+  .label { font-size: 10.5px; }
+  .terms-intro { margin: 0 0 4px; }
+  .terms { margin: 0 0 6px 16px; padding: 0; }
+  .terms li { margin: 2px 0; }
+  .liability { margin: 0 0 4px; }
+  .note { margin: 0 0 6px; font-weight: 700; }
+  .final { margin: 0 0 6px; }
+  .final-sign { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; margin-bottom: 8px; page-break-inside: avoid; }
+  .return-table { width: 100%; border-collapse: collapse; border: 1px solid #222; page-break-inside: avoid; page-break-before: avoid; }
+  .return-table td { border: 1px solid #222; vertical-align: top; padding: 5px 7px; width: 50%; }
+  .return-line { border-bottom: 1px solid #222; min-height: 14px; margin: 3px 0 2px; }
+  .meta { color: #555; font-size: 10px; margin-top: 6px; }
+  .actions { margin-top: 12px; }
+  @media print {
+    .actions { display: none; }
+    body { margin: 0; }
+    .return-table, .sign-row, .final-sign { page-break-inside: avoid; }
+  }
 </style></head><body>
   <h1>DECLARATION CUM UNDERTAKING</h1>
   <p class="intro">I, <strong>${escapeHtml(employeeName)}</strong>, employee of Tarmal wire products Ltd. acknowledge receipt of company
