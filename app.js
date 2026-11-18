@@ -4699,12 +4699,12 @@ function applyTicketFilters(tickets) {
     : [];
 
   const outsideHoursOnly = isTicketOutsideHoursFilterOn();
-  const completedTodayOnly = isTicketCompletedTodayFilterOn();
+  const completedDateOnly = isTicketCompletedDateFilterOn();
   const focusOnly = isMyFocusModeOn();
   const filtered = tickets.filter((ticket) => {
     if (focusOnly && !isMyFocusTicket(ticket)) return false;
     if (outsideHoursOnly && !completionOutsideOffice(ticket)) return false;
-    if (completedTodayOnly && !isTicketCompletedToday(ticket)) return false;
+    if (completedDateOnly && !isTicketCompletedInActiveDateFilter(ticket)) return false;
     if (statusValues.length && !statusValues.includes(ticket.Status)) return false;
     if (ownerValues.length && !ownerValues.includes(ticket.Owner)) return false;
     if (typeValues.length && !typeValues.includes(ticket.Type)) return false;
@@ -4718,8 +4718,8 @@ function applyTicketFilters(tickets) {
   // Outside-hours mode stays on completed clock times / explicit marks only.
   // Do not pull in open parents or in-hours siblings just to keep a family together.
   if (outsideHoursOnly) return filtered;
-  // Completed-today mode stays on completed-today rows only (no family expansion).
-  if (completedTodayOnly) return filtered;
+  // Completed-date modes stay on matching completed rows only (no family expansion).
+  if (completedDateOnly) return filtered;
   // Focus Mode lists only starred tickets; do not pull in unstarred parents or siblings.
   if (focusOnly) return filtered;
   // Always keep parent↔subtask families together across type/status/owner filters.
@@ -5048,6 +5048,12 @@ function setActiveTab(tabName, options = {}) {
   const pageTitle = TAB_LABELS[tabName] || tabName;
   if (topbarPageTitle) topbarPageTitle.textContent = pageTitle;
   if (topbarExpandPageTitle) topbarExpandPageTitle.textContent = pageTitle;
+
+  if (typeof syncConsumablesLowStockHeader === "function") {
+    syncConsumablesLowStockHeader();
+  } else {
+    document.body.classList.remove("consumables-low-stock");
+  }
 
   if (options.skipRender) return;
 
@@ -5667,6 +5673,24 @@ function forceClosedOnOutsideOffice(value = localIsoDateTime()) {
   return `${datePart}T18:00:00`;
 }
 
+/**
+ * Prefer End Date as the calendar day of closedOn; keep the existing clock when present.
+ * Milestone is never used for completion stamps.
+ */
+function syncClosedOnDateFromEndDate(closedOn, endDate) {
+  const endKey = toInputDateValue(endDate) || "";
+  if (!endKey) return cleanText(closedOn);
+  const stamp = cleanText(closedOn);
+  const timeMatch = stamp.match(/[T ](\d{2}):(\d{2})(?::(\d{2}))?/);
+  if (timeMatch) {
+    const hh = timeMatch[1];
+    const mm = timeMatch[2];
+    const ss = timeMatch[3] || "00";
+    return `${endKey}T${hh}:${mm}:${ss}`;
+  }
+  return `${endKey}T${localIsoDateTime().slice(11)}`;
+}
+
 function formatCompletionStamp(value) {
   const match = cleanText(value).match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})/);
   if (!match) return cleanText(value);
@@ -5695,6 +5719,9 @@ function stampTicketCompletion(ticket, previousTicket = null) {
   } else if (!completionTimestampHasTime(next.closedOn)) {
     next.closedOn = localIsoDateTime();
   }
+  // End Date owns the closedOn calendar day (Completed today / Completed column).
+  // Changing End Date on an already-Completed ticket retargets the stamp date and keeps time.
+  next.closedOn = syncClosedOnDateFromEndDate(next.closedOn, next["End date"]);
   // Retroactive mark: work done after hours, ticket saved during office hours.
   if (isOutsideHoursMarked(next)) {
     const minutes = completionClockMinutes(next.closedOn);
@@ -5735,8 +5762,66 @@ function isTicketOutsideHoursFilterOn() {
   return ticketSortFilter?.value === "outside-hours";
 }
 
+const COMPLETED_DATE_SORT_KEYS = new Set([
+  "completed-today",
+  "completed-yesterday",
+  "completed-this-week",
+  "completed-last-week"
+]);
+
 function isTicketCompletedTodayFilterOn() {
   return ticketSortFilter?.value === "completed-today";
+}
+
+function isTicketCompletedDateFilterOn() {
+  return COMPLETED_DATE_SORT_KEYS.has(ticketSortFilter?.value || "");
+}
+
+/** Local calendar Monday 00:00 for the week containing `date` (Mon–Sun weeks). */
+function getLocalMondayStart(date = new Date()) {
+  const start = new Date(date);
+  start.setHours(0, 0, 0, 0);
+  const day = start.getDay();
+  const diffToMonday = day === 0 ? -6 : 1 - day;
+  start.setDate(start.getDate() + diffToMonday);
+  return start;
+}
+
+/** Inclusive YYYY-MM-DD range for completed-* sort keys; null if not a completed-date sort. */
+function getCompletedDateFilterRange(sortKey = ticketSortFilter?.value) {
+  const today = startOfTodayDate();
+  if (sortKey === "completed-today") {
+    const key = formatLocalDateValue(today);
+    return { startKey: key, endKey: key, phrase: "today" };
+  }
+  if (sortKey === "completed-yesterday") {
+    const yesterday = startOfTodayDate();
+    yesterday.setDate(yesterday.getDate() - 1);
+    const key = formatLocalDateValue(yesterday);
+    return { startKey: key, endKey: key, phrase: "yesterday" };
+  }
+  if (sortKey === "completed-this-week") {
+    const monday = getLocalMondayStart(today);
+    const sunday = new Date(monday);
+    sunday.setDate(monday.getDate() + 6);
+    return {
+      startKey: formatLocalDateValue(monday),
+      endKey: formatLocalDateValue(sunday),
+      phrase: "this week"
+    };
+  }
+  if (sortKey === "completed-last-week") {
+    const monday = getLocalMondayStart(today);
+    monday.setDate(monday.getDate() - 7);
+    const sunday = new Date(monday);
+    sunday.setDate(monday.getDate() + 6);
+    return {
+      startKey: formatLocalDateValue(monday),
+      endKey: formatLocalDateValue(sunday),
+      phrase: "last week"
+    };
+  }
+  return null;
 }
 
 /** Prefer closedOn wall-clock YYYY-MM-DD (local); fall back to End date. */
@@ -5752,10 +5837,18 @@ function ticketCompletionSortKey(ticket) {
   return cleanText(ticket?.["End date"]) || "";
 }
 
-function isTicketCompletedToday(ticket) {
-  if (!isTicketCompleted(ticket)) return false;
+function isTicketCompletedInDateRange(ticket, range) {
+  if (!range || !isTicketCompleted(ticket)) return false;
   const key = ticketCompletionDateKey(ticket);
-  return Boolean(key) && key === getTodayDateValue();
+  return Boolean(key) && key >= range.startKey && key <= range.endKey;
+}
+
+function isTicketCompletedInActiveDateFilter(ticket) {
+  return isTicketCompletedInDateRange(ticket, getCompletedDateFilterRange());
+}
+
+function isTicketCompletedToday(ticket) {
+  return isTicketCompletedInDateRange(ticket, getCompletedDateFilterRange("completed-today"));
 }
 
 function setTicketOutsideHoursFilter(on) {
@@ -10216,8 +10309,10 @@ function renderTickets(options = {}) {
   if (paintTickets) {
     const filteredTickets = getFilteredDisplayedTickets();
     const outsideHoursOnly = isTicketOutsideHoursFilterOn();
-    const completedTodayOnly = isTicketCompletedTodayFilterOn();
-    const completionListMode = outsideHoursOnly || completedTodayOnly;
+    const completedDateOnly = isTicketCompletedDateFilterOn();
+    const completedDateRange = completedDateOnly ? getCompletedDateFilterRange() : null;
+    const completedDatePhrase = completedDateRange?.phrase || "today";
+    const completionListMode = outsideHoursOnly || completedDateOnly;
     if (ticketFilterSummary) {
       const ticketOpenWord = statusFilterIncludesCompleted(ticketStatusFilterPanel) ? "" : "open ";
       const sortLabels = {
@@ -10231,9 +10326,9 @@ function renderTickets(options = {}) {
       const outsideLabel = filteredTickets.length
         ? `Showing ${filteredTickets.length} completed outside office hours (before 8:00, at/after 5:30, or marked)`
         : "No tickets completed outside office hours";
-      const completedTodayLabel = filteredTickets.length
-        ? `Showing ${filteredTickets.length} ticket${filteredTickets.length === 1 ? "" : "s"} completed today (newest first)`
-        : "No tickets completed today";
+      const completedDateLabel = filteredTickets.length
+        ? `Showing ${filteredTickets.length} ticket${filteredTickets.length === 1 ? "" : "s"} completed ${completedDatePhrase} (newest first)`
+        : `No tickets completed ${completedDatePhrase}`;
 
       const focusModeOn = isMyFocusModeOn();
       const focusTotal = focusModeOn ? tickets.filter(isMyFocusTicket).length : 0;
@@ -10243,7 +10338,7 @@ function renderTickets(options = {}) {
 
       const completionSummary = outsideHoursOnly
         ? outsideLabel
-        : (completedTodayOnly ? completedTodayLabel : "");
+        : (completedDateOnly ? completedDateLabel : "");
       ticketFilterSummary.textContent = completionSummary
         ? (focusModeOn ? `${completionSummary} (My Focus only)` : completionSummary)
         : (focusModeOn ? focusLabel : (sortLabels[sortKey] || defaultLabel));
@@ -10258,8 +10353,8 @@ function renderTickets(options = {}) {
       focusMode: focusModeOn,
       emptyMessage: outsideHoursOnly
         ? "No completed tickets outside office hours."
-        : (completedTodayOnly
-          ? "No tickets completed today."
+        : (completedDateOnly
+          ? `No tickets completed ${completedDatePhrase}.`
           : (focusModeOn
             ? (getMyFocusCount()
               ? "No focus tickets match the current filters."
@@ -11068,7 +11163,7 @@ function statusFilterIncludesCompleted(panel) {
 function getFilteredDisplayedTickets() {
   const search = cleanText(ticketSearchFilter?.value);
   const outsideHoursOnly = isTicketOutsideHoursFilterOn();
-  const completedTodayOnly = isTicketCompletedTodayFilterOn();
+  const completedDateOnly = isTicketCompletedDateFilterOn();
   const filtered = applyTicketFilters(getValidTickets());
   if (outsideHoursOnly) {
     const outsideHoursTickets = filtered
@@ -11079,10 +11174,10 @@ function getFilteredDisplayedTickets() {
     );
     return outsideHoursTickets;
   }
-  if (completedTodayOnly) {
+  if (completedDateOnly) {
     lastOutsideHoursSheetRows = new Set();
     return filtered
-      .filter((ticket) => isTicketCompletedToday(ticket))
+      .filter((ticket) => isTicketCompletedInActiveDateFilter(ticket))
       .sort((a, b) => ticketCompletionSortKey(b).localeCompare(ticketCompletionSortKey(a)));
   }
   lastOutsideHoursSheetRows = new Set();
@@ -11696,8 +11791,8 @@ setSelectedPerformancePeriod(selectedPerformancePeriod);
 ticketSearchFilter?.addEventListener("input", () => scheduleRenderTickets());
 ticketSortFilter?.addEventListener("change", () => {
   scheduleRenderTickets({ immediate: true });
-  // Outside-hours / completed-today need TaskAudit closedOn — force a full (non-lite) refresh.
-  if ((isTicketOutsideHoursFilterOn() || isTicketCompletedTodayFilterOn()) && SHEET_WEB_APP_URL) {
+  // Outside-hours / completed-date sorts need TaskAudit closedOn — force a full (non-lite) refresh.
+  if ((isTicketOutsideHoursFilterOn() || isTicketCompletedDateFilterOn()) && SHEET_WEB_APP_URL) {
     refreshFromSheet({ skipScreenshotSync: true, silent: true, lite: false, retries: 1 }).catch(() => {});
   }
 });

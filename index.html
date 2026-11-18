@@ -6,12 +6,12 @@
     <title>Tarmal IT Portal</title>
     <link rel="icon" href="./assets/tarmal-mark.png?v=1" type="image/png">
     <link rel="apple-touch-icon" href="./assets/apple-touch-icon.png?v=1">
-    <link rel="stylesheet" href="./styles.css?v=221">
+    <link rel="stylesheet" href="./styles.css?v=222">
     <!-- auth stays blocking so requireLogin runs before app chrome paints -->
     <script src="./auth.js?v=31"></script>
     <!-- Defer main bundles so HTML can parse while ~210KB+ app.js downloads -->
-    <script src="./app.js?v=249" defer></script>
-    <script src="./assets.js?v=25" defer></script>
+    <script src="./app.js?v=251" defer></script>
+    <script src="./assets.js?v=26" defer></script>
     <script src="./documents.js?v=12" defer></script>
     <script src="./procurement.js?v=6" defer></script>
   </head>
@@ -451,6 +451,9 @@
                 <option value="milestone-open-desc" selected>Today's milestone first, then newest milestone</option>
                 <option value="outside-hours">Completed outside office hours</option>
                 <option value="completed-today">Completed today</option>
+                <option value="completed-yesterday">Completed yesterday</option>
+                <option value="completed-this-week">Completed this week</option>
+                <option value="completed-last-week">Completed last week</option>
               </select>
             </label>
             <button class="secondary-button filter-clear clear-filters-button" id="clearTicketFilters" type="button">Clear Filters</button>
