@@ -2640,7 +2640,15 @@ function hideGlobalConsumableLowStockWarning(targets) {
   });
 }
 
+/** Amber entire workspace header on every tab while any consumable is ≤ reorder. */
+function syncConsumablesLowStockHeader(items = null) {
+  const hasLow = canViewConsumables() && Consumables.lowStockItems(items).length > 0;
+  document.body.classList.toggle("consumables-low-stock", hasLow);
+}
+
 function updateGlobalConsumableLowStockWarning(items = null) {
+  syncConsumablesLowStockHeader(items);
+
   const buttons = [consumableLowStockWarning, consumableLowStockWarningCompact].filter(Boolean);
   if (!buttons.length) {
     consumableLowStockWarning = document.querySelector("#consumableLowStockWarning");

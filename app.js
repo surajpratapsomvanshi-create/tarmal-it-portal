@@ -5049,10 +5049,9 @@ function setActiveTab(tabName, options = {}) {
   if (topbarPageTitle) topbarPageTitle.textContent = pageTitle;
   if (topbarExpandPageTitle) topbarExpandPageTitle.textContent = pageTitle;
 
+  // Keep global low-stock amber header in sync after tab changes (not tab-gated).
   if (typeof syncConsumablesLowStockHeader === "function") {
     syncConsumablesLowStockHeader();
-  } else {
-    document.body.classList.remove("consumables-low-stock");
   }
 
   if (options.skipRender) return;
