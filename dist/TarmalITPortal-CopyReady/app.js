@@ -3266,7 +3266,16 @@ function normalizeTicket(ticket) {
     pendingFields: normalizePendingFieldsList(ticket.pendingFields),
     createdOn: ticket.createdOn || "",
     lastUpdated: ticket.lastUpdated || "",
-    closedOn: ticket.closedOn || ticket["Closed On"] || ""
+    closedOn: (() => {
+      const raw = ticket.closedOn || ticket["Closed On"] || "";
+      const status = cleanText(ticket.Status);
+      const endDate = canonicalizeTicketDate(ticket["End date"]);
+      // Soft repair on load: Completed + End Date ⇒ closedOn date follows End Date (time kept).
+      if (statusClass(status) === "status-completed" && endDate) {
+        return syncClosedOnDateFromEndDate(raw, endDate) || raw;
+      }
+      return raw;
+    })()
   };
 }
 
@@ -3540,7 +3549,7 @@ function getTodayActivityTickets(tickets) {
 function ticketLatestActivity(ticket) {
   const auditCandidates = [
     { label: "Updated", value: ticket.lastUpdated },
-    { label: "Closed", value: ticket.closedOn },
+    { label: "Closed", value: deriveEffectiveCompletionStamp(ticket) || ticket.closedOn },
     { label: "Created", value: ticket.createdOn }
   ]
     .map((entry) => ({ ...entry, date: parseTicketDate(entry.value) }))
@@ -5673,7 +5682,8 @@ function forceClosedOnOutsideOffice(value = localIsoDateTime()) {
 }
 
 /**
- * Prefer End Date as the calendar day of closedOn; keep the existing clock when present.
+ * Hard rule: Completed date portion = End Date when End Date is set.
+ * Keep the existing clock when present; otherwise stamp local time on that End Date.
  * Milestone is never used for completion stamps.
  */
 function syncClosedOnDateFromEndDate(closedOn, endDate) {
@@ -5688,6 +5698,18 @@ function syncClosedOnDateFromEndDate(closedOn, endDate) {
     return `${endKey}T${hh}:${mm}:${ss}`;
   }
   return `${endKey}T${localIsoDateTime().slice(11)}`;
+}
+
+/**
+ * Effective completion stamp for display/filters.
+ * For Completed tickets with End Date: closedOn date is replaced by End Date; time kept from closedOn.
+ */
+function deriveEffectiveCompletionStamp(ticket) {
+  const raw = cleanText(ticket?.closedOn || ticket?.["Closed On"] || "");
+  if (!isTicketCompleted(ticket)) return raw;
+  const endDate = ticket?.["End date"];
+  if (!toInputDateValue(endDate)) return raw;
+  return syncClosedOnDateFromEndDate(raw, endDate);
 }
 
 function formatCompletionStamp(value) {
@@ -5713,13 +5735,14 @@ function stampTicketCompletion(ticket, previousTicket = null) {
     return next;
   }
   next["Outside Hours"] = marked;
+  // Prefer existing clock from previous/current closedOn; date always comes from End Date below.
   if (previousTicket && isTicketCompleted(previousTicket) && completionTimestampHasTime(previousTicket.closedOn)) {
     next.closedOn = previousTicket.closedOn;
   } else if (!completionTimestampHasTime(next.closedOn)) {
     next.closedOn = localIsoDateTime();
   }
-  // End Date owns the closedOn calendar day (Completed today / Completed column).
-  // Changing End Date on an already-Completed ticket retargets the stamp date and keeps time.
+  // Hard rule: End Date owns the closedOn calendar day (Completed column / completed-* filters).
+  // Already-Completed edits that change End Date retarget the stamp date and keep time.
   next.closedOn = syncClosedOnDateFromEndDate(next.closedOn, next["End date"]);
   // Retroactive mark: work done after hours, ticket saved during office hours.
   if (isOutsideHoursMarked(next)) {
@@ -5823,16 +5846,17 @@ function getCompletedDateFilterRange(sortKey = ticketSortFilter?.value) {
   return null;
 }
 
-/** Prefer closedOn wall-clock YYYY-MM-DD (local); fall back to End date. */
+/** Completion calendar day: End Date when present on Completed tickets, else closedOn. */
 function ticketCompletionDateKey(ticket) {
-  const closedKey = toInputDateValue(ticket?.closedOn || ticket?.["Closed On"] || "");
+  const effective = deriveEffectiveCompletionStamp(ticket);
+  const closedKey = toInputDateValue(effective);
   if (closedKey) return closedKey;
   return toInputDateValue(ticket?.["End date"] || "") || canonicalizeTicketDate(ticket?.["End date"] || "") || "";
 }
 
 function ticketCompletionSortKey(ticket) {
-  const closedOn = cleanText(ticket?.closedOn || ticket?.["Closed On"]);
-  if (closedOn) return closedOn;
+  const effective = deriveEffectiveCompletionStamp(ticket);
+  if (effective) return effective;
   return cleanText(ticket?.["End date"]) || "";
 }
 
@@ -5898,7 +5922,7 @@ function isTicketOverdue(ticket) {
 function ticketResolutionDays(ticket) {
   if (!isTicketCompleted(ticket)) return null;
   const created = parseTicketDate(ticket.createdOn) || parseTicketDate(ticket["Start date"]);
-  const closed = parseTicketDate(ticket.closedOn) || parseTicketDate(ticket["End date"]);
+  const closed = parseTicketDate(deriveEffectiveCompletionStamp(ticket)) || parseTicketDate(ticket["End date"]);
   if (!created || !closed) return null;
   const days = (closed.getTime() - created.getTime()) / 86400000;
   return days >= 0 ? days : null;
@@ -8798,17 +8822,19 @@ async function movePresentationTicketToColumn(sheetRow, columnId) {
   if (priorStatus.toLowerCase() === nextStatus.toLowerCase()) return;
   if (kanbanColumnId(ticket.Status) === columnId) return;
 
-  const updated = stampTicketCompletion({
+  const withStatus = {
     ...ticket,
     Status: nextStatus,
     expectedStatus: priorStatus || nextStatus,
     lastKnownStatus: priorStatus || nextStatus,
     lastUpdated: new Date().toISOString(),
     ticketId: ticketStableId(ticket) || createTicketId()
-  }, ticket);
-  if (/^completed$/i.test(nextStatus) && !cleanText(updated["End date"])) {
-    updated["End date"] = getTodayDateValue();
+  };
+  // End Date must exist before stamping so closedOn date = End Date.
+  if (/^completed$/i.test(nextStatus) && !cleanText(withStatus["End date"])) {
+    withStatus["End date"] = getTodayDateValue();
   }
+  const updated = stampTicketCompletion(withStatus, ticket);
 
   const sheetTicket = {
     ...updated,
@@ -10075,7 +10101,7 @@ function renderTicketTable(tickets, options = {}) {
         <td class="ticket-col-compact ticket-col-status"><span class="status-pill ${statusClass(ticket.Status)}">${escapeHtml(ticket.Status || "Blank")}</span></td>
         <td class="ticket-col-compact ticket-col-date">${formatDate(ticket.Milestone) ? escapeHtml(formatDate(ticket.Milestone)) : "—"}</td>
         <td class="ticket-col-compact ticket-col-date">${escapeHtml(formatDate(ticket["End date"]))}</td>
-        ${showCompletedAt ? `<td class="ticket-col-compact ticket-col-date ticket-col-completed-at"><span class="ticket-completed-label">${escapeHtml(formatCompletionStamp(ticket.closedOn))}</span></td>` : ""}
+        ${showCompletedAt ? `<td class="ticket-col-compact ticket-col-date ticket-col-completed-at"><span class="ticket-completed-label">${escapeHtml(formatCompletionStamp(deriveEffectiveCompletionStamp(ticket)))}</span></td>` : ""}
         <td class="ticket-col-compact ticket-col-type"><span class="ticket-type-label">${escapeHtml(ticket.Type)}</span></td>
         <td class="remarks-col">${renderTicketRemarksCell(ticket)}</td>
         ${canEdit ? `
@@ -11167,7 +11193,7 @@ function getFilteredDisplayedTickets() {
   if (outsideHoursOnly) {
     const outsideHoursTickets = filtered
       .filter((ticket) => completionOutsideOffice(ticket))
-      .sort((a, b) => String(b.closedOn || "").localeCompare(String(a.closedOn || "")));
+      .sort((a, b) => ticketCompletionSortKey(b).localeCompare(ticketCompletionSortKey(a)));
     lastOutsideHoursSheetRows = new Set(
       outsideHoursTickets.map((ticket) => Number(ticket.sheetRow)).filter((row) => row > 0)
     );
