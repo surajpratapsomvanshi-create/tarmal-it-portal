@@ -1862,8 +1862,7 @@ function writeTicketToSheetRow_(sheet, sheetRow, data) {
   const fields = prepared.fields;
   const workflow = prepared.workflow;
 
-  // Stale Pending Approval must not undo manager Completed — unless this save
-  // intentionally opens project-type approval (Type newly set to SAP/Infra).
+  // Stale Pending Approval must not undo manager Completed.
   if (isCompletedStatus(oldStatus) && isPendingApprovalStatus_(fields.status)
     && !(workflow && workflow.approvalKind === "project-type")) {
     return {
@@ -4280,7 +4279,7 @@ function typeEnteredProjectType_(nextType, previousType) {
   return isExactProjectType_(nextType) && !isExactProjectType_(previousType);
 }
 
-function resolveCompletionWorkflow_(oldStatus, requestedStatus, owner, actorName, actorEmail) {
+function resolveCompletionWorkflow_(oldStatus, requestedStatus, owner, actorName, actorEmail, ticketType) {
   const wantsComplete = isCompletedStatus(requestedStatus);
   const wasPending = isPendingApprovalStatus_(oldStatus);
   const wasComplete = isCompletedStatus(oldStatus);
@@ -4302,6 +4301,10 @@ function resolveCompletionWorkflow_(oldStatus, requestedStatus, owner, actorName
     if (wasComplete) {
       return { status: requestedStatus, approvalSent: false };
     }
+    // Completion approval ONLY for exact project SAP / Infra — never Daily-* or MOM.
+    if (!isExactProjectType_(ticketType)) {
+      return { status: "Completed", approvalSent: false };
+    }
     if (!ownerRequiresCompletionApproval_(owner, maps)) {
       return { status: "Completed", approvalSent: false };
     }
@@ -4322,14 +4325,14 @@ function resolveCompletionWorkflow_(oldStatus, requestedStatus, owner, actorName
 }
 
 /**
- * Combined approval workflow:
- * - Completion → Pending Approval (existing)
- * - Type newly set to exact SAP / Infra → Pending Approval
- * - Leaving Pending Approval (non-Completed) requires the owner's manager
+ * Approval workflow:
+ * - Completion of exact SAP / Infra → Pending Approval (manager)
+ * - Daily - SAP / Daily - Infra / MOM: no approval
+ * - Setting Type to SAP/Infra alone no longer requires approval
+ * - Leaving Pending Approval (non-Completed) still requires the owner's manager
  */
 function resolveTicketWorkflow_(oldTicket, requestedStatus, requestedType, owner, actorName, actorEmail) {
   const oldStatus = oldTicket ? String(oldTicket.Status || "") : "";
-  const oldType = oldTicket ? String(oldTicket.Type || "") : "";
   const maps = readUserMasterMaps_();
 
   const leavingPending = isPendingApprovalStatus_(oldStatus)
@@ -4347,45 +4350,12 @@ function resolveTicketWorkflow_(oldTicket, requestedStatus, requestedType, owner
     requestedStatus,
     owner,
     actorName,
-    actorEmail
+    actorEmail,
+    requestedType
   );
 
-  // Completion approval (Requested Completed → Pending) wins over project-type gating.
   if (isPendingApprovalStatus_(completion.status) && isCompletedStatus(requestedStatus)) {
     return completion;
-  }
-
-  if (typeEnteredProjectType_(requestedType, oldType)) {
-    if (!ownerRequiresCompletionApproval_(owner, maps)) {
-      if (leavingPending) {
-        return {
-          status: requestedStatus,
-          approvalSent: false,
-          approved: true,
-          message: "Approved."
-        };
-      }
-      return completion;
-    }
-    if (canUserApproveCompletion_(actorName, actorEmail, owner, maps)) {
-      if (leavingPending) {
-        return {
-          status: completion.status,
-          approvalSent: false,
-          approved: true,
-          message: "Approved."
-        };
-      }
-      return completion;
-    }
-    const manager = getManagerEntryForUser_(owner, maps);
-    return {
-      status: PENDING_APPROVAL_STATUS,
-      approvalSent: true,
-      approvalKind: "project-type",
-      manager: manager,
-      message: "Project type sent for manager approval."
-    };
   }
 
   if (leavingPending) {
@@ -4623,12 +4593,8 @@ function sendPendingCompletionApprovalEmails(force) {
 
     try {
       const managerEntry = { user: resolved.managerName, email: resolved.managerEmail };
-      // Exact SAP/Infra pending rows use project-type copy; others use completion copy.
-      if (isExactProjectType_(ticket.Type)) {
-        sendTaskProjectTypeApprovalEmail_(ticket, managerEntry, ticket.Owner);
-      } else {
-        sendTaskCompletionApprovalEmail_(ticket, managerEntry, ticket.Owner);
-      }
+      // Pending Approval is completion-gated for exact SAP/Infra only.
+      sendTaskCompletionApprovalEmail_(ticket, managerEntry, ticket.Owner);
       taskSheet.getRange(i + 1, approvalCol + 1).setValue("Yes");
       sent++;
       lastSentTo = resolved.managerEmail;

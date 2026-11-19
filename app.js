@@ -3697,6 +3697,86 @@ function isExactMomType(type) {
   return String(type || "").trim().toLowerCase() === "mom";
 }
 
+/** Create/edit Type select order (matches index.html). */
+const TICKET_TYPE_OPTION_ORDER = ["Daily - Infra", "Daily - SAP", "SAP", "Infra", "MOM"];
+
+/** Admin-level only may choose exact SAP / Infra at create (and when changing type). */
+function canChooseProjectTaskTypes(user = Auth.currentUser()) {
+  return Auth.isAdminLevelUser(user);
+}
+
+/** Map project SAP/Infra → Daily equivalents for non-admin create/duplicate. */
+function fallbackTypeForNonAdmin(type) {
+  if (isExactSapType(type)) return "Daily - SAP";
+  if (isExactInfraType(type)) return "Daily - Infra";
+  const text = cleanText(type);
+  if (text && TICKET_TYPE_OPTION_ORDER.includes(text) && !isExactProjectType(text)) return text;
+  return "Daily - Infra";
+}
+
+/**
+ * Rebuild Type <select> options for create/edit.
+ * Non-admin: Daily - Infra / Daily - SAP / MOM only.
+ * Non-admin edit of existing SAP/Infra: keep current type only (cannot change to/from project).
+ */
+function syncTicketTypeSelectOptions(selectEl, { mode = "create", currentType = "" } = {}) {
+  if (!selectEl) return "";
+  const admin = canChooseProjectTaskTypes();
+  const previous = cleanText(currentType) || cleanText(selectEl.value) || "Daily - Infra";
+  let allowed;
+
+  if (admin) {
+    allowed = TICKET_TYPE_OPTION_ORDER.slice();
+  } else if (mode === "edit" && isExactProjectType(previous)) {
+    allowed = [previous];
+  } else {
+    allowed = TICKET_TYPE_OPTION_ORDER.filter((entry) => !isExactProjectType(entry));
+  }
+
+  const selected = admin
+    ? (TICKET_TYPE_OPTION_ORDER.includes(previous) ? previous : "Daily - Infra")
+    : (mode === "edit" && isExactProjectType(previous)
+      ? previous
+      : fallbackTypeForNonAdmin(previous));
+
+  selectEl.innerHTML = allowed
+    .map((entry) => `<option value="${escapeHtml(entry)}">${escapeHtml(entry)}</option>`)
+    .join("");
+  selectEl.value = allowed.includes(selected) ? selected : allowed[0] || "Daily - Infra";
+  selectEl.disabled = false;
+  return selectEl.value;
+}
+
+function assertCreatableTicketType(type) {
+  if (isExactProjectType(type) && !canChooseProjectTaskTypes()) {
+    return "Only Admin-level users can create SAP or Infra project tasks. Use Daily - SAP, Daily - Infra, or MOM.";
+  }
+  return "";
+}
+
+function assertEditableTicketType(nextType, previousType) {
+  if (canChooseProjectTaskTypes()) return "";
+  const next = cleanText(nextType);
+  const prev = cleanText(previousType);
+  if (isExactProjectType(next) && !isExactProjectType(prev)) {
+    return "Only Admin-level users can change Type to SAP or Infra.";
+  }
+  if (!isExactProjectType(next) && isExactProjectType(prev)) {
+    return "Only Admin-level users can change Type away from SAP or Infra project tasks.";
+  }
+  if (isExactProjectType(next) && isExactProjectType(prev) && next.toLowerCase() !== prev.toLowerCase()) {
+    return "Only Admin-level users can change between SAP and Infra project types.";
+  }
+  return "";
+}
+
+/** Non-admin cannot delete exact SAP / Infra project tasks. */
+function canDeleteTicket(ticket, user = Auth.currentUser()) {
+  if (!canEditTickets()) return false;
+  if (isExactProjectType(ticket?.Type) && !Auth.isAdminLevelUser(user)) return false;
+  return true;
+}
+
 function isSapTypeTicket(ticket) {
   return isExactSapType(ticket?.Type);
 }
@@ -3949,32 +4029,35 @@ function ownerRequiresManagerApproval(ownerName) {
   return Boolean(manager?.user);
 }
 
+function isExactProjectType(type) {
+  // Approval-gated / admin-create project types only (exact SAP / Infra).
+  // Not Daily - SAP / Daily - Infra / MOM.
+  return isExactSapType(type) || isExactInfraType(type);
+}
+
 function shouldRequireCompletionApproval(ticket, user = Auth.currentUser()) {
   const owner = cleanText(ticket?.Owner);
   if (!owner || !isTicketCompleted(ticket)) return false;
+  // Completion approval ONLY for exact project SAP / Infra — never Daily-* or MOM.
+  if (!isExactProjectType(ticket?.Type)) return false;
   if (!ownerRequiresManagerApproval(owner)) return false;
   return !actorIsOwnerManager(owner, user);
 }
 
-function isExactProjectType(type) {
-  // Approval-gated project types only (SAP / Infra). MOM is presentational, not approval-gated.
-  return isExactSapType(type) || isExactInfraType(type);
-}
-
 function typeEnteredProjectType(nextType, previousType) {
-  // Exact SAP / Infra only — not Daily - SAP / Daily - Infra / MOM.
+  // Kept for callers; project-type-on-create approval is disabled (completion-only).
   return isExactProjectType(nextType) && !isExactProjectType(previousType);
 }
 
 function shouldRequireProjectTypeApproval(ticket, previousTicket = null, user = Auth.currentUser()) {
-  if (!typeEnteredProjectType(ticket?.Type, previousTicket?.Type)) return false;
-  const owner = cleanText(ticket?.Owner);
-  if (!owner) return false;
-  if (!ownerRequiresManagerApproval(owner)) return false;
-  return !actorIsOwnerManager(owner, user);
+  // Approval is completion-only for SAP/Infra. Creating/changing Type no longer gates.
+  void ticket;
+  void previousTicket;
+  void user;
+  return false;
 }
 
-/** "completion" | "project-type" | "" — completion wins when both apply. */
+/** "completion" | "" — project-type approval removed; Daily/MOM never approve. */
 function getRequiredApprovalKind(ticket, previousTicket = null, user = Auth.currentUser()) {
   if (shouldRequireCompletionApproval(ticket, user)) return "completion";
   if (shouldRequireProjectTypeApproval(ticket, previousTicket, user)) return "project-type";
@@ -4041,12 +4124,12 @@ function populateTicketEditApprovalNote(ticket) {
   const manager = getManagerForOwner(ticket.Owner);
   const managerName = manager?.user || "the manager";
   if (canCurrentUserApproveTicket(ticket)) {
-    ticketEditApprovalNote.textContent = isProjectTypeTicket(ticket)
-      ? `Awaiting your approval for ${ticket.Owner}. Set status to Not started or In progress to approve project type ${ticket.Type}, or Completed to approve closure.`
+    ticketEditApprovalNote.textContent = isExactProjectType(ticket?.Type)
+      ? `Awaiting your approval to close ${ticket.Type} project task for ${ticket.Owner}. Set status to Completed to approve.`
       : `Awaiting your approval. Set status to Completed to approve closure for ${ticket.Owner}.`;
   } else {
-    ticketEditApprovalNote.textContent = isProjectTypeTicket(ticket)
-      ? `Awaiting manager approval from ${managerName} for project type ${ticket.Type}.`
+    ticketEditApprovalNote.textContent = isExactProjectType(ticket?.Type)
+      ? `Awaiting manager approval from ${managerName} to complete this ${ticket.Type} project task.`
       : `Awaiting manager approval from ${managerName}.`;
   }
   ticketEditApprovalNote.hidden = false;
@@ -4129,6 +4212,7 @@ function isOwnerVisibleToCurrentUser(owner) {
 }
 
 function applyTicketVisibilityFilter(tickets) {
+  // Owner/team based only — never hide SAP/Infra project tickets from their non-admin owners.
   if (hasFullHierarchyAccess()) return tickets;
   return tickets.filter((ticket) => isOwnerVisibleToCurrentUser(ticket.Owner));
 }
@@ -6724,7 +6808,10 @@ function openSubtaskCreateModal(parentSheetRow) {
   if (ticketCreateParentContext) ticketCreateParentContext.hidden = false;
   if (ticketCreateParentLabel) ticketCreateParentLabel.textContent = parent.Task || "Parent task";
   if (ticketFormSubmitLabel) ticketFormSubmitLabel.textContent = "Create Sub-task";
-  if (form?.elements.Type && parent.Type) form.elements.Type.value = parent.Type;
+  syncTicketTypeSelectOptions(form?.elements?.Type, {
+    mode: "create",
+    currentType: parent.Type || "Daily - Infra"
+  });
   if (form?.elements["Raised By"] && parent["Raised By"]) {
     form.elements["Raised By"].value = parent["Raised By"];
   }
@@ -6774,6 +6861,10 @@ function openTicketCreateModal() {
   setActiveTab("tickets");
   ticketCreateModal.hidden = false;
   document.body.classList.add("modal-open");
+  syncTicketTypeSelectOptions(form?.elements?.Type, {
+    mode: "create",
+    currentType: form?.elements?.Type?.value || "Daily - Infra"
+  });
   resetSurajTicketCreateTracking();
   applyDefaultTicketFormOwner();
   applySurajTicketCreateDefaults({ force: true });
@@ -6849,7 +6940,10 @@ function openTicketEditor(sheetRow, options = {}) {
     ticketEditRaisedByTouched = true;
   }
   populateTicketEditStatusSelect(ticket);
-  ticketEditForm.elements.Type.value = ticket.Type || "Daily - Infra";
+  syncTicketTypeSelectOptions(ticketEditForm.elements.Type, {
+    mode: "edit",
+    currentType: ticket.Type || "Daily - Infra"
+  });
   const originalOwnerCheckbox = ticketEditForm.querySelector("[name='originalOwnerBhanu']");
   if (originalOwnerCheckbox) {
     originalOwnerCheckbox.checked = isTicketOriginalOwnerBhanu(ticket);
@@ -6862,6 +6956,7 @@ function openTicketEditor(sheetRow, options = {}) {
   populateTicketEditParentContext(ticket);
   populateTicketEditApprovalNote(ticket);
   syncTicketEditFocusToggle(ticket);
+  syncTicketDeleteButtonForActiveEdit();
 
   ticketEditModal.hidden = false;
   document.body.classList.add("modal-open");
@@ -8054,7 +8149,9 @@ function setTicketEditBusyState({ saving = false, deleting = false } = {}) {
   }
 
   if (deleteTicketEditButton) {
-    deleteTicketEditButton.disabled = busy;
+    const canDelete = canDeleteTicket(activeEditTicket || {});
+    deleteTicketEditButton.hidden = !canDelete;
+    deleteTicketEditButton.disabled = busy || !canDelete;
     deleteTicketEditButton.classList.toggle("is-deleting", deleting);
     deleteTicketEditButton.textContent = deleting ? "Deleting…" : "Delete Task";
   }
@@ -8071,14 +8168,18 @@ function setTicketEditBusyState({ saving = false, deleting = false } = {}) {
   if (closeTicketDeleteConfirmButton) closeTicketDeleteConfirmButton.disabled = busy;
 }
 
+function syncTicketDeleteButtonForActiveEdit() {
+  if (!deleteTicketEditButton) return;
+  const canDelete = canDeleteTicket(activeEditTicket || {});
+  deleteTicketEditButton.hidden = !canDelete;
+  deleteTicketEditButton.disabled = !canDelete || ticketEditDeleteInFlight || ticketEditSubmitInFlight;
+  deleteTicketEditButton.classList.remove("is-deleting");
+  deleteTicketEditButton.textContent = "Delete Task";
+}
+
 function resetTicketDeleteUi() {
   closeTicketDeleteConfirm();
-  if (deleteTicketEditButton) {
-    deleteTicketEditButton.hidden = false;
-    deleteTicketEditButton.disabled = false;
-    deleteTicketEditButton.classList.remove("is-deleting");
-    deleteTicketEditButton.textContent = "Delete Task";
-  }
+  syncTicketDeleteButtonForActiveEdit();
   if (confirmDeleteTicketButton) {
     confirmDeleteTicketButton.disabled = false;
     confirmDeleteTicketButton.classList.remove("is-deleting");
@@ -8138,6 +8239,10 @@ function requestTicketDelete() {
   if (!ticketEditForm || ticketEditDeleteInFlight || ticketEditSubmitInFlight) return;
 
   const sourceTicket = activeEditTicket || {};
+  if (!canDeleteTicket(sourceTicket)) {
+    showTicketDeleteError("Only Admin-level users can delete SAP or Infra project tasks.");
+    return;
+  }
   const label = String(sourceTicket.Task || ticketEditForm.elements.Task?.value || "this task").trim() || "this task";
 
   if (openTicketDeleteConfirm(label)) return;
@@ -8152,6 +8257,10 @@ async function executeTicketDelete() {
   if (!ticketEditForm || ticketEditDeleteInFlight || ticketEditSubmitInFlight) return;
 
   const sourceTicket = activeEditTicket || {};
+  if (!canDeleteTicket(sourceTicket)) {
+    showTicketDeleteError("Only Admin-level users can delete SAP or Infra project tasks.");
+    return;
+  }
   const data = new FormData(ticketEditForm);
   const task = String(sourceTicket.Task || data.get("Task") || "").trim();
   const owner = cleanText(sourceTicket.Owner || data.get("Owner") || "");
@@ -8565,7 +8674,11 @@ function populateTicketCreateFormFromSource(source) {
   if (form.elements["Raised By"]) {
     form.elements["Raised By"].value = source["Raised By"] || "";
   }
-  setTicketCreateSelectValue("Type", source.Type || "Daily - Infra");
+  // Non-admin duplicating SAP/Infra falls back to Daily - SAP / Daily - Infra.
+  syncTicketTypeSelectOptions(form.elements.Type, {
+    mode: "create",
+    currentType: source.Type || "Daily - Infra"
+  });
   setDateFieldValue(form, "Start date", source["Start date"]);
   if (form.elements["Start date"] && !form.elements["Start date"].value) {
     form.elements["Start date"].valueAsDate = new Date();
@@ -11293,6 +11406,16 @@ form?.addEventListener("submit", async (event) => {
     return;
   }
 
+  const createTypeError = assertCreatableTicketType(form.elements?.Type?.value);
+  if (createTypeError) {
+    alert(createTypeError);
+    syncTicketTypeSelectOptions(form.elements?.Type, {
+      mode: "create",
+      currentType: fallbackTypeForNonAdmin(form.elements?.Type?.value)
+    });
+    return;
+  }
+
   const submissionId = createSubmissionId();
   // Re-submit of the same failed create: reuse existing pending locals with this form's
   // identity instead of pushing more clones. Match by submissionId stamped on first attempt.
@@ -11466,6 +11589,16 @@ ticketEditForm?.addEventListener("submit", async (event) => {
   const updatedTicket = ticketFromEditForm();
   if (!isOwnerVisibleToCurrentUser(updatedTicket.Owner)) {
     alert("You can only assign tickets to yourself and team members who report to you.");
+    return;
+  }
+
+  const typeChangeError = assertEditableTicketType(updatedTicket.Type, activeEditTicket?.Type);
+  if (typeChangeError) {
+    alert(typeChangeError);
+    syncTicketTypeSelectOptions(ticketEditForm.elements.Type, {
+      mode: "edit",
+      currentType: activeEditTicket?.Type || "Daily - Infra"
+    });
     return;
   }
 
@@ -12017,6 +12150,14 @@ if (initialTab) {
 }
 Auth.refreshSessionRights();
 Auth.applyAccessControl();
+syncTicketTypeSelectOptions(form?.elements?.Type, {
+  mode: "create",
+  currentType: form?.elements?.Type?.value || "Daily - Infra"
+});
+syncTicketTypeSelectOptions(ticketEditForm?.elements?.Type, {
+  mode: "edit",
+  currentType: ticketEditForm?.elements?.Type?.value || "Daily - Infra"
+});
 setStatus(SHEET_WEB_APP_URL ? "online" : "", SHEET_WEB_APP_URL ? "Ready to sync" : "Sync not configured");
 renderRightsForm(emptyRights());
 renderUsers();
