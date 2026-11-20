@@ -849,33 +849,71 @@ function buildDeclarationFormHtml(asset, logoDataUrl = "") {
 <html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title>
 <style>
   @page { size: A4; margin: 10mm 12mm; }
-  body { font-family: "Times New Roman", Times, serif; color: #111; margin: 10px; line-height: 1.26; font-size: 11.5px; }
-  .brand-header { text-align: center; margin: 0 0 4px; }
-  .brand-logo { display: inline-block; width: 48mm; max-width: 48mm; height: auto; }
-  h1 { text-align: center; font-size: 15.5px; letter-spacing: 0.04em; margin: 0 0 6px; text-transform: uppercase; }
-  .intro { margin: 0 0 5px; }
-  .specs { margin: 0 0 6px 16px; padding: 0; }
-  .specs li { margin: 1px 0; }
-  .sign-row { display: grid; grid-template-columns: 1.2fr 0.9fr 0.9fr 1.2fr; gap: 10px; margin: 6px 0 8px; align-items: end; page-break-inside: avoid; }
-  .sign-box { min-height: 38px; }
-  .sign-line { border-bottom: 1px solid #222; min-height: 20px; margin-bottom: 2px; }
-  .thumb-box { border: 1px solid #222; min-height: 38px; width: 52px; }
-  .label { font-size: 10.5px; }
-  .terms-intro { margin: 0 0 3px; }
-  .terms { margin: 0 0 5px 16px; padding: 0; }
-  .terms li { margin: 1px 0; }
-  .liability { margin: 0 0 3px; }
-  .note { margin: 0 0 5px; font-weight: 700; }
-  .final { margin: 0 0 5px; }
-  .final-sign { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; margin-bottom: 6px; page-break-inside: avoid; }
-  .return-table { width: 100%; border-collapse: collapse; border: 1px solid #222; page-break-inside: avoid; page-break-before: avoid; }
-  .return-table td { border: 1px solid #222; vertical-align: top; padding: 4px 7px; width: 50%; }
-  .return-line { border-bottom: 1px solid #222; min-height: 12px; margin: 2px 0 2px; }
-  .meta { color: #555; font-size: 10px; margin-top: 5px; }
-  .actions { margin-top: 12px; }
+  html, body { height: 100%; }
+  body {
+    font-family: "Times New Roman", Times, serif;
+    color: #111;
+    margin: 0;
+    padding: 0;
+    line-height: 1.48;
+    font-size: 12px;
+    min-height: 277mm;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+  }
+  .brand-header { text-align: center; margin: 0 0 10px; }
+  .brand-logo { display: inline-block; width: 52mm; max-width: 52mm; height: auto; }
+  h1 { text-align: center; font-size: 16px; letter-spacing: 0.04em; margin: 0 0 14px; text-transform: uppercase; }
+  .intro { margin: 0 0 12px; }
+  .specs { margin: 0 0 16px 18px; padding: 0; }
+  .specs li { margin: 5px 0; }
+  .sign-row {
+    display: grid;
+    grid-template-columns: 1.2fr 0.9fr 0.9fr 1.2fr;
+    gap: 12px;
+    margin: 14px 0 22px;
+    align-items: end;
+    page-break-inside: avoid;
+  }
+  .sign-box { min-height: 52px; }
+  .sign-line { border-bottom: 1px solid #222; min-height: 28px; margin-bottom: 4px; }
+  .thumb-box { border: 1px solid #222; min-height: 48px; width: 56px; }
+  .label { font-size: 11px; }
+  .terms-intro { margin: 0 0 10px; }
+  .terms { margin: 0 0 14px 18px; padding: 0; }
+  .terms li { margin: 5px 0; }
+  .liability { margin: 0 0 10px; }
+  .note { margin: 0 0 16px; font-weight: 700; }
+  .final { margin: 0 0 12px; }
+  .final-sign {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+    margin: 0 0 8px;
+    page-break-inside: avoid;
+  }
+  .page-footer { margin-top: auto; padding-top: 18px; }
+  .return-table {
+    width: 100%;
+    border-collapse: collapse;
+    border: 1px solid #222;
+    page-break-inside: avoid;
+  }
+  .return-table td { border: 1px solid #222; vertical-align: top; padding: 8px 10px; width: 50%; }
+  .return-line { border-bottom: 1px solid #222; min-height: 18px; margin: 6px 0 10px; }
+  .meta { color: #555; font-size: 10px; margin: 10px 0 0; }
+  .actions { margin-top: 14px; }
   @media print {
-    .actions { display: none; }
-    body { margin: 0; }
+    .actions { display: none !important; }
+    html, body { height: auto; }
+    body {
+      margin: 0;
+      min-height: 277mm;
+      display: flex;
+      flex-direction: column;
+    }
+    .page-footer { margin-top: auto; }
     .return-table, .sign-row, .final-sign { page-break-inside: avoid; }
   }
 </style></head><body>
@@ -911,27 +949,29 @@ function buildDeclarationFormHtml(asset, logoDataUrl = "") {
     <div class="sign-box"><div class="sign-line"></div><div class="label">Signature</div></div>
     <div class="sign-box"><div class="sign-line"></div><div class="label">Date: ${escapeHtml(formDate)}</div></div>
   </div>
-  <table class="return-table" aria-label="Return details">
-    <tr>
-      <td>
-        <div><strong>Reason for returning:</strong></div>
-        <div class="return-line"></div>
-        <div><strong>Return Date:</strong></div>
-        <div class="return-line"></div>
-        <div><strong>Sign:</strong></div>
-        <div class="return-line"></div>
-      </td>
-      <td>
-        <div><strong>${escapeHtml(assetType)} Condition (IT Person Receiving):</strong></div>
-        <div class="return-line"></div>
-        <div><strong>Receipt Date:</strong></div>
-        <div class="return-line"></div>
-        <div><strong>Sign:</strong></div>
-        <div class="return-line"></div>
-      </td>
-    </tr>
-  </table>
-  <p class="meta">Asset ID: ${escapeHtml(asset.assetCode || "—")} · Generated ${escapeHtml(new Date().toLocaleString())}</p>
+  <div class="page-footer">
+    <table class="return-table" aria-label="Return details">
+      <tr>
+        <td>
+          <div><strong>Reason for returning:</strong></div>
+          <div class="return-line"></div>
+          <div><strong>Return Date:</strong></div>
+          <div class="return-line"></div>
+          <div><strong>Sign:</strong></div>
+          <div class="return-line"></div>
+        </td>
+        <td>
+          <div><strong>${escapeHtml(assetType)} Condition (IT Person Receiving):</strong></div>
+          <div class="return-line"></div>
+          <div><strong>Receipt Date:</strong></div>
+          <div class="return-line"></div>
+          <div><strong>Sign:</strong></div>
+          <div class="return-line"></div>
+        </td>
+      </tr>
+    </table>
+    <p class="meta">Asset ID: ${escapeHtml(asset.assetCode || "—")} · Generated ${escapeHtml(new Date().toLocaleString())}</p>
+  </div>
   <div class="actions">
     <button type="button" onclick="window.print()">Print / Save as PDF</button>
   </div>
