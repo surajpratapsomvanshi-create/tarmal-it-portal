@@ -2516,6 +2516,12 @@ let consumableMoveNotes;
 let closeConsumableMoveButton;
 let consumableLowStockWarning;
 let consumableLowStockWarningCompact;
+let consumableLowStockBanner;
+let consumableLowStockCount;
+let consumableLowStockChips;
+let consumableLowStockDismiss;
+let consumableLowStockCompactLabel;
+const LOW_STOCK_DISMISS_KEY = "tarmal.lowStockDismissed";
 /** True while Item ID is still auto-managed (blank or last filled from category). */
 let consumableItemCodeAuto = true;
 
@@ -2564,6 +2570,11 @@ function bindConsumableElements() {
   closeConsumableMoveButton = document.querySelector("#closeConsumableMoveButton");
   consumableLowStockWarning = document.querySelector("#consumableLowStockWarning");
   consumableLowStockWarningCompact = document.querySelector("#consumableLowStockWarningCompact");
+  consumableLowStockBanner = document.querySelector("#consumableLowStockBanner");
+  consumableLowStockCount = document.querySelector("#consumableLowStockCount");
+  consumableLowStockChips = document.querySelector("#consumableLowStockChips");
+  consumableLowStockDismiss = document.querySelector("#consumableLowStockDismiss");
+  consumableLowStockCompactLabel = document.querySelector("#consumableLowStockCompactLabel");
 }
 
 function formatConsumableNumber(value, digits = 1) {
@@ -2670,63 +2681,136 @@ function updateConsumableLowStockBadge(items) {
   consumableLowStockBadge.textContent = `${low} low stock`;
 }
 
-function hideGlobalConsumableLowStockWarning(targets) {
-  targets.forEach((el) => {
-    el.hidden = true;
-    el.style.display = "none";
-    el.textContent = "";
-    el.removeAttribute("title");
-    el.setAttribute("aria-hidden", "true");
-  });
+function lowStockFingerprint(lowItems) {
+  return (lowItems || [])
+    .map((item) => String(item.itemCode || item.id || item.name || "").trim())
+    .filter(Boolean)
+    .sort()
+    .join("|");
 }
 
-/** Amber entire workspace header on every tab while any consumable is ≤ reorder. */
+function isLowStockDismissed(fingerprint) {
+  if (!fingerprint) return false;
+  try {
+    return sessionStorage.getItem(LOW_STOCK_DISMISS_KEY) === fingerprint;
+  } catch {
+    return false;
+  }
+}
+
+function dismissLowStockBanner(fingerprint) {
+  try {
+    if (fingerprint) sessionStorage.setItem(LOW_STOCK_DISMISS_KEY, fingerprint);
+  } catch {
+    /* ignore quota / private mode */
+  }
+  if (consumableLowStockBanner) consumableLowStockBanner.hidden = true;
+  if (consumableLowStockWarningCompact) {
+    consumableLowStockWarningCompact.hidden = true;
+    consumableLowStockWarningCompact.setAttribute("aria-hidden", "true");
+  }
+}
+
+function hideGlobalConsumableLowStockWarning() {
+  document.body.classList.remove("consumables-low-stock");
+  if (consumableLowStockBanner) {
+    consumableLowStockBanner.hidden = true;
+  }
+  if (consumableLowStockCount) consumableLowStockCount.textContent = "";
+  if (consumableLowStockChips) consumableLowStockChips.innerHTML = "";
+  if (consumableLowStockWarning) {
+    consumableLowStockWarning.removeAttribute("title");
+  }
+  if (consumableLowStockWarningCompact) {
+    consumableLowStockWarningCompact.hidden = true;
+    consumableLowStockWarningCompact.setAttribute("aria-hidden", "true");
+    consumableLowStockWarningCompact.removeAttribute("title");
+  }
+  if (consumableLowStockCompactLabel) {
+    consumableLowStockCompactLabel.textContent = "Low stock";
+  }
+}
+
+/** Keep body flag for non-chrome hooks; strip/banner carries the visual alert. */
 function syncConsumablesLowStockHeader(items = null) {
   const hasLow = canViewConsumables() && Consumables.lowStockItems(items).length > 0;
   document.body.classList.toggle("consumables-low-stock", hasLow);
 }
 
 function updateGlobalConsumableLowStockWarning(items = null) {
-  syncConsumablesLowStockHeader(items);
-
-  const buttons = [consumableLowStockWarning, consumableLowStockWarningCompact].filter(Boolean);
-  if (!buttons.length) {
+  if (!consumableLowStockBanner) {
+    consumableLowStockBanner = document.querySelector("#consumableLowStockBanner");
     consumableLowStockWarning = document.querySelector("#consumableLowStockWarning");
     consumableLowStockWarningCompact = document.querySelector("#consumableLowStockWarningCompact");
+    consumableLowStockCount = document.querySelector("#consumableLowStockCount");
+    consumableLowStockChips = document.querySelector("#consumableLowStockChips");
+    consumableLowStockDismiss = document.querySelector("#consumableLowStockDismiss");
+    consumableLowStockCompactLabel = document.querySelector("#consumableLowStockCompactLabel");
   }
-  const targets = [consumableLowStockWarning, consumableLowStockWarningCompact].filter(Boolean);
-  if (!targets.length) return;
 
   if (!canViewConsumables()) {
-    hideGlobalConsumableLowStockWarning(targets);
+    hideGlobalConsumableLowStockWarning();
     return;
   }
 
   const lowItems = Consumables.lowStockItems(items);
+  syncConsumablesLowStockHeader(lowItems.length ? lowItems : []);
+
   if (!lowItems.length) {
-    hideGlobalConsumableLowStockWarning(targets);
+    hideGlobalConsumableLowStockWarning();
     return;
   }
 
-  const names = lowItems
-    .slice(0, 3)
-    .map((item) => item.itemCode || item.name || "Item")
-    .join(", ");
-  const more = lowItems.length > 3 ? ` +${lowItems.length - 3} more` : "";
-  const label = lowItems.length === 1
-    ? `Low stock: ${names}`
-    : `Low stock: ${lowItems.length} items (${names}${more})`;
+  const fingerprint = lowStockFingerprint(lowItems);
   const title = lowItems
     .map((item) => `${item.itemCode || "—"} ${item.name || ""} (${item.currentStock}/${item.reorderLevel})`)
     .join(" · ");
+  const countLabel = lowItems.length === 1 ? "1 item" : `${lowItems.length} items`;
+  const chipCodes = lowItems.slice(0, 4).map((item) => item.itemCode || item.name || "Item");
+  const moreCount = lowItems.length - chipCodes.length;
 
-  targets.forEach((el) => {
-    el.hidden = false;
-    el.style.display = "";
-    el.removeAttribute("aria-hidden");
-    el.textContent = label;
-    el.title = title;
-  });
+  if (consumableLowStockCount) consumableLowStockCount.textContent = countLabel;
+  if (consumableLowStockChips) {
+    const escape = typeof escapeHtml === "function"
+      ? escapeHtml
+      : (value) => String(value ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+    const chipsHtml = chipCodes
+      .map((code) => `<span class="low-stock-chip">${escape(code)}</span>`)
+      .join("");
+    const moreHtml = moreCount > 0
+      ? `<span class="low-stock-chip low-stock-chip-more">+${moreCount} more</span>`
+      : "";
+    consumableLowStockChips.innerHTML = chipsHtml + moreHtml;
+  }
+  if (consumableLowStockWarning) {
+    consumableLowStockWarning.title = title;
+  }
+  if (consumableLowStockCompactLabel) {
+    consumableLowStockCompactLabel.textContent = lowItems.length === 1
+      ? `Low stock: ${chipCodes[0] || "1 item"}`
+      : `Low stock: ${lowItems.length}`;
+  }
+  if (consumableLowStockWarningCompact) {
+    consumableLowStockWarningCompact.title = title;
+  }
+
+  const dismissed = isLowStockDismissed(fingerprint);
+  if (consumableLowStockBanner) {
+    consumableLowStockBanner.hidden = dismissed;
+    consumableLowStockBanner.dataset.fingerprint = fingerprint;
+  }
+  if (consumableLowStockWarningCompact) {
+    consumableLowStockWarningCompact.hidden = dismissed;
+    if (dismissed) {
+      consumableLowStockWarningCompact.setAttribute("aria-hidden", "true");
+    } else {
+      consumableLowStockWarningCompact.removeAttribute("aria-hidden");
+    }
+  }
 }
 
 function openConsumablesLowStockFromWarning() {
@@ -3280,6 +3364,13 @@ function initConsumablesModule() {
 
   consumableLowStockWarning?.addEventListener("click", openConsumablesLowStockFromWarning);
   consumableLowStockWarningCompact?.addEventListener("click", openConsumablesLowStockFromWarning);
+  consumableLowStockDismiss?.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const fingerprint = consumableLowStockBanner?.dataset?.fingerprint
+      || lowStockFingerprint(Consumables.lowStockItems());
+    dismissLowStockBanner(fingerprint);
+  });
 
   // Persist recalculated balances for any legacy rows left at stock 0 after Receive.
   const repaired = Consumables.save(Consumables.read());
