@@ -2745,14 +2745,16 @@ function renderConsumables() {
         <td>${escapeHtml(formatConsumableNumber(item.reorderLevel, 0))}</td>
         <td>${escapeHtml(formatConsumableNumber(avg, 1))}</td>
         <td>${cover === null ? "—" : escapeHtml(formatConsumableNumber(cover, 0))}</td>
-        <td>${escapeHtml(item.vendor || "—")}</td>
-        <td class="asset-actions">
-          <button class="text-button consumable-view-button" type="button" data-item-id="${escapeHtml(item.id)}">View</button>
-          ${manage ? `
-            <button class="text-button consumable-move-button" type="button" data-item-id="${escapeHtml(item.id)}">Stock</button>
-            <button class="text-button consumable-edit-button" type="button" data-item-id="${escapeHtml(item.id)}">Edit</button>
-            <button class="text-button consumable-delete-button" type="button" data-item-id="${escapeHtml(item.id)}">Delete</button>
-          ` : ""}
+        <td class="consumable-vendor-cell">${escapeHtml(item.vendor || "—")}</td>
+        <td class="asset-actions-cell consumable-actions-cell">
+          <div class="asset-actions">
+            <button class="text-button consumable-view-button" type="button" data-item-id="${escapeHtml(item.id)}">View</button>
+            ${manage ? `
+              <button class="text-button consumable-move-button" type="button" data-item-id="${escapeHtml(item.id)}">Stock</button>
+              <button class="text-button consumable-edit-button" type="button" data-item-id="${escapeHtml(item.id)}">Edit</button>
+              <button class="text-button consumable-delete-button" type="button" data-item-id="${escapeHtml(item.id)}">Delete</button>
+            ` : ""}
+          </div>
         </td>
       </tr>
     `;

@@ -6,12 +6,12 @@
     <title>Tarmal IT Portal</title>
     <link rel="icon" href="./assets/tarmal-mark.png?v=1" type="image/png">
     <link rel="apple-touch-icon" href="./assets/apple-touch-icon.png?v=1">
-    <link rel="stylesheet" href="./styles.css?v=224">
+    <link rel="stylesheet" href="./styles.css?v=225">
     <!-- auth stays blocking so requireLogin runs before app chrome paints -->
     <script src="./auth.js?v=31"></script>
     <!-- Defer main bundles so HTML can parse while ~210KB+ app.js downloads -->
     <script src="./app.js?v=254" defer></script>
-    <script src="./assets.js?v=27" defer></script>
+    <script src="./assets.js?v=28" defer></script>
     <script src="./documents.js?v=12" defer></script>
     <script src="./procurement.js?v=6" defer></script>
   </head>
@@ -1131,8 +1131,8 @@
                   <th>Reorder</th>
                   <th>Avg / 30d</th>
                   <th>Days cover</th>
-                  <th>Vendor</th>
-                  <th>Actions</th>
+                  <th class="consumable-vendor-col">Vendor</th>
+                  <th class="asset-actions-col consumable-actions-col">Actions</th>
                 </tr>
               </thead>
               <tbody id="consumableRows"></tbody>

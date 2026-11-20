@@ -6807,6 +6807,54 @@ body.view-focus .dashboard-layout {
   color: #9a3412;
 }
 
+/* Consumables: avoid fixed-layout clipping of View/Stock/Edit/Delete */
+.consumables-board .asset-table-wrap {
+  overflow-x: auto;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.consumable-table {
+  table-layout: auto;
+  width: 100%;
+  min-width: 980px;
+}
+
+.consumable-table th,
+.consumable-table td {
+  white-space: nowrap;
+}
+
+.consumable-table th:nth-child(2),
+.consumable-table td:nth-child(2) {
+  white-space: normal;
+  min-width: 140px;
+  max-width: 280px;
+}
+
+.consumable-table .consumable-vendor-col,
+.consumable-table .consumable-vendor-cell {
+  max-width: 120px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.consumable-table .consumable-actions-col,
+.consumable-table .consumable-actions-cell {
+  width: 1%;
+  min-width: 220px;
+  padding-right: 12px;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+.consumable-table .consumable-actions-cell .asset-actions {
+  display: inline-flex;
+  flex-wrap: nowrap;
+  gap: 2px;
+  white-space: nowrap;
+}
+
 .consumable-history-wrap {
   max-height: min(42vh, 360px);
   overflow: auto;
