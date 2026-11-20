@@ -6,7 +6,10 @@
     <title>Tarmal IT Portal</title>
     <link rel="icon" href="./assets/tarmal-mark.png?v=1" type="image/png">
     <link rel="apple-touch-icon" href="./assets/apple-touch-icon.png?v=1">
-    <link rel="stylesheet" href="./styles.css?v=225">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="./styles.css?v=226">
     <!-- auth stays blocking so requireLogin runs before app chrome paints -->
     <script src="./auth.js?v=31"></script>
     <!-- Defer main bundles so HTML can parse while ~210KB+ app.js downloads -->
@@ -73,11 +76,11 @@
       </aside>
 
       <div class="app-main">
-        <div class="topbar-stack" id="siteTopbarChrome">
+        <div class="topbar-stack sap-workspace-chrome" id="siteTopbarChrome">
           <div class="topbar-chrome">
             <header class="topbar" id="siteTopbar">
               <div class="topbar-context">
-                <p class="topbar-context-eyebrow">Workspace</p>
+                <p class="topbar-context-eyebrow">Tarmal IT Portal</p>
                 <h1 id="topbarPageTitle">Dashboard</h1>
               </div>
               <div class="topbar-actions">
