@@ -310,7 +310,7 @@ function uniqueCaseInsensitive(values) {
 const ticketMultiFilters = [
   { panel: ticketStatusFilterPanel, trigger: ticketStatusFilterTrigger, defaultLabel: "All statuses", getValues: (ticket) => ticket.Status },
   { panel: ticketOwnerFilterPanel, trigger: ticketOwnerFilterTrigger, defaultLabel: "All owners", getValues: (ticket) => ticket.Owner },
-  { panel: ticketTypeFilterPanel, trigger: ticketTypeFilterTrigger, defaultLabel: "All types", getValues: (ticket) => ticket.Type },
+  { panel: ticketTypeFilterPanel, trigger: ticketTypeFilterTrigger, defaultLabel: "All types", getValues: (ticket) => ticket.Type, extraOptions: ["Project"] },
   { panel: ticketPriorityFilterPanel, trigger: ticketPriorityFilterTrigger, defaultLabel: "All priorities", getValues: (ticket) => ticket.Priority, labelFormatter: formatPriorityLabel },
   { panel: ticketBhanuFilterPanel, trigger: ticketBhanuFilterTrigger, defaultLabel: "All original owners", getValues: (ticket) => getTicketOriginalOwnerValue(ticket), staticOptions: ["Bhanu"] },
   { panel: ticketRaisedByFilterPanel, trigger: ticketRaisedByFilterTrigger, defaultLabel: "All raisers", getValues: getTicketRaisedByValue, caseInsensitive: true }
@@ -4556,13 +4556,16 @@ function closeMultiFilterPanels(exceptPanel = null) {
   }
 }
 
-function populateMultiFilter(panel, trigger, values, defaultLabel, labelFormatter = null, staticOptions = null, onChange = null) {
+function populateMultiFilter(panel, trigger, values, defaultLabel, labelFormatter = null, staticOptions = null, onChange = null, extraOptions = null) {
   const selected = new Set(getMultiFilterValues(panel));
   const sortedOptions = staticOptions?.length
     ? staticOptions
     : labelFormatter === formatPriorityLabel
     ? ["80", "20"].filter((value) => values.some((entry) => normalizePriority(entry) === value))
-    : [...new Set(values.filter(Boolean))].sort((a, b) => String(a).localeCompare(String(b)));
+    : [...new Set([
+        ...(Array.isArray(extraOptions) ? extraOptions : []),
+        ...values.filter(Boolean)
+      ])].sort((a, b) => String(a).localeCompare(String(b)));
 
   panel.innerHTML = sortedOptions.map((value) => `
     <label class="multi-select-option">
@@ -4599,6 +4602,17 @@ function populatePresentationTypeFilter() {
   });
 }
 
+function ticketMatchesSelectedTypes(ticket, typeValues) {
+  if (!typeValues?.length) return true;
+  const ticketType = String(ticket?.Type || "").trim().toLowerCase();
+  return typeValues.some((selected) => {
+    const key = String(selected || "").trim().toLowerCase();
+    // Convenience alias: exact SAP / Infra only (not Daily - *).
+    if (key === "project") return isExactProjectType(ticket?.Type);
+    return key === ticketType;
+  });
+}
+
 function populateFilterOptions(tickets) {
   ticketMultiFilters.forEach((filter) => {
     if (!filter.panel || !filter.trigger) return;
@@ -4609,7 +4623,9 @@ function populateFilterOptions(tickets) {
       filter.caseInsensitive ? uniqueCaseInsensitive(values) : values,
       filter.defaultLabel,
       filter.labelFormatter || null,
-      filter.staticOptions || null
+      filter.staticOptions || null,
+      null,
+      filter.extraOptions || null
     );
   });
 }
@@ -4811,7 +4827,7 @@ function applyTicketFilters(tickets) {
     if (completedDateOnly && !isTicketCompletedInActiveDateFilter(ticket)) return false;
     if (statusValues.length && !statusValues.includes(ticket.Status)) return false;
     if (ownerValues.length && !ownerValues.includes(ticket.Owner)) return false;
-    if (typeValues.length && !typeValues.includes(ticket.Type)) return false;
+    if (!ticketMatchesSelectedTypes(ticket, typeValues)) return false;
     if (priorityValues.length && !priorityValues.includes(ticket.Priority)) return false;
     if (bhanuValues.length && !bhanuValues.includes(getTicketOriginalOwnerValue(ticket))) return false;
     if (raisedByValues.length && !raisedByValues.includes(getTicketRaisedByValue(ticket).toLowerCase())) return false;
