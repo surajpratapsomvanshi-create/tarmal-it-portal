@@ -9,12 +9,12 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="./styles.css?v=230">
+    <link rel="stylesheet" href="./styles.css?v=231">
     <!-- auth stays blocking so requireLogin runs before app chrome paints -->
     <script src="./auth.js?v=31"></script>
     <!-- Defer main bundles so HTML can parse while ~210KB+ app.js downloads -->
     <script src="./app.js?v=257" defer></script>
-    <script src="./assets.js?v=31" defer></script>
+    <script src="./assets.js?v=32" defer></script>
     <script src="./documents.js?v=12" defer></script>
     <script src="./procurement.js?v=6" defer></script>
   </head>
@@ -84,6 +84,41 @@
                 <h1 id="topbarPageTitle">Dashboard</h1>
               </div>
               <div class="topbar-actions">
+                <div class="stock-notif" id="stockNotifRoot" hidden>
+                  <button class="stock-notif-btn" id="stockNotifButton" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="stockNotifPanel" title="Notifications">
+                    <span class="stock-notif-bell" aria-hidden="true">
+                      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" focusable="false">
+                        <path d="M12 3a5.5 5.5 0 0 0-5.5 5.5v2.1c0 .7-.2 1.4-.6 2L4.7 14.4c-.5.7 0 1.6.8 1.6h13c.8 0 1.3-.9.8-1.6l-1.2-1.8c-.4-.6-.6-1.3-.6-2V8.5A5.5 5.5 0 0 0 12 3Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>
+                        <path d="M9.5 18a2.5 2.5 0 0 0 5 0" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+                      </svg>
+                    </span>
+                    <span class="stock-notif-badge" id="stockNotifBadge" hidden>0</span>
+                  </button>
+                  <div class="stock-notif-panel" id="stockNotifPanel" role="menu" hidden>
+                    <div class="stock-notif-panel-head">
+                      <strong>Notifications</strong>
+                      <button class="stock-notif-mark-read" id="stockNotifMarkRead" type="button">Mark all as read</button>
+                    </div>
+                    <div class="stock-notif-summary" id="stockNotifSummary">
+                      <span class="stock-notif-summary-icon" aria-hidden="true">
+                        <svg viewBox="0 0 20 20" width="16" height="16" fill="none" focusable="false">
+                          <rect x="3" y="5" width="14" height="11" rx="2" stroke="currentColor" stroke-width="1.5"/>
+                          <path d="M7 5V4.5A3 3 0 0 1 13 4.5V5" stroke="currentColor" stroke-width="1.5"/>
+                        </svg>
+                      </span>
+                      <span class="stock-notif-summary-copy">
+                        <strong>Low Stock Alert</strong>
+                        <span id="stockNotifSummaryText">0 consumables below minimum</span>
+                      </span>
+                      <span class="stock-notif-summary-count" id="stockNotifSummaryCount">0</span>
+                    </div>
+                    <ul class="stock-notif-list" id="stockNotifList"></ul>
+                    <button class="stock-notif-footer" id="stockNotifViewAll" type="button">
+                      View all inventory alerts
+                      <span aria-hidden="true">›</span>
+                    </button>
+                  </div>
+                </div>
                 <div class="user-chip">
                   <span class="user-chip-prefix">Signed in as</span>
                   <strong id="currentUserLabel">User</strong>
@@ -106,22 +141,23 @@
           </div>
         </div>
 
-        <aside class="low-stock-strip" id="consumableLowStockBanner" hidden aria-live="polite">
-          <button class="low-stock-strip-body" id="consumableLowStockWarning" type="button" title="Open Consumables low-stock filter">
-            <span class="low-stock-strip-icon" aria-hidden="true">
-              <svg viewBox="0 0 20 20" width="16" height="16" fill="none" focusable="false">
-                <path d="M10 2.5L18 17H2L10 2.5Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" fill="currentColor" fill-opacity="0.12"/>
-                <path d="M10 8v4.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
-                <circle cx="10" cy="14.6" r="1" fill="currentColor"/>
-              </svg>
-            </span>
-            <span class="low-stock-strip-copy">
-              <strong class="low-stock-strip-title">Low stock</strong>
-              <span class="low-stock-strip-count" id="consumableLowStockCount"></span>
-            </span>
-            <span class="low-stock-strip-chips" id="consumableLowStockChips"></span>
+        <aside class="low-stock-banner" id="consumableLowStockBanner" hidden aria-live="polite">
+          <span class="low-stock-banner-icon" aria-hidden="true">
+            <svg viewBox="0 0 20 20" width="15" height="15" fill="none" focusable="false">
+              <path d="M10 2.5L18 17H2L10 2.5Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" fill="currentColor" fill-opacity="0.14"/>
+              <path d="M10 8v4.2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+              <circle cx="10" cy="14.5" r="1" fill="currentColor"/>
+            </svg>
+          </span>
+          <div class="low-stock-banner-copy">
+            <strong class="low-stock-banner-title">Low Stock Alert</strong>
+            <span class="low-stock-banner-msg" id="consumableLowStockCount"></span>
+          </div>
+          <button class="low-stock-banner-cta" id="consumableLowStockWarning" type="button" title="Open Consumables low-stock filter">
+            View Low-Stock Items
+            <span aria-hidden="true">›</span>
           </button>
-          <button class="low-stock-strip-dismiss" id="consumableLowStockDismiss" type="button" title="Dismiss for this session" aria-label="Dismiss low stock alert">
+          <button class="low-stock-banner-dismiss" id="consumableLowStockDismiss" type="button" title="Dismiss for this session" aria-label="Dismiss low stock alert">
             <span aria-hidden="true">&times;</span>
           </button>
         </aside>
@@ -131,9 +167,14 @@
             <span class="panel-icon-glyph panel-icon-glyph-menu" aria-hidden="true"></span>
           </button>
           <span class="topbar-expand-title" id="topbarExpandPageTitle">Dashboard</span>
-          <button class="low-stock-compact-badge" id="consumableLowStockWarningCompact" type="button" hidden title="Open Consumables low-stock filter">
-            <span class="low-stock-compact-dot" aria-hidden="true"></span>
-            <span class="low-stock-compact-label" id="consumableLowStockCompactLabel">Low stock</span>
+          <button class="stock-notif-btn stock-notif-btn-compact" id="consumableLowStockWarningCompact" type="button" hidden title="Notifications">
+            <span class="stock-notif-bell" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" focusable="false">
+                <path d="M12 3a5.5 5.5 0 0 0-5.5 5.5v2.1c0 .7-.2 1.4-.6 2L4.7 14.4c-.5.7 0 1.6.8 1.6h13c.8 0 1.3-.9.8-1.6l-1.2-1.8c-.4-.6-.6-1.3-.6-2V8.5A5.5 5.5 0 0 0 12 3Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>
+                <path d="M9.5 18a2.5 2.5 0 0 0 5 0" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+              </svg>
+            </span>
+            <span class="stock-notif-badge" id="stockNotifBadgeCompact" hidden>0</span>
           </button>
           <div class="sync-card topbar-expand-status" id="topbarExpandStatus" role="status" aria-live="polite">
             <span class="status-dot" id="topbarExpandStatusDot"></span>
