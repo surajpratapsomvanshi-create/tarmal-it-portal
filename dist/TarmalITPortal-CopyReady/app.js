@@ -4039,6 +4039,7 @@ function shouldRequireCompletionApproval(ticket, user = Auth.currentUser()) {
   const owner = cleanText(ticket?.Owner);
   if (!owner || !isTicketCompleted(ticket)) return false;
   // Completion approval ONLY for exact project SAP / Infra — never Daily-* or MOM.
+  if (isDailyCategoryType(ticket?.Type) || isExactMomType(ticket?.Type)) return false;
   if (!isExactProjectType(ticket?.Type)) return false;
   if (!ownerRequiresManagerApproval(owner)) return false;
   return !actorIsOwnerManager(owner, user);
@@ -4076,22 +4077,32 @@ function applyCompletionApprovalPreview(ticket, previousTicket = null) {
 function reconcileSyncedTicketStatus(ticket, result = {}, expected = {}) {
   const serverStatus = cleanText(result.status);
   const expectedStatus = cleanText(expected.Status);
-  // Approval workflow may rewrite Completed / working status → Pending Approval; honor that.
+  const effectiveType = cleanText(expected.Type || ticket?.Type);
+  const projectApprovalType = isExactProjectType(effectiveType);
+  // Approval workflow may rewrite Completed → Pending Approval for SAP/Infra only.
+  // Daily-* / MOM must never snap into Pending Approval from a server echo.
   if (serverStatus && expectedStatus && serverStatus !== expectedStatus) {
     if (/^pending approval$/i.test(serverStatus) && !/^pending approval$/i.test(expectedStatus)) {
-      return serverStatus;
+      if (projectApprovalType) return serverStatus;
+      return expectedStatus;
     }
     // Prefer the value we just saved — ack/status echo can lag and snap the UI back.
     if (expected.sheetRow || ticketStableId(expected)) {
       return expectedStatus;
     }
   }
-  if (serverStatus) return serverStatus;
+  if (serverStatus) {
+    if (/^pending approval$/i.test(serverStatus) && !projectApprovalType) {
+      return expectedStatus || "Completed";
+    }
+    return serverStatus;
+  }
   if (shouldRequireCompletionApproval({ ...ticket, ...expected, Status: "Completed" })
     && /^completed$/i.test(expectedStatus)) {
     return "Pending Approval";
   }
-  if (isPendingApprovalStatus(ticket.Status) || isPendingApprovalStatus(expectedStatus)) {
+  if (projectApprovalType
+    && (isPendingApprovalStatus(ticket.Status) || isPendingApprovalStatus(expectedStatus))) {
     return "Pending Approval";
   }
   return cleanText(expected.Status || ticket.Status);

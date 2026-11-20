@@ -710,6 +710,12 @@ function resolveCompletionWorkflow_(oldStatus, requestedStatus, owner, actorName
   const wasComplete = isCompletedStatus(oldStatus);
   const maps = readUserMasterMaps_();
 
+  // Daily-* / MOM / any non-project type: always complete directly — never Pending Approval,
+  // even if a legacy row was already stuck in Pending Approval.
+  if (wantsComplete && !isExactProjectType_(ticketType)) {
+    return { status: "Completed", approvalSent: false };
+  }
+
   if (wasPending && wantsComplete) {
     if (!canUserApproveCompletion_(actorName, actorEmail, owner, maps)) {
       throw new Error("Only the task owner's manager can approve completion.");
@@ -726,10 +732,7 @@ function resolveCompletionWorkflow_(oldStatus, requestedStatus, owner, actorName
     if (wasComplete) {
       return { status: requestedStatus, approvalSent: false };
     }
-    // Completion approval ONLY for exact project SAP / Infra — never Daily-* or MOM.
-    if (!isExactProjectType_(ticketType)) {
-      return { status: "Completed", approvalSent: false };
-    }
+    // Completion approval ONLY for exact project SAP / Infra.
     if (!ownerRequiresCompletionApproval_(owner, maps)) {
       return { status: "Completed", approvalSent: false };
     }
@@ -752,19 +755,21 @@ function resolveCompletionWorkflow_(oldStatus, requestedStatus, owner, actorName
 /**
  * Approval workflow:
  * - Completion of exact SAP / Infra → Pending Approval (manager)
- * - Daily - SAP / Daily - Infra / MOM: no approval
+ * - Daily - SAP / Daily - Infra / MOM: no approval (Completed directly)
  * - Setting Type to SAP/Infra alone no longer requires approval
- * - Leaving Pending Approval (non-Completed) still requires the owner's manager
+ * - Leaving Pending Approval on project types still requires the owner's manager
  */
 function resolveTicketWorkflow_(oldTicket, requestedStatus, requestedType, owner, actorName, actorEmail) {
   const oldStatus = oldTicket ? String(oldTicket.Status || "") : "";
   const maps = readUserMasterMaps_();
+  const effectiveType = String(requestedType || (oldTicket && oldTicket.Type) || "").trim();
 
   const leavingPending = isPendingApprovalStatus_(oldStatus)
     && !isPendingApprovalStatus_(requestedStatus)
     && !isCompletedStatus(requestedStatus);
 
-  if (leavingPending && ownerRequiresCompletionApproval_(owner, maps)) {
+  // Manager gate only for exact SAP / Infra project tickets.
+  if (leavingPending && isExactProjectType_(effectiveType) && ownerRequiresCompletionApproval_(owner, maps)) {
     if (!canUserApproveCompletion_(actorName, actorEmail, owner, maps)) {
       throw new Error("Only the task owner's manager can approve this ticket.");
     }
@@ -776,7 +781,7 @@ function resolveTicketWorkflow_(oldTicket, requestedStatus, requestedType, owner
     owner,
     actorName,
     actorEmail,
-    requestedType
+    effectiveType
   );
 
   if (isPendingApprovalStatus_(completion.status) && isCompletedStatus(requestedStatus)) {
@@ -1004,6 +1009,9 @@ function sendPendingCompletionApprovalEmails(force) {
     const row = values[i];
     const ticket = rowToTicket_(row, columnMap, i + 1);
     if (!isPendingApprovalStatus_(ticket.Status)) continue;
+
+    // Never email approvals for Daily-* / MOM / non-project — those must not use this flow.
+    if (!isExactProjectType_(ticket.Type)) continue;
 
     const sentFlag = String(row[approvalCol] || "").trim();
     if (sentFlag === "Yes") continue;
