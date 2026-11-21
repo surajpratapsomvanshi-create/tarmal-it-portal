@@ -2518,7 +2518,6 @@ let consumableLowStockWarning;
 let consumableLowStockWarningCompact;
 let consumableLowStockBanner;
 let consumableLowStockCount;
-let consumableLowStockDismiss;
 let stockNotifRoot;
 let stockNotifButton;
 let stockNotifBadge;
@@ -2529,7 +2528,6 @@ let stockNotifSummaryText;
 let stockNotifSummaryCount;
 let stockNotifMarkRead;
 let stockNotifViewAll;
-const LOW_STOCK_DISMISS_KEY = "tarmal.lowStockDismissed";
 const LOW_STOCK_READ_KEY = "tarmal.lowStockRead";
 /** True while Item ID is still auto-managed (blank or last filled from category). */
 let consumableItemCodeAuto = true;
@@ -2581,7 +2579,6 @@ function bindConsumableElements() {
   consumableLowStockWarningCompact = document.querySelector("#consumableLowStockWarningCompact");
   consumableLowStockBanner = document.querySelector("#consumableLowStockBanner");
   consumableLowStockCount = document.querySelector("#consumableLowStockCount");
-  consumableLowStockDismiss = document.querySelector("#consumableLowStockDismiss");
   stockNotifRoot = document.querySelector("#stockNotifRoot");
   stockNotifButton = document.querySelector("#stockNotifButton");
   stockNotifBadge = document.querySelector("#stockNotifBadge");
@@ -2715,15 +2712,6 @@ function lowStockFingerprint(lowItems) {
     .join("|");
 }
 
-function isLowStockDismissed(fingerprint) {
-  if (!fingerprint) return false;
-  try {
-    return sessionStorage.getItem(LOW_STOCK_DISMISS_KEY) === fingerprint;
-  } catch {
-    return false;
-  }
-}
-
 function isLowStockMarkedRead(fingerprint) {
   if (!fingerprint) return false;
   try {
@@ -2740,15 +2728,6 @@ function markLowStockRead(fingerprint) {
     /* ignore */
   }
   setStockNotifBadgeCount(0);
-}
-
-function dismissLowStockBanner(fingerprint) {
-  try {
-    if (fingerprint) sessionStorage.setItem(LOW_STOCK_DISMISS_KEY, fingerprint);
-  } catch {
-    /* ignore quota / private mode */
-  }
-  if (consumableLowStockBanner) consumableLowStockBanner.hidden = true;
 }
 
 function setStockNotifOpen(open) {
@@ -2802,7 +2781,6 @@ function bindStockNotifElements() {
     consumableLowStockWarning = document.querySelector("#consumableLowStockWarning");
     consumableLowStockWarningCompact = document.querySelector("#consumableLowStockWarningCompact");
     consumableLowStockCount = document.querySelector("#consumableLowStockCount");
-    consumableLowStockDismiss = document.querySelector("#consumableLowStockDismiss");
   }
 }
 
@@ -2892,9 +2870,9 @@ function updateGlobalConsumableLowStockWarning(items = null) {
     consumableLowStockWarningCompact.title = `${count} low-stock alert${count === 1 ? "" : "s"}`;
   }
 
-  const dismissed = isLowStockDismissed(fingerprint);
+  // Persistent banner on all tabs while inventory is low — not dismissible.
   if (consumableLowStockBanner) {
-    consumableLowStockBanner.hidden = dismissed;
+    consumableLowStockBanner.hidden = false;
     consumableLowStockBanner.dataset.fingerprint = fingerprint;
   }
 }
@@ -3455,13 +3433,6 @@ function initConsumablesModule() {
     event.stopPropagation();
     // Collapsed header: jump straight to filtered Consumables.
     openConsumablesLowStockFromWarning();
-  });
-  consumableLowStockDismiss?.addEventListener("click", (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    const fingerprint = consumableLowStockBanner?.dataset?.fingerprint
-      || lowStockFingerprint(Consumables.lowStockItems());
-    dismissLowStockBanner(fingerprint);
   });
   stockNotifButton?.addEventListener("click", (event) => {
     event.preventDefault();

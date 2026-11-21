@@ -567,20 +567,19 @@ body.performance-filters-collapsed .filter-sidebar {
   justify-content: flex-end;
 }
 
-/* Compact one-line low-stock banner — never paints full topbar chrome */
+/* Persistent slim low-stock banner — never paints full topbar chrome, never dismissible */
 .low-stock-banner {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   width: 100%;
   max-width: 100%;
   box-sizing: border-box;
-  min-height: 36px;
-  padding: 6px 8px 6px 10px;
+  min-height: 52px;
+  padding: 8px 12px 8px 12px;
   border: 1px solid #f0d5a8;
-  border-left: 3px solid var(--amber);
   border-radius: var(--radius-md);
-  background: var(--amber-soft);
+  background: linear-gradient(180deg, #fffbf5 0%, #fff4e5 100%);
   color: #7a1f1f;
 }
 
@@ -593,29 +592,33 @@ body.performance-filters-collapsed .filter-sidebar {
   align-items: center;
   justify-content: center;
   flex: 0 0 auto;
-  color: var(--amber);
+  width: 32px;
+  height: 32px;
+  line-height: 0;
 }
 
 .low-stock-banner-copy {
   display: flex;
-  align-items: baseline;
-  flex-wrap: wrap;
-  gap: 6px 10px;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 2px;
   min-width: 0;
   flex: 1 1 auto;
 }
 
 .low-stock-banner-title {
-  font-size: 13px;
-  font-weight: 700;
+  font-size: 14px;
+  font-weight: 800;
   color: #8b1e1e;
-  white-space: nowrap;
+  line-height: 1.2;
 }
 
 .low-stock-banner-msg {
   font-size: 12px;
   font-weight: 500;
   color: #9a3b3b;
+  line-height: 1.25;
   min-width: 0;
 }
 
@@ -625,12 +628,12 @@ body.performance-filters-collapsed .filter-sidebar {
   gap: 4px;
   flex: 0 0 auto;
   margin: 0;
-  padding: 4px 10px;
+  padding: 7px 12px;
   border-radius: 999px;
   border: 1px solid #b42318;
-  background: #fff;
+  background: #fffaf5;
   color: #8b1e1e;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
   line-height: 1.2;
   white-space: nowrap;
@@ -640,30 +643,6 @@ body.performance-filters-collapsed .filter-sidebar {
 .low-stock-banner-cta:hover,
 .low-stock-banner-cta:focus-visible {
   background: #fff7f5;
-  outline: none;
-}
-
-.low-stock-banner-dismiss {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex: 0 0 auto;
-  width: 28px;
-  height: 28px;
-  margin: 0;
-  padding: 0;
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: #9a3b3b;
-  font-size: 18px;
-  line-height: 1;
-  cursor: pointer;
-}
-
-.low-stock-banner-dismiss:hover,
-.low-stock-banner-dismiss:focus-visible {
-  background: rgba(180, 35, 24, 0.08);
   outline: none;
 }
 
@@ -795,8 +774,8 @@ body.performance-filters-collapsed .filter-sidebar {
   margin: 10px 12px 6px;
   padding: 10px 12px;
   border-radius: var(--radius-sm);
-  background: var(--soft);
-  border: 1px solid var(--line);
+  background: linear-gradient(180deg, #fffbf5 0%, var(--amber-soft) 100%);
+  border: 1px solid #f0d5a8;
 }
 
 .stock-notif-summary-icon {
@@ -822,7 +801,7 @@ body.performance-filters-collapsed .filter-sidebar {
 
 .stock-notif-summary-copy strong {
   font-size: 13px;
-  color: var(--ink);
+  color: #8b1e1e;
 }
 
 .stock-notif-summary-copy span {
@@ -9950,9 +9929,9 @@ body.view-focus .dashboard-layout {
 
 .presentation-filter-field span,
 .presentation-filter-label {
-  color: var(--muted);
+  color: var(--ink-secondary);
   font-size: 0.62rem;
-  font-weight: 650;
+  font-weight: 700;
   letter-spacing: 0.04em;
   text-transform: uppercase;
   white-space: nowrap;
@@ -9967,6 +9946,7 @@ body.view-focus .dashboard-layout {
   background: var(--panel);
   color: var(--ink);
   font-size: 0.72rem;
+  font-weight: 600;
 }
 
 .presentation-filter-field--type select {

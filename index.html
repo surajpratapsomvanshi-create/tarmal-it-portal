@@ -9,12 +9,12 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="./styles.css?v=231">
+    <link rel="stylesheet" href="./styles.css?v=233">
     <!-- auth stays blocking so requireLogin runs before app chrome paints -->
     <script src="./auth.js?v=31"></script>
     <!-- Defer main bundles so HTML can parse while ~210KB+ app.js downloads -->
     <script src="./app.js?v=257" defer></script>
-    <script src="./assets.js?v=32" defer></script>
+    <script src="./assets.js?v=34" defer></script>
     <script src="./documents.js?v=12" defer></script>
     <script src="./procurement.js?v=6" defer></script>
   </head>
@@ -143,10 +143,10 @@
 
         <aside class="low-stock-banner" id="consumableLowStockBanner" hidden aria-live="polite">
           <span class="low-stock-banner-icon" aria-hidden="true">
-            <svg viewBox="0 0 20 20" width="15" height="15" fill="none" focusable="false">
-              <path d="M10 2.5L18 17H2L10 2.5Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" fill="currentColor" fill-opacity="0.14"/>
-              <path d="M10 8v4.2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
-              <circle cx="10" cy="14.5" r="1" fill="currentColor"/>
+            <svg viewBox="0 0 24 24" width="28" height="28" fill="none" focusable="false">
+              <path d="M12 3.2 22 20.5H2L12 3.2Z" stroke="#b45309" stroke-width="1.6" stroke-linejoin="round" fill="#fbbf24"/>
+              <path d="M12 9.2v5.2" stroke="#7a1f1f" stroke-width="1.8" stroke-linecap="round"/>
+              <circle cx="12" cy="17.2" r="1.15" fill="#7a1f1f"/>
             </svg>
           </span>
           <div class="low-stock-banner-copy">
@@ -156,9 +156,6 @@
           <button class="low-stock-banner-cta" id="consumableLowStockWarning" type="button" title="Open Consumables low-stock filter">
             View Low-Stock Items
             <span aria-hidden="true">›</span>
-          </button>
-          <button class="low-stock-banner-dismiss" id="consumableLowStockDismiss" type="button" title="Dismiss for this session" aria-label="Dismiss low stock alert">
-            <span aria-hidden="true">&times;</span>
           </button>
         </aside>
 
