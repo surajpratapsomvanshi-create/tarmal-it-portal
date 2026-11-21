@@ -662,6 +662,57 @@ body.performance-filters-collapsed .filter-sidebar {
   outline: none;
 }
 
+/* Compact variant for filters-hidden restore rows + collapsed header bar */
+.low-stock-banner--compact {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 34px;
+  margin: 0 6px;
+  padding: 4px 8px;
+  gap: 8px;
+}
+
+.low-stock-banner--compact .low-stock-banner-main {
+  gap: 8px;
+}
+
+.low-stock-banner--compact .low-stock-banner-icon {
+  width: 20px;
+  height: 20px;
+}
+
+.low-stock-banner--compact .low-stock-banner-title {
+  font-size: 12px;
+}
+
+.low-stock-banner--compact .low-stock-banner-msg {
+  font-size: 11px;
+}
+
+.low-stock-banner--compact .low-stock-banner-cta {
+  padding: 4px 8px;
+  font-size: 11px;
+}
+
+.toolbar-restore-row.panel-restore-bar {
+  gap: 8px;
+}
+
+.toolbar-restore-row .panel-restore-label {
+  flex: 0 1 auto;
+  max-width: 42%;
+}
+
+.toolbar-restore-row .toolbar-expand-btn {
+  margin-left: auto;
+  flex: 0 0 auto;
+}
+
+.topbar-expand-bar .low-stock-banner--compact {
+  margin: 0 4px;
+  max-width: min(520px, 100%);
+}
+
 /* Header notifications bell + dropdown (preferred space-saving pattern) */
 .stock-notif {
   position: relative;
@@ -964,6 +1015,19 @@ body.performance-filters-collapsed .filter-sidebar {
 
   .low-stock-banner-cta {
     margin-left: auto;
+  }
+
+  .low-stock-banner--compact {
+    flex-wrap: nowrap;
+    padding: 3px 6px;
+  }
+
+  .low-stock-banner--compact .low-stock-banner-msg {
+    display: none;
+  }
+
+  .toolbar-restore-row .panel-restore-label {
+    max-width: 28%;
   }
 
   .stock-notif-panel {
@@ -1770,7 +1834,9 @@ body.sidebar-collapsed .sidebar-expand-bar {
 .board-toolbar-panel .toolbar-restore-row {
   display: none;
   margin-bottom: 6px;
-  justify-content: space-between;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
 }
 
 .board-toolbar-panel.is-collapsed .board-toolbar-body {

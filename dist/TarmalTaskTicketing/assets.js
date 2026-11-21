@@ -2784,6 +2784,69 @@ function bindStockNotifElements() {
   }
 }
 
+function lowStockCompactBannerHtml(countMsg = "") {
+  return `
+    <div class="low-stock-banner-main">
+      <span class="low-stock-banner-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" focusable="false">
+          <path d="M12 3.1 21.8 20.6H2.2L12 3.1Z" stroke="#7f1d1d" stroke-width="1.7" stroke-linejoin="round" fill="#f5c542"/>
+          <path d="M12 9v5.4" stroke="#7f1d1d" stroke-width="2" stroke-linecap="round"/>
+          <circle cx="12" cy="17.35" r="1.2" fill="#7f1d1d"/>
+        </svg>
+      </span>
+      <div class="low-stock-banner-copy">
+        <strong class="low-stock-banner-title">Low Stock Alert</strong>
+        <span class="low-stock-banner-msg">${escapeLowStockHtml(countMsg)}</span>
+      </div>
+    </div>
+    <button class="low-stock-banner-cta" type="button" title="Open Consumables low-stock filter">
+      View Low-Stock Items
+      <span aria-hidden="true">&gt;</span>
+    </button>
+  `;
+}
+
+/** Compact cream banners for collapsed header + filters-hidden restore rows. */
+function ensureLowStockCompactBanners() {
+  const rows = Array.from(document.querySelectorAll(".toolbar-restore-row.panel-restore-bar"));
+  rows.forEach((row) => {
+    if (row.querySelector(".low-stock-banner--compact")) return;
+    const chip = document.createElement("aside");
+    chip.className = "low-stock-banner low-stock-banner--compact";
+    chip.hidden = true;
+    chip.setAttribute("aria-live", "polite");
+    chip.innerHTML = lowStockCompactBannerHtml();
+    const expandBtn = row.querySelector(".toolbar-expand-btn");
+    if (expandBtn) row.insertBefore(chip, expandBtn);
+    else row.appendChild(chip);
+    chip.querySelector(".low-stock-banner-cta")?.addEventListener("click", openConsumablesLowStockFromWarning);
+  });
+
+  const expandBar = document.querySelector("#topbarExpandBar");
+  if (expandBar && !expandBar.querySelector(".low-stock-banner--compact")) {
+    const chip = document.createElement("aside");
+    chip.className = "low-stock-banner low-stock-banner--compact low-stock-banner--header-collapsed";
+    chip.hidden = true;
+    chip.setAttribute("aria-live", "polite");
+    chip.innerHTML = lowStockCompactBannerHtml();
+    const insertBefore = expandBar.querySelector("#consumableLowStockWarningCompact")
+      || expandBar.querySelector("#topbarExpandStatus")
+      || expandBar.querySelector("#expandTopbarButton");
+    if (insertBefore) expandBar.insertBefore(chip, insertBefore);
+    else expandBar.appendChild(chip);
+    chip.querySelector(".low-stock-banner-cta")?.addEventListener("click", openConsumablesLowStockFromWarning);
+  }
+}
+
+function syncLowStockCompactBanners(visible, countMsg = "") {
+  ensureLowStockCompactBanners();
+  document.querySelectorAll(".low-stock-banner--compact").forEach((chip) => {
+    chip.hidden = !visible;
+    const msg = chip.querySelector(".low-stock-banner-msg");
+    if (msg) msg.textContent = visible ? countMsg : "";
+  });
+}
+
 function hideGlobalConsumableLowStockWarning() {
   document.body.classList.remove("consumables-low-stock");
   setStockNotifOpen(false);
@@ -2794,6 +2857,7 @@ function hideGlobalConsumableLowStockWarning() {
   if (stockNotifSummaryText) stockNotifSummaryText.textContent = "0 consumables below minimum";
   if (stockNotifSummaryCount) stockNotifSummaryCount.textContent = "0";
   setStockNotifBadgeCount(0);
+  syncLowStockCompactBanners(false);
   if (consumableLowStockWarningCompact) {
     consumableLowStockWarningCompact.hidden = true;
     consumableLowStockWarningCompact.setAttribute("aria-hidden", "true");
@@ -2875,6 +2939,8 @@ function updateGlobalConsumableLowStockWarning(items = null) {
     consumableLowStockBanner.hidden = false;
     consumableLowStockBanner.dataset.fingerprint = fingerprint;
   }
+  // Also keep compact cream banners in collapsed header + filters-hidden rows.
+  syncLowStockCompactBanners(true, countMsg);
 }
 
 function openConsumablesLowStockFromWarning() {
@@ -3371,6 +3437,7 @@ function exportConsumablesCsv() {
 
 function initConsumablesModule() {
   bindConsumableElements();
+  ensureLowStockCompactBanners();
   if (!consumableRows) return;
 
   openConsumableFormButton?.addEventListener("click", () => openConsumableForm());
