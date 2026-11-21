@@ -3543,8 +3543,13 @@ function formatTodayActivityLabel(ticket) {
 
 function getTodayActivityStatusSortOrder(status) {
   const cls = statusClass(status);
+  // Ascending: Completed → In progress → Blocked → Not started → other
   if (cls === "status-completed") return 1;
-  return 0;
+  if (cls === "status-progress") return 2;
+  if (cls === "status-blocked") return 3;
+  if (cls === "status-pending") return 4;
+  if (cls === "status-approval") return 5;
+  return 6;
 }
 
 function getTodayActivityTickets(tickets) {
@@ -5244,7 +5249,7 @@ function setToolbarCollapsed(panel, collapsed) {
   panel.classList.toggle("is-collapsed", collapsed);
   const key = panel.dataset.toolbarKey || panel.id;
   localStorage.setItem(`${TOOLBAR_COLLAPSED_PREFIX}${key}`, collapsed ? "1" : "0");
-  // Low-stock cream alert is collapsed-only — refresh visibility on toggle.
+  // Low-stock cream alert swaps header ↔ section row on collapse toggle.
   if (typeof window.syncLowStockCompactBanners === "function") {
     try {
       const hasLow = typeof canViewConsumables === "function"

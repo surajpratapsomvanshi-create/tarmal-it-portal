@@ -9,12 +9,12 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="./styles.css?v=240">
+    <link rel="stylesheet" href="./styles.css?v=241">
     <!-- auth stays blocking so requireLogin runs before app chrome paints -->
     <script src="./auth.js?v=31"></script>
     <!-- Defer main bundles so HTML can parse while ~210KB+ app.js downloads -->
-    <script src="./app.js?v=259" defer></script>
-    <script src="./assets.js?v=40" defer></script>
+    <script src="./app.js?v=261" defer></script>
+    <script src="./assets.js?v=42" defer></script>
     <script src="./documents.js?v=12" defer></script>
     <script src="./procurement.js?v=6" defer></script>
   </head>
@@ -83,7 +83,9 @@
                 <p class="topbar-context-eyebrow">Tarmal IT Portal</p>
                 <h1 id="topbarPageTitle">Dashboard</h1>
               </div>
-              <!-- Legacy hooks for low-stock JS; alert UI mounts only in collapsed section rows -->
+              <!-- Low Stock Alert: top header middle when filters are EXPANDED (hidden when section collapsed). -->
+              <div class="topbar-low-stock-slot" id="lowStockAlertSlot" data-low-stock-slot aria-live="polite"></div>
+              <!-- Legacy hooks kept for fingerprint / count JS; never visible as the cream alert. -->
               <aside id="consumableLowStockBanner" hidden aria-hidden="true" style="display:none!important">
                 <span id="consumableLowStockCount"></span>
                 <button id="consumableLowStockWarning" type="button" hidden tabindex="-1"></button>
@@ -200,8 +202,6 @@
               </button>
             </div>
           </div>
-          <!-- Dedicated mount for global Low Stock Alert (header agent may relocate/clone here). Keep in collapsed/narrow layouts. -->
-          <div class="dashboard-hero-alert-slot" id="lowStockAlertSlot" data-low-stock-slot aria-live="polite"></div>
           <div class="dashboard-hero-aside">
             <div class="dashboard-completion-ring" id="dashboardCompletionRing" style="--completion: 0">
               <div class="dashboard-completion-ring-inner">
