@@ -347,7 +347,6 @@ textarea {
 .app-main > .topbar-stack,
 .app-main > .topbar-chrome,
 .app-main > .topbar,
-.app-main > .low-stock-banner,
 .app-main > .topbar-expand-bar,
 .app-main > .sidebar-expand-bar,
 .app-main > .tab-panel {
@@ -547,8 +546,9 @@ body.performance-filters-collapsed .filter-sidebar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 20px;
+  gap: 12px 16px;
   flex: 1 1 auto;
+  flex-wrap: nowrap;
   min-width: 0;
   width: 100%;
   padding: 0;
@@ -563,27 +563,28 @@ body.performance-filters-collapsed .filter-sidebar {
   display: flex;
   align-items: center;
   gap: 10px;
+  flex: 0 0 auto;
   flex-wrap: wrap;
   justify-content: flex-end;
 }
 
-/* Persistent low-stock banner — mockup-faithful; never full topbar wash; not dismissible */
+/* Persistent low-stock banner — sits in header tile center; never dismissible */
 .low-stock-banner {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 14px;
-  width: 100%;
+  gap: 10px 12px;
+  flex: 1 1 auto;
+  min-width: 0;
   max-width: 100%;
   box-sizing: border-box;
-  min-height: 56px;
+  min-height: 48px;
   margin: 0;
-  padding: 10px 14px;
+  padding: 8px 12px;
   border: 1px solid #e8c48a;
   border-radius: 8px;
   background: #fff4d1;
   color: #7f1d1d;
-  flex-shrink: 0;
 }
 
 .low-stock-banner[hidden] {
@@ -593,7 +594,7 @@ body.performance-filters-collapsed .filter-sidebar {
 .low-stock-banner-main {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   min-width: 0;
   flex: 1 1 auto;
 }
@@ -603,8 +604,8 @@ body.performance-filters-collapsed .filter-sidebar {
   align-items: center;
   justify-content: center;
   flex: 0 0 auto;
-  width: 30px;
-  height: 30px;
+  width: 28px;
+  height: 28px;
   line-height: 0;
 }
 
@@ -613,13 +614,13 @@ body.performance-filters-collapsed .filter-sidebar {
   flex-direction: column;
   align-items: flex-start;
   justify-content: center;
-  gap: 2px;
+  gap: 1px;
   min-width: 0;
   flex: 1 1 auto;
 }
 
 .low-stock-banner-title {
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 800;
   color: #7f1d1d;
   line-height: 1.2;
@@ -627,25 +628,28 @@ body.performance-filters-collapsed .filter-sidebar {
 }
 
 .low-stock-banner-msg {
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 500;
   color: #9f2a2a;
   line-height: 1.3;
   min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .low-stock-banner-cta {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: 4px;
   flex: 0 0 auto;
   margin: 0;
-  padding: 8px 14px;
+  padding: 6px 12px;
   border-radius: 999px;
   border: 1.5px solid #7f1d1d;
   background: transparent;
   color: #7f1d1d;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 700;
   line-height: 1.2;
   white-space: nowrap;
@@ -927,11 +931,35 @@ body.performance-filters-collapsed .filter-sidebar {
   outline: none;
 }
 
+@media (max-width: 1100px) {
+  .topbar {
+    flex-wrap: wrap;
+  }
+
+  .topbar-context {
+    max-width: none;
+  }
+
+  .low-stock-banner {
+    order: 3;
+    flex: 1 1 100%;
+    min-width: 0;
+  }
+
+  .topbar-actions {
+    margin-left: auto;
+  }
+}
+
 @media (max-width: 720px) {
   .low-stock-banner {
     flex-wrap: wrap;
     gap: 8px;
     padding: 8px;
+  }
+
+  .low-stock-banner-msg {
+    white-space: normal;
   }
 
   .low-stock-banner-cta {
@@ -993,7 +1021,9 @@ body.performance-filters-collapsed .filter-sidebar {
 .topbar-context {
   display: grid;
   gap: 2px;
+  flex: 0 1 auto;
   min-width: 0;
+  max-width: min(240px, 34vw);
 }
 
 .topbar-context-eyebrow {
