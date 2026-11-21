@@ -9,12 +9,12 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="./styles.css?v=233">
+    <link rel="stylesheet" href="./styles.css?v=235">
     <!-- auth stays blocking so requireLogin runs before app chrome paints -->
     <script src="./auth.js?v=31"></script>
     <!-- Defer main bundles so HTML can parse while ~210KB+ app.js downloads -->
     <script src="./app.js?v=257" defer></script>
-    <script src="./assets.js?v=34" defer></script>
+    <script src="./assets.js?v=36" defer></script>
     <script src="./documents.js?v=12" defer></script>
     <script src="./procurement.js?v=6" defer></script>
   </head>
@@ -142,20 +142,22 @@
         </div>
 
         <aside class="low-stock-banner" id="consumableLowStockBanner" hidden aria-live="polite">
-          <span class="low-stock-banner-icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24" width="28" height="28" fill="none" focusable="false">
-              <path d="M12 3.2 22 20.5H2L12 3.2Z" stroke="#b45309" stroke-width="1.6" stroke-linejoin="round" fill="#fbbf24"/>
-              <path d="M12 9.2v5.2" stroke="#7a1f1f" stroke-width="1.8" stroke-linecap="round"/>
-              <circle cx="12" cy="17.2" r="1.15" fill="#7a1f1f"/>
-            </svg>
-          </span>
-          <div class="low-stock-banner-copy">
-            <strong class="low-stock-banner-title">Low Stock Alert</strong>
-            <span class="low-stock-banner-msg" id="consumableLowStockCount"></span>
+          <div class="low-stock-banner-main">
+            <span class="low-stock-banner-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="28" height="28" fill="none" focusable="false">
+                <path d="M12 3.1 21.8 20.6H2.2L12 3.1Z" stroke="#7f1d1d" stroke-width="1.7" stroke-linejoin="round" fill="#f5c542"/>
+                <path d="M12 9v5.4" stroke="#7f1d1d" stroke-width="2" stroke-linecap="round"/>
+                <circle cx="12" cy="17.35" r="1.2" fill="#7f1d1d"/>
+              </svg>
+            </span>
+            <div class="low-stock-banner-copy">
+              <strong class="low-stock-banner-title">Low Stock Alert</strong>
+              <span class="low-stock-banner-msg" id="consumableLowStockCount"></span>
+            </div>
           </div>
           <button class="low-stock-banner-cta" id="consumableLowStockWarning" type="button" title="Open Consumables low-stock filter">
             View Low-Stock Items
-            <span aria-hidden="true">›</span>
+            <span aria-hidden="true">&gt;</span>
           </button>
         </aside>
 

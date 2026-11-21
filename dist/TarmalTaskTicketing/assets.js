@@ -1181,7 +1181,7 @@ function renderAssets() {
       const declaration = declarationStatusInfo(asset);
       const canDownloadDeclaration = Boolean(asset.employeeName || asset.declarationGeneratedAt);
       const signedLink = asset.declarationSignedDriveUrl
-        ? `<a class="text-button" href="${escapeHtml(asset.declarationSignedDriveUrl)}" target="_blank" rel="noopener">View signed</a>`
+        ? `<a class="text-button asset-declaration-signed" href="${escapeHtml(asset.declarationSignedDriveUrl)}" target="_blank" rel="noopener">View signed</a>`
         : "";
 
       return `
@@ -1199,7 +1199,7 @@ function renderAssets() {
           <td class="asset-declaration-cell">
             <div class="asset-declaration-inline">
               <span class="declaration-status-pill ${declaration.className}">${escapeHtml(declaration.label)}</span>
-              <div class="asset-actions asset-declaration-actions">
+              <div class="asset-declaration-actions">
                 ${canDownloadDeclaration
                   ? `<button class="text-button asset-declaration-download" type="button" data-asset-id="${escapeHtml(asset.id)}">Download</button>`
                   : `<span class="muted-text">Assign employee first</span>`}
@@ -1211,7 +1211,7 @@ function renderAssets() {
             </div>
           </td>
           <td class="asset-actions-cell">
-            <div class="asset-actions">
+            <div class="asset-actions asset-row-actions">
               <button class="text-button asset-view-button" type="button" data-asset-id="${escapeHtml(asset.id)}">View</button>
               ${showActions ? `
                 <button class="text-button asset-edit-button" type="button" data-asset-id="${escapeHtml(asset.id)}">Edit</button>
@@ -2846,8 +2846,8 @@ function updateGlobalConsumableLowStockWarning(items = null) {
   const fingerprint = lowStockFingerprint(lowItems);
   const count = lowItems.length;
   const countMsg = count === 1
-    ? "1 consumable is below its minimum stock level"
-    : `${count} consumables are below their minimum stock level`;
+    ? "1 consumable is below its minimum stock level."
+    : `${count} consumables are below their minimum stock level.`;
   const shortMsg = count === 1
     ? "1 consumable below minimum"
     : `${count} consumables below minimum`;
