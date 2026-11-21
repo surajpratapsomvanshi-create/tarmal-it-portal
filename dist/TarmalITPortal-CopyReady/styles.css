@@ -568,7 +568,29 @@ body.performance-filters-collapsed .filter-sidebar {
   justify-content: flex-end;
 }
 
-/* Persistent low-stock banner — sits in header tile center; never dismissible */
+/* Top header middle slot — Low Stock Alert when filters are expanded */
+.topbar-low-stock-slot {
+  display: flex;
+  align-items: center;
+  justify-content: stretch;
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0 8px;
+}
+
+.topbar-low-stock-slot:empty {
+  min-height: 0;
+}
+
+.topbar-low-stock-slot .low-stock-banner--header,
+.topbar .low-stock-banner--header {
+  flex: 1 1 auto;
+  width: 100%;
+  max-width: min(560px, 100%);
+  margin: 0;
+}
+
+/* Persistent low-stock banner — cream tile; never dismissible */
 .low-stock-banner {
   display: flex;
   align-items: center;
@@ -1084,6 +1106,8 @@ body.performance-filters-collapsed .filter-sidebar {
 
 .topbar-context {
   display: grid;
+  flex: 0 1 auto;
+  min-width: 0;
   gap: 2px;
   flex: 0 1 auto;
   min-width: 0;
@@ -1330,32 +1354,11 @@ h2 {
   min-width: 0;
 }
 
-/* Host for Low Stock Alert in Dashboard welcome tile center (visible when header collapsed). */
-.dashboard-hero-alert-slot {
-  position: relative;
-  z-index: 2;
-  display: flex;
-  align-items: center;
-  justify-content: stretch;
-  min-width: 0;
-  min-height: 0;
-  width: 100%;
-  align-self: center;
-}
-
-.dashboard-hero-alert-slot:empty {
-  min-height: 0;
-}
-
-.dashboard-hero-alert-slot .low-stock-banner,
-.dashboard-hero-alert-slot .low-stock-banner--dashboard {
-  width: 100%;
-  max-width: none;
-  margin: 0;
-  flex: 1 1 auto;
-}
-
-.dashboard-hero-alert-slot .low-stock-banner[hidden] {
+/* Dashboard welcome hero must NEVER host the Low Stock Alert (awkward ss4). */
+.dashboard-hero-alert-slot,
+.dashboard-hero .low-stock-banner,
+.dashboard-hero-aside .low-stock-banner,
+.low-stock-banner--dashboard {
   display: none !important;
 }
 
@@ -2122,6 +2125,7 @@ body.sidebar-collapsed .sidebar-expand-bar {
   display: inline-flex !important;
 }
 
+/* Section-row alert only while that toolbar is collapsed; header alert only when expanded (JS). */
 .board-toolbar-panel:not(.is-collapsed) .low-stock-banner--board {
   display: none !important;
 }
@@ -8403,18 +8407,8 @@ body.view-focus .dashboard-layout {
     gap: 14px;
   }
 
-  .dashboard-hero-alert-slot {
-    order: 2;
-    min-height: 48px;
-    justify-content: stretch;
-  }
-
-  .dashboard-hero-alert-slot .low-stock-banner {
-    max-width: none;
-  }
-
   .dashboard-hero-aside {
-    order: 3;
+    order: 2;
     justify-content: flex-start;
     flex-wrap: nowrap;
     width: 100%;
@@ -9114,10 +9108,6 @@ body.view-focus .dashboard-layout {
     background: #fff;
     border: 1px solid var(--line-strong);
     box-shadow: none;
-  }
-
-  .dashboard-hero-alert-slot {
-    min-height: 44px;
   }
 
   .dashboard-hero-aside {

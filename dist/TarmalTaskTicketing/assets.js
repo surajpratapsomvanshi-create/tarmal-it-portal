@@ -2842,20 +2842,50 @@ function ensureBoardHeaderExpandButtons() {
   });
 }
 
-/** Mount cream banners for collapsed-only section rows (never top portal header). */
+/** Active tab filters collapsed? Tabs without a toolbar treat as expanded (header alert). */
+function getActiveFiltersCollapsed() {
+  const activePanel = document.querySelector(".tab-panel.active");
+  if (!activePanel) return false;
+  const toolbar = activePanel.querySelector(".board-toolbar-panel");
+  if (!toolbar) return false;
+  return toolbar.classList.contains("is-collapsed");
+}
+
+/**
+ * Mount cream banners in:
+ *  - top app header middle (expanded filters)
+ *  - section header middle e.g. Recent Tickets | alert | actions (collapsed filters)
+ * Never mount in Dashboard welcome hero.
+ */
 function ensureLowStockCompactBanners() {
   ensureBoardHeaderExpandButtons();
 
-  // Dashboard welcome tile center (compact content tile).
-  const dashSlot = document.querySelector("#lowStockAlertSlot, .dashboard-hero-alert-slot");
-  if (dashSlot && !dashSlot.querySelector(".low-stock-banner")) {
+  // Remove any leftover Dashboard hero mounts (awkward ss4 placement).
+  document.querySelectorAll(
+    ".dashboard-hero-alert-slot .low-stock-banner, .low-stock-banner--dashboard"
+  ).forEach((el) => el.remove());
+
+  // Top app header middle: between page title and bell/user/signout.
+  let headerSlot = document.querySelector("#lowStockAlertSlot, .topbar-low-stock-slot");
+  const siteTopbar = document.querySelector("#siteTopbar");
+  if (!headerSlot && siteTopbar) {
+    headerSlot = document.createElement("div");
+    headerSlot.className = "topbar-low-stock-slot";
+    headerSlot.id = "lowStockAlertSlot";
+    headerSlot.setAttribute("data-low-stock-slot", "");
+    headerSlot.setAttribute("aria-live", "polite");
+    const actions = siteTopbar.querySelector(".topbar-actions");
+    if (actions) siteTopbar.insertBefore(headerSlot, actions);
+    else siteTopbar.appendChild(headerSlot);
+  }
+  if (headerSlot && !headerSlot.querySelector(".low-stock-banner--header")) {
     mountLowStockCompactBanner(
-      dashSlot,
-      "low-stock-banner low-stock-banner--compact low-stock-banner--dashboard"
+      headerSlot,
+      "low-stock-banner low-stock-banner--compact low-stock-banner--header"
     );
   }
 
-  // Section headers: "Recent Tickets" | alert | "+ New Ticket" (collapsed-only via CSS/JS).
+  // Section headers: "Recent Tickets" | alert | "+ New Ticket".
   document.querySelectorAll(".board-header").forEach((header) => {
     if (header.querySelector(".low-stock-banner--board")) return;
     const actions = header.querySelector(".board-actions");
@@ -2868,31 +2898,47 @@ function ensureLowStockCompactBanners() {
   });
 }
 
-function isLowStockChipCollapsedContext(chip) {
-  if (!chip) return false;
-  if (chip.classList.contains("low-stock-banner--dashboard") || chip.closest(".dashboard-hero-alert-slot")) {
-    return true; // Dashboard welcome tile is the compact content header
-  }
-  const panel = chip.closest(".board-toolbar-panel");
-  if (panel) return panel.classList.contains("is-collapsed");
-  return false;
-}
-
-/** Show cream alerts only while low stock AND section is collapsed. */
+/**
+ * Mutual exclusion:
+ *   lowStock + filtersCollapsed  → section-row only
+ *   lowStock + filtersExpanded   → top header only
+ * Never both; never Dashboard hero.
+ */
 function syncLowStockCompactBanners(hasLowStock, countMsg = "") {
   ensureLowStockCompactBanners();
-  // Never show in the top TARMAL IT PORTAL header.
   if (consumableLowStockBanner) consumableLowStockBanner.hidden = true;
 
   const low = Boolean(hasLowStock);
+  const filtersCollapsed = getActiveFiltersCollapsed();
   const msgText = low ? (countMsg || "") : "";
+
   document.querySelectorAll(".low-stock-banner--compact").forEach((chip) => {
-    // Drop any header-chrome mounts from older builds.
-    if (chip.closest("#siteTopbar, #topbarExpandBar, .topbar")) {
+    // Never show in Dashboard welcome hero / gauge middle.
+    if (
+      chip.classList.contains("low-stock-banner--dashboard")
+      || chip.closest(".dashboard-hero, .dashboard-hero-alert-slot, .dashboard-hero-aside")
+    ) {
       chip.hidden = true;
       return;
     }
-    const show = low && isLowStockChipCollapsedContext(chip);
+
+    let show = false;
+    if (low) {
+      const isHeader = chip.classList.contains("low-stock-banner--header")
+        || Boolean(chip.closest("#lowStockAlertSlot, .topbar-low-stock-slot, #siteTopbar"));
+      const isBoard = chip.classList.contains("low-stock-banner--board");
+
+      if (isHeader && !isBoard) {
+        show = !filtersCollapsed;
+      } else if (isBoard) {
+        const panel = chip.closest(".board-toolbar-panel");
+        const inActiveTab = Boolean(chip.closest(".tab-panel.active"));
+        show = filtersCollapsed
+          && inActiveTab
+          && Boolean(panel?.classList.contains("is-collapsed"));
+      }
+    }
+
     chip.hidden = !show;
     const msg = chip.querySelector(".low-stock-banner-msg");
     if (msg) msg.textContent = show ? msgText : "";
@@ -2990,7 +3036,7 @@ function updateGlobalConsumableLowStockWarning(items = null) {
     consumableLowStockWarningCompact.title = `${count} low-stock alert${count === 1 ? "" : "s"}`;
   }
 
-  // Collapsed-section cream banners only (never top portal header).
+  // Cream banner: header when expanded, section row when collapsed (never both / never hero).
   if (consumableLowStockBanner) {
     consumableLowStockBanner.hidden = true;
     consumableLowStockBanner.dataset.fingerprint = fingerprint;
