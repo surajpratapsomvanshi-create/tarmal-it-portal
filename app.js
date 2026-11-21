@@ -3731,6 +3731,38 @@ function fallbackTypeForNonAdmin(type) {
 }
 
 /**
+ * Parent project Type → default child Type for new sub-tasks.
+ * Exact "SAP" → "Daily - SAP"; exact "Infra" → "Daily - Infra".
+ * Other parent types: no special mapping (empty string).
+ */
+function defaultChildTypeFromParentType(parentType) {
+  if (isExactSapType(parentType)) return "Daily - SAP";
+  if (isExactInfraType(parentType)) return "Daily - Infra";
+  return "";
+}
+
+function resolveCreateFormParentTicket() {
+  const parentRow = Number(ticketFormParentSheetRow?.value) || 0;
+  if (!parentRow) return null;
+  return findTicketBySheetRow(parentRow);
+}
+
+/** Prefill create-form Type from SAP/Infra parent. Returns the applied type or "". */
+function applySubtaskTypeDefaultFromParent({ force = false } = {}) {
+  const parent = resolveCreateFormParentTicket();
+  if (!parent) return "";
+  const childType = defaultChildTypeFromParentType(parent.Type);
+  if (!childType) return "";
+  const typeField = form?.elements?.Type;
+  if (!typeField) return childType;
+  const current = cleanText(typeField.value);
+  if (!force && current) return current;
+  syncTicketTypeSelectOptions(typeField, { mode: "create", currentType: childType });
+  ticketCreateTypeTouched = true;
+  return childType;
+}
+
+/**
  * Rebuild Type <select> options for create/edit.
  * Non-admin: Daily - Infra / Daily - SAP / MOM only.
  * Non-admin edit of existing SAP/Infra: keep current type only (cannot change to/from project).
@@ -4526,10 +4558,14 @@ function applySurajTicketCreateDefaults({ force = false } = {}) {
   if (!shouldApply) return;
 
   if (force || !ticketCreateTypeTouched) {
-    const typeField = form.elements.Type;
-    if (typeField) {
-      const option = [...typeField.options].find((entry) => entry.value === DAILY_SAP_TYPE || entry.textContent === DAILY_SAP_TYPE);
-      typeField.value = option ? option.value : DAILY_SAP_TYPE;
+    // Do not override Type when creating under Project SAP/Infra (Daily - SAP / Daily - Infra).
+    const parentDrivenType = defaultChildTypeFromParentType(resolveCreateFormParentTicket()?.Type);
+    if (!parentDrivenType) {
+      const typeField = form.elements.Type;
+      if (typeField) {
+        const option = [...typeField.options].find((entry) => entry.value === DAILY_SAP_TYPE || entry.textContent === DAILY_SAP_TYPE);
+        typeField.value = option ? option.value : DAILY_SAP_TYPE;
+      }
     }
   }
   if (force || !ticketCreateMilestoneTouched) {
@@ -7015,9 +7051,12 @@ function openSubtaskCreateModal(parentSheetRow) {
   if (ticketCreateParentContext) ticketCreateParentContext.hidden = false;
   if (ticketCreateParentLabel) ticketCreateParentLabel.textContent = parent.Task || "Parent task";
   if (ticketFormSubmitLabel) ticketFormSubmitLabel.textContent = "Create Sub-task";
+  const childTypeDefault = defaultChildTypeFromParentType(parent.Type)
+    || fallbackTypeForNonAdmin(parent.Type)
+    || "Daily - Infra";
   syncTicketTypeSelectOptions(form?.elements?.Type, {
     mode: "create",
-    currentType: parent.Type || "Daily - Infra"
+    currentType: childTypeDefault
   });
   if (form?.elements["Raised By"] && parent["Raised By"]) {
     form.elements["Raised By"].value = parent["Raised By"];
@@ -7028,6 +7067,8 @@ function openSubtaskCreateModal(parentSheetRow) {
   }
   applyDefaultTicketFormOwner();
   applySurajTicketCreateDefaults({ force: true });
+  // Project SAP/Infra parent Type wins over Suraj's Daily - SAP create default.
+  applySubtaskTypeDefaultFromParent({ force: true });
   resetTicketFormFocusToggle();
   syncOutsideHoursFormField("create");
   form?.elements.Task?.focus();
@@ -7068,13 +7109,20 @@ function openTicketCreateModal() {
   setActiveTab("tickets");
   ticketCreateModal.hidden = false;
   document.body.classList.add("modal-open");
+  const parentForCreate = resolveCreateFormParentTicket();
+  const parentChildType = defaultChildTypeFromParentType(parentForCreate?.Type);
+  const createTypeSeed = cleanText(form?.elements?.Type?.value)
+    || parentChildType
+    || "Daily - Infra";
   syncTicketTypeSelectOptions(form?.elements?.Type, {
     mode: "create",
-    currentType: form?.elements?.Type?.value || "Daily - Infra"
+    currentType: createTypeSeed
   });
   resetSurajTicketCreateTracking();
   applyDefaultTicketFormOwner();
   applySurajTicketCreateDefaults({ force: true });
+  // Child create with parentId: apply SAP/Infra → Daily default when Type is empty.
+  applySubtaskTypeDefaultFromParent({ force: false });
   setRecurrenceFormState("ticketForm", null);
   if (form?.elements?.Status) {
     form.elements.Status.value = "Not started";
