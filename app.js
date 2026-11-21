@@ -5244,6 +5244,18 @@ function setToolbarCollapsed(panel, collapsed) {
   panel.classList.toggle("is-collapsed", collapsed);
   const key = panel.dataset.toolbarKey || panel.id;
   localStorage.setItem(`${TOOLBAR_COLLAPSED_PREFIX}${key}`, collapsed ? "1" : "0");
+  // Low-stock cream alert is collapsed-only — refresh visibility on toggle.
+  if (typeof window.syncLowStockCompactBanners === "function") {
+    try {
+      const hasLow = typeof canViewConsumables === "function"
+        && typeof Consumables !== "undefined"
+        && canViewConsumables()
+        && Consumables.lowStockItems().length > 0;
+      window.syncLowStockCompactBanners(hasLow);
+    } catch {
+      window.syncLowStockCompactBanners(document.body.classList.contains("consumables-low-stock"));
+    }
+  }
 }
 
 const MOBILE_NAV_MQ = window.matchMedia("(max-width: 900px)");
@@ -5354,12 +5366,12 @@ function initToolbarCollapse() {
       : stored === "1";
     setToolbarCollapsed(panel, collapsed);
 
-    panel.querySelector(".toolbar-collapse-btn")?.addEventListener("click", () => {
-      setToolbarCollapsed(panel, true);
+    panel.querySelectorAll(".toolbar-collapse-btn").forEach((btn) => {
+      btn.addEventListener("click", () => setToolbarCollapsed(panel, true));
     });
 
-    panel.querySelector(".toolbar-expand-btn")?.addEventListener("click", () => {
-      setToolbarCollapsed(panel, false);
+    panel.querySelectorAll(".toolbar-expand-btn").forEach((btn) => {
+      btn.addEventListener("click", () => setToolbarCollapsed(panel, false));
     });
   });
 }

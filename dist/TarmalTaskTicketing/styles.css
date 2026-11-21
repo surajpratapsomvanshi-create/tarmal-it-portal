@@ -2085,12 +2085,45 @@ body.sidebar-collapsed .sidebar-expand-bar {
   gap: 8px;
 }
 
-.board-toolbar-panel.is-collapsed .board-toolbar-body {
+/* Collapsed: keep section title row (title | low-stock alert | primary actions), hide filters */
+.board-toolbar-panel.is-collapsed .toolbar-restore-row {
   display: none;
 }
 
-.board-toolbar-panel.is-collapsed .toolbar-restore-row {
-  display: flex;
+.board-toolbar-panel.is-collapsed .board-toolbar-body {
+  display: block;
+}
+
+.board-toolbar-panel.is-collapsed .ticket-filters,
+.board-toolbar-panel.is-collapsed .kanban-filters,
+.board-toolbar-panel.is-collapsed .asset-filters,
+.board-toolbar-panel.is-collapsed .consumable-filters,
+.board-toolbar-panel.is-collapsed .document-filters,
+.board-toolbar-panel.is-collapsed .user-filters,
+.board-toolbar-panel.is-collapsed .procurement-filters,
+.board-toolbar-panel.is-collapsed .filter-summary,
+.board-toolbar-panel.is-collapsed .board-header .eyebrow {
+  display: none !important;
+}
+
+.board-toolbar-panel.is-collapsed .board-actions .secondary-button:not(.toolbar-expand-btn-inline) {
+  display: none !important;
+}
+
+.board-toolbar-panel.is-collapsed .board-actions .toolbar-collapse-btn {
+  display: none !important;
+}
+
+.board-header .toolbar-expand-btn-inline {
+  display: none !important;
+}
+
+.board-toolbar-panel.is-collapsed .board-header .toolbar-expand-btn-inline {
+  display: inline-flex !important;
+}
+
+.board-toolbar-panel:not(.is-collapsed) .low-stock-banner--board {
+  display: none !important;
 }
 
 .toolbar-collapse-btn {

@@ -2824,31 +2824,29 @@ function mountLowStockCompactBanner(host, classNames, insertBeforeEl = null) {
   return chip;
 }
 
-/** Compact cream banners in every left-title | empty-middle | right-action row. */
-function ensureLowStockCompactBanners() {
-  // Filters-hidden restore bars (Tickets — filters & actions hidden + funnel).
-  document.querySelectorAll(".toolbar-restore-row.panel-restore-bar").forEach((row) => {
-    if (row.querySelector(".low-stock-banner--compact")) return;
-    mountLowStockCompactBanner(
-      row,
-      "low-stock-banner low-stock-banner--compact",
-      row.querySelector(".toolbar-expand-btn")
-    );
+function ensureBoardHeaderExpandButtons() {
+  document.querySelectorAll(".board-toolbar-panel").forEach((panel) => {
+    const actions = panel.querySelector(".board-header .board-actions");
+    if (!actions || actions.querySelector(".toolbar-expand-btn-inline")) return;
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "secondary-button toolbar-expand-btn toolbar-expand-btn-inline";
+    btn.textContent = "Show filters";
+    btn.title = "Show filters";
+    actions.appendChild(btn);
+    btn.addEventListener("click", () => {
+      if (typeof setToolbarCollapsed === "function") setToolbarCollapsed(panel, false);
+      else panel.classList.remove("is-collapsed");
+      syncLowStockCompactBanners(canViewConsumables() && Consumables.lowStockItems().length > 0);
+    });
   });
+}
 
-  // Collapsed global header chrome.
-  const expandBar = document.querySelector("#topbarExpandBar");
-  if (expandBar && !expandBar.querySelector(".low-stock-banner--compact")) {
-    mountLowStockCompactBanner(
-      expandBar,
-      "low-stock-banner low-stock-banner--compact low-stock-banner--header-collapsed",
-      expandBar.querySelector("#consumableLowStockWarningCompact")
-        || expandBar.querySelector("#topbarExpandStatus")
-        || expandBar.querySelector("#expandTopbarButton")
-    );
-  }
+/** Mount cream banners for collapsed-only section rows (never top portal header). */
+function ensureLowStockCompactBanners() {
+  ensureBoardHeaderExpandButtons();
 
-  // Dashboard welcome tile center slot.
+  // Dashboard welcome tile center (compact content tile).
   const dashSlot = document.querySelector("#lowStockAlertSlot, .dashboard-hero-alert-slot");
   if (dashSlot && !dashSlot.querySelector(".low-stock-banner")) {
     mountLowStockCompactBanner(
@@ -2857,7 +2855,7 @@ function ensureLowStockCompactBanners() {
     );
   }
 
-  // Section headers: "Recent Tickets" | EMPTY MIDDLE | "+ New Ticket" (and every tab equivalent).
+  // Section headers: "Recent Tickets" | alert | "+ New Ticket" (collapsed-only via CSS/JS).
   document.querySelectorAll(".board-header").forEach((header) => {
     if (header.querySelector(".low-stock-banner--board")) return;
     const actions = header.querySelector(".board-actions");
@@ -2868,29 +2866,42 @@ function ensureLowStockCompactBanners() {
       actions
     );
   });
-
-  // Performance / similar headers that have a real right-side action button group.
-  document.querySelectorAll(".panel-heading").forEach((heading) => {
-    if (heading.querySelector(".low-stock-banner--board")) return;
-    const actions = heading.querySelector(".performance-period-heading-actions, .panel-heading-actions");
-    if (!actions || !actions.querySelector("button")) return;
-    if (!heading.querySelector("h2, .dashboard-title, .panel-title")) return;
-    mountLowStockCompactBanner(
-      heading,
-      "low-stock-banner low-stock-banner--compact low-stock-banner--board",
-      actions
-    );
-  });
 }
 
-function syncLowStockCompactBanners(visible, countMsg = "") {
+function isLowStockChipCollapsedContext(chip) {
+  if (!chip) return false;
+  if (chip.classList.contains("low-stock-banner--dashboard") || chip.closest(".dashboard-hero-alert-slot")) {
+    return true; // Dashboard welcome tile is the compact content header
+  }
+  const panel = chip.closest(".board-toolbar-panel");
+  if (panel) return panel.classList.contains("is-collapsed");
+  return false;
+}
+
+/** Show cream alerts only while low stock AND section is collapsed. */
+function syncLowStockCompactBanners(hasLowStock, countMsg = "") {
   ensureLowStockCompactBanners();
+  // Never show in the top TARMAL IT PORTAL header.
+  if (consumableLowStockBanner) consumableLowStockBanner.hidden = true;
+
+  const low = Boolean(hasLowStock);
+  const msgText = low ? (countMsg || "") : "";
   document.querySelectorAll(".low-stock-banner--compact").forEach((chip) => {
-    chip.hidden = !visible;
+    // Drop any header-chrome mounts from older builds.
+    if (chip.closest("#siteTopbar, #topbarExpandBar, .topbar")) {
+      chip.hidden = true;
+      return;
+    }
+    const show = low && isLowStockChipCollapsedContext(chip);
+    chip.hidden = !show;
     const msg = chip.querySelector(".low-stock-banner-msg");
-    if (msg) msg.textContent = visible ? countMsg : "";
+    if (msg) msg.textContent = show ? msgText : "";
   });
 }
+
+// Expose for toolbar expand/collapse hooks in app.js
+window.syncLowStockCompactBanners = syncLowStockCompactBanners;
+window.ensureLowStockCompactBanners = ensureLowStockCompactBanners;
 
 function hideGlobalConsumableLowStockWarning() {
   document.body.classList.remove("consumables-low-stock");
@@ -2979,12 +2990,11 @@ function updateGlobalConsumableLowStockWarning(items = null) {
     consumableLowStockWarningCompact.title = `${count} low-stock alert${count === 1 ? "" : "s"}`;
   }
 
-  // Persistent banner on all tabs while inventory is low — not dismissible.
+  // Collapsed-section cream banners only (never top portal header).
   if (consumableLowStockBanner) {
-    consumableLowStockBanner.hidden = false;
+    consumableLowStockBanner.hidden = true;
     consumableLowStockBanner.dataset.fingerprint = fingerprint;
   }
-  // Also keep compact cream banners in collapsed header + filters-hidden rows.
   syncLowStockCompactBanners(true, countMsg);
 }
 
