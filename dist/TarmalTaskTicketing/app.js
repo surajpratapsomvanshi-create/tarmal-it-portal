@@ -5245,6 +5245,19 @@ function setActiveTab(tabName, options = {}) {
   }
 }
 
+function refreshLowStockCompactBanners() {
+  if (typeof window.syncLowStockCompactBanners !== "function") return;
+  try {
+    const hasLow = typeof canViewConsumables === "function"
+      && typeof Consumables !== "undefined"
+      && canViewConsumables()
+      && Consumables.lowStockItems().length > 0;
+    window.syncLowStockCompactBanners(hasLow);
+  } catch {
+    window.syncLowStockCompactBanners(document.body.classList.contains("consumables-low-stock"));
+  }
+}
+
 function setSidebarCollapsed(collapsed) {
   document.body.classList.toggle("sidebar-collapsed", collapsed);
   document.body.classList.toggle("chrome-collapsed", collapsed);
@@ -5252,6 +5265,8 @@ function setSidebarCollapsed(collapsed) {
   localStorage.setItem(CHROME_COLLAPSED_KEY, collapsed ? "1" : "0");
   toggleSidebarButton?.setAttribute("aria-expanded", collapsed ? "false" : "true");
   syncMobileNavBackdrop(collapsed);
+  // Full header tile hides with sidebar-collapsed — swap alert to section/strip.
+  refreshLowStockCompactBanners();
 }
 
 function setTopbarCollapsed(collapsed, { persist = true } = {}) {
@@ -5265,6 +5280,7 @@ function setTopbarCollapsed(collapsed, { persist = true } = {}) {
   if (persist) {
     localStorage.setItem(TOPBAR_COLLAPSED_KEY, collapsed ? "1" : "0");
   }
+  refreshLowStockCompactBanners();
 }
 
 function setPerformanceFiltersCollapsed(collapsed) {
@@ -5285,18 +5301,7 @@ function setToolbarCollapsed(panel, collapsed) {
   panel.classList.toggle("is-collapsed", collapsed);
   const key = panel.dataset.toolbarKey || panel.id;
   localStorage.setItem(`${TOOLBAR_COLLAPSED_PREFIX}${key}`, collapsed ? "1" : "0");
-  // Low-stock cream alert swaps header ↔ section row on collapse toggle.
-  if (typeof window.syncLowStockCompactBanners === "function") {
-    try {
-      const hasLow = typeof canViewConsumables === "function"
-        && typeof Consumables !== "undefined"
-        && canViewConsumables()
-        && Consumables.lowStockItems().length > 0;
-      window.syncLowStockCompactBanners(hasLow);
-    } catch {
-      window.syncLowStockCompactBanners(document.body.classList.contains("consumables-low-stock"));
-    }
-  }
+  refreshLowStockCompactBanners();
 }
 
 const MOBILE_NAV_MQ = window.matchMedia("(max-width: 900px)");

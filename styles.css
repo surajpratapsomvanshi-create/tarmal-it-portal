@@ -2125,9 +2125,30 @@ body.sidebar-collapsed .sidebar-expand-bar {
   display: inline-flex !important;
 }
 
-/* Section-row alert only while that toolbar is collapsed; header alert only when expanded (JS). */
-.board-toolbar-panel:not(.is-collapsed) .low-stock-banner--board {
+/* Section/strip alerts only when sidebar is collapsed (full header tile gone). JS also gates. */
+body:not(.sidebar-collapsed) .low-stock-banner--board,
+body:not(.sidebar-collapsed) .low-stock-banner--collapsed-strip,
+body:not(.sidebar-collapsed) .low-stock-collapsed-strip {
   display: none !important;
+}
+
+/* Dedicated strip under thin hamburger topbar (Dashboard / no board-header). */
+.low-stock-collapsed-strip {
+  display: none;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body.sidebar-collapsed .low-stock-collapsed-strip:not([hidden]) {
+  display: block;
+}
+
+body.sidebar-collapsed .low-stock-collapsed-strip .low-stock-banner--collapsed-strip {
+  width: 100%;
+  max-width: 100%;
 }
 
 .toolbar-collapse-btn {

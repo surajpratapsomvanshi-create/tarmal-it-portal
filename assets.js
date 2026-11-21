@@ -2842,25 +2842,48 @@ function ensureBoardHeaderExpandButtons() {
   });
 }
 
-/** Active tab filters collapsed? Tabs without a toolbar treat as expanded (header alert). */
-function getActiveFiltersCollapsed() {
-  const activePanel = document.querySelector(".tab-panel.active");
-  if (!activePanel) return false;
-  const toolbar = activePanel.querySelector(".board-toolbar-panel");
-  if (!toolbar) return false;
-  return toolbar.classList.contains("is-collapsed");
+/** Sidebar nav collapsed (hamburger thin topbar). Not the filters Hide button. */
+function isSidebarCollapsed() {
+  return document.body.classList.contains("sidebar-collapsed");
+}
+
+/**
+ * Full top header tile (title | alert slot | bell/user) is usable?
+ * Desktop sidebar-collapsed hides .topbar-stack; mobile may keep it visible.
+ * topbar-collapsed also hides the chrome / alert slot.
+ */
+function isTopHeaderLowStockSlotAvailable() {
+  if (document.body.classList.contains("topbar-collapsed")) return false;
+  const stack = document.querySelector("#siteTopbarChrome, .topbar-stack");
+  if (!stack) return false;
+  const cs = window.getComputedStyle(stack);
+  if (cs.display === "none" || cs.visibility === "hidden") return false;
+  if (stack.getBoundingClientRect().height < 16) return false;
+  const chrome = document.querySelector("#siteTopbar, .topbar-chrome .topbar, .topbar");
+  if (chrome) {
+    const chromeCs = window.getComputedStyle(chrome);
+    if (chromeCs.display === "none" || chrome.getBoundingClientRect().height < 16) return false;
+  }
+  return true;
+}
+
+/** Active tab has a section toolbar row (e.g. Recent Tickets | actions). */
+function getActiveBoardHeader() {
+  return document.querySelector(".tab-panel.active .board-header .board-actions")
+    ?.closest(".board-header") || null;
 }
 
 /**
  * Mount cream banners in:
- *  - top app header middle (expanded filters)
- *  - section header middle e.g. Recent Tickets | alert | actions (collapsed filters)
- * Never mount in Dashboard welcome hero.
+ *  - top app header middle (when full header tile is visible)
+ *  - section header middle e.g. Recent Tickets | alert | actions (sidebar collapsed)
+ *  - dedicated strip under thin hamburger topbar (Dashboard / tabs without board row)
+ * Never mount in Dashboard welcome hero gauge gap.
  */
 function ensureLowStockCompactBanners() {
   ensureBoardHeaderExpandButtons();
 
-  // Remove any leftover Dashboard hero mounts (awkward ss4 placement).
+  // Remove any leftover Dashboard hero mounts (awkward welcome-gap placement).
   document.querySelectorAll(
     ".dashboard-hero-alert-slot .low-stock-banner, .low-stock-banner--dashboard"
   ).forEach((el) => el.remove());
@@ -2896,21 +2919,51 @@ function ensureLowStockCompactBanners() {
       actions
     );
   });
+
+  // Fallback strip under thin hamburger bar (Dashboard / tabs without board-header).
+  let collapsedStrip = document.querySelector("#lowStockCollapsedStrip, [data-low-stock-collapsed-strip]");
+  if (!collapsedStrip) {
+    const expandBar = document.querySelector("#sidebarExpandBar");
+    collapsedStrip = document.createElement("div");
+    collapsedStrip.id = "lowStockCollapsedStrip";
+    collapsedStrip.className = "low-stock-collapsed-strip";
+    collapsedStrip.setAttribute("data-low-stock-collapsed-strip", "");
+    collapsedStrip.setAttribute("aria-live", "polite");
+    collapsedStrip.hidden = true;
+    if (expandBar?.parentNode) {
+      expandBar.parentNode.insertBefore(collapsedStrip, expandBar.nextSibling);
+    } else {
+      document.querySelector(".app-main")?.prepend(collapsedStrip);
+    }
+  }
+  if (collapsedStrip && !collapsedStrip.querySelector(".low-stock-banner--collapsed-strip")) {
+    mountLowStockCompactBanner(
+      collapsedStrip,
+      "low-stock-banner low-stock-banner--compact low-stock-banner--collapsed-strip"
+    );
+  }
 }
 
 /**
- * Mutual exclusion:
- *   lowStock + filtersCollapsed  → section-row only
- *   lowStock + filtersExpanded   → top header only
- * Never both; never Dashboard hero.
+ * Mutual exclusion (exactly one when low stock):
+ *   full top header visible → header middle only
+ *   sidebar/header chrome collapsed → section row (Tickets etc.) OR collapsed strip (Dashboard)
+ * Never both; never Dashboard welcome-hero gap.
  */
 function syncLowStockCompactBanners(hasLowStock, countMsg = "") {
   ensureLowStockCompactBanners();
   if (consumableLowStockBanner) consumableLowStockBanner.hidden = true;
 
   const low = Boolean(hasLowStock);
-  const filtersCollapsed = getActiveFiltersCollapsed();
+  const headerAvailable = isTopHeaderLowStockSlotAvailable();
+  const useFallback = low && !headerAvailable;
+  const activeBoard = useFallback ? getActiveBoardHeader() : null;
+  const useBoard = Boolean(activeBoard);
+  const useStrip = useFallback && !useBoard;
   const msgText = low ? (countMsg || "") : "";
+
+  const collapsedStripHost = document.querySelector("#lowStockCollapsedStrip, [data-low-stock-collapsed-strip]");
+  if (collapsedStripHost) collapsedStripHost.hidden = !useStrip;
 
   document.querySelectorAll(".low-stock-banner--compact").forEach((chip) => {
     // Never show in Dashboard welcome hero / gauge middle.
@@ -2927,15 +2980,15 @@ function syncLowStockCompactBanners(hasLowStock, countMsg = "") {
       const isHeader = chip.classList.contains("low-stock-banner--header")
         || Boolean(chip.closest("#lowStockAlertSlot, .topbar-low-stock-slot, #siteTopbar"));
       const isBoard = chip.classList.contains("low-stock-banner--board");
+      const isStrip = chip.classList.contains("low-stock-banner--collapsed-strip")
+        || Boolean(chip.closest("#lowStockCollapsedStrip, [data-low-stock-collapsed-strip]"));
 
-      if (isHeader && !isBoard) {
-        show = !filtersCollapsed;
+      if (isHeader && !isBoard && !isStrip) {
+        show = headerAvailable;
       } else if (isBoard) {
-        const panel = chip.closest(".board-toolbar-panel");
-        const inActiveTab = Boolean(chip.closest(".tab-panel.active"));
-        show = filtersCollapsed
-          && inActiveTab
-          && Boolean(panel?.classList.contains("is-collapsed"));
+        show = useBoard && chip.closest(".board-header") === activeBoard;
+      } else if (isStrip) {
+        show = useStrip;
       }
     }
 
@@ -2944,6 +2997,9 @@ function syncLowStockCompactBanners(hasLowStock, countMsg = "") {
     if (msg) msg.textContent = show ? msgText : "";
   });
 }
+
+window.isSidebarCollapsed = isSidebarCollapsed;
+window.isTopHeaderLowStockSlotAvailable = isTopHeaderLowStockSlotAvailable;
 
 // Expose for toolbar expand/collapse hooks in app.js
 window.syncLowStockCompactBanners = syncLowStockCompactBanners;
@@ -3036,7 +3092,7 @@ function updateGlobalConsumableLowStockWarning(items = null) {
     consumableLowStockWarningCompact.title = `${count} low-stock alert${count === 1 ? "" : "s"}`;
   }
 
-  // Cream banner: header when expanded, section row when collapsed (never both / never hero).
+  // Cream banner: header when top tile visible; else section row / collapsed strip (never both / never hero).
   if (consumableLowStockBanner) {
     consumableLowStockBanner.hidden = true;
     consumableLowStockBanner.dataset.fingerprint = fingerprint;
