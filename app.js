@@ -63,6 +63,17 @@ const dashboardCompletionRing = document.querySelector("#dashboardCompletionRing
 const statusPanelTotal = document.querySelector("#statusPanelTotal");
 const ownerPanelTotal = document.querySelector("#ownerPanelTotal");
 const dashboardRecentList = document.querySelector("#dashboardRecentList");
+const dashboardOnTrack = document.querySelector("#dashboardOnTrack");
+const dashboardOnTrackMsg = document.querySelector("#dashboardOnTrackMsg");
+const totalDelta = document.querySelector("#totalDelta");
+const progressDelta = document.querySelector("#progressDelta");
+const pendingDelta = document.querySelector("#pendingDelta");
+const completedDelta = document.querySelector("#completedDelta");
+const totalSparkline = document.querySelector("#totalSparkline");
+const progressSparkline = document.querySelector("#progressSparkline");
+const pendingSparkline = document.querySelector("#pendingSparkline");
+const completedSparkline = document.querySelector("#completedSparkline");
+const DASHBOARD_SUBTITLE = "Here’s what’s happening with your IT & operations today.";
 const performanceSubtitle = document.querySelector("#performanceSubtitle");
 const performanceOwnerFilter = document.querySelector("#performanceOwnerFilter");
 const performanceTypeFilter = document.querySelector("#performanceTypeFilter");
@@ -5479,7 +5490,7 @@ function priorityChartColor(priority) {
   return "#64748b";
 }
 
-function buildPerfDonutSvg(segments, centerLabel = "") {
+function buildPerfDonutSvg(segments, centerLabel = "", centerValue = null) {
   const total = segments.reduce((sum, segment) => sum + segment.value, 0);
   if (!total) return "";
 
@@ -5509,11 +5520,13 @@ function buildPerfDonutSvg(segments, centerLabel = "") {
     return circle;
   }).join("");
 
+  const valueText = centerValue == null ? String(total) : String(centerValue);
+
   return `
     <svg class="perf-donut-svg" viewBox="0 0 ${size} ${size}" role="img" aria-hidden="true">
       <circle cx="${center}" cy="${center}" r="${radius}" fill="none" stroke="#e2e8f0" stroke-width="${stroke}"></circle>
       ${rings}
-      <text x="${center}" y="${center - 4}" text-anchor="middle" class="perf-donut-total">${total}</text>
+      <text x="${center}" y="${center - 4}" text-anchor="middle" class="perf-donut-total">${escapeHtml(valueText)}</text>
       <text x="${center}" y="${center + 14}" text-anchor="middle" class="perf-donut-label">${escapeHtml(centerLabel || "Total")}</text>
     </svg>
   `;
@@ -5552,10 +5565,141 @@ function renderPerfDonutChart(target, summary, options = {}) {
 
   target.innerHTML = `
     <div class="perf-donut-layout">
-      ${buildPerfDonutSvg(segments, options.centerLabel || "Tasks")}
+      ${buildPerfDonutSvg(segments, options.centerLabel || "Tasks", options.centerValue)}
       <div class="perf-chart-legend">${legend}</div>
     </div>
   `;
+}
+
+function dashboardStatusColor(status) {
+  const cls = statusClass(status);
+  if (cls === "status-completed") return "#22c55e";
+  if (cls === "status-progress") return "#0ea5e9";
+  if (cls === "status-pending") return "#eab308";
+  if (cls === "status-blocked") return "#ef4444";
+  if (cls === "status-approval") return "#ea580c";
+  return "#94a3b8";
+}
+
+function ticketTrendDate(ticket) {
+  return parseTicketDate(ticket.createdOn)
+    || parseTicketDate(ticket["Start date"])
+    || parseTicketDate(ticket.Milestone)
+    || parseTicketDate(ticket["End date"])
+    || parseTicketDate(ticket.lastUpdated);
+}
+
+function startOfDayMs(date) {
+  const day = new Date(date);
+  day.setHours(0, 0, 0, 0);
+  return day.getTime();
+}
+
+function buildMetricSeries(tickets, matcher, days = 14) {
+  const today = startOfTodayDate();
+  const buckets = [];
+  for (let i = days - 1; i >= 0; i -= 1) {
+    const day = new Date(today);
+    day.setDate(today.getDate() - i);
+    const key = startOfDayMs(day);
+    buckets.push({ key, count: 0 });
+  }
+  const index = new Map(buckets.map((bucket, idx) => [bucket.key, idx]));
+  tickets.forEach((ticket) => {
+    if (matcher && !matcher(ticket)) return;
+    const date = ticketTrendDate(ticket);
+    if (!date) return;
+    const idx = index.get(startOfDayMs(date));
+    if (idx == null) return;
+    buckets[idx].count += 1;
+  });
+  return buckets.map((bucket) => bucket.count);
+}
+
+function formatMetricDelta(current, previous) {
+  if (!previous && !current) {
+    return { text: "0%", tone: "is-flat" };
+  }
+  if (!previous) {
+    return { text: "↑ 100%", tone: "is-up" };
+  }
+  const change = Math.round(((current - previous) / previous) * 100);
+  if (change > 0) return { text: `↑ ${change}%`, tone: "is-up" };
+  if (change < 0) return { text: `↓ ${Math.abs(change)}%`, tone: "is-down" };
+  return { text: "0%", tone: "is-flat" };
+}
+
+function renderMetricDelta(el, current, previous) {
+  if (!el) return;
+  const delta = formatMetricDelta(current, previous);
+  el.textContent = delta.text;
+  el.classList.remove("is-up", "is-down", "is-flat");
+  el.classList.add(delta.tone);
+}
+
+function renderSparkline(svg, series, stroke) {
+  if (!svg) return;
+  const values = Array.isArray(series) && series.length ? series.slice() : [0, 0];
+  const width = 120;
+  const height = 36;
+  const max = Math.max.apply(null, values.concat([1]));
+  const min = Math.min.apply(null, values);
+  const range = Math.max(max - min, 1);
+  const step = values.length > 1 ? width / (values.length - 1) : width;
+  const points = values.map((value, index) => {
+    const x = Math.round(index * step * 100) / 100;
+    const y = Math.round((height - ((value - min) / range) * (height - 6) - 3) * 100) / 100;
+    return `${x},${y}`;
+  }).join(" ");
+  svg.innerHTML = `<path d="M${points.replace(/ /g, " L")}" stroke="${stroke || "currentColor"}"></path>`;
+}
+
+function renderDashboardMetricTrends(tickets) {
+  const seriesTotal = buildMetricSeries(tickets, null, 14);
+  const seriesProgress = buildMetricSeries(tickets, (ticket) => ticket.Status === "In progress", 14);
+  const seriesPending = buildMetricSeries(tickets, (ticket) => ticket.Status === "Not started", 14);
+  const seriesCompleted = buildMetricSeries(tickets, (ticket) => statusClass(ticket.Status) === "status-completed", 14);
+
+  renderSparkline(totalSparkline, seriesTotal, "#0284c7");
+  renderSparkline(progressSparkline, seriesProgress, "#16a34a");
+  renderSparkline(pendingSparkline, seriesPending, "#ea580c");
+  renderSparkline(completedSparkline, seriesCompleted, "#6366f1");
+
+  const sum = (arr) => arr.reduce((acc, value) => acc + value, 0);
+  const recent = (arr) => sum(arr.slice(-7));
+  const prior = (arr) => sum(arr.slice(0, Math.max(arr.length - 7, 0)));
+
+  renderMetricDelta(totalDelta, recent(seriesTotal), prior(seriesTotal));
+  renderMetricDelta(progressDelta, recent(seriesProgress), prior(seriesProgress));
+  renderMetricDelta(pendingDelta, recent(seriesPending), prior(seriesPending));
+  renderMetricDelta(completedDelta, recent(seriesCompleted), prior(seriesCompleted));
+}
+
+function renderDashboardStatusBreakdown(tickets) {
+  if (!statusList) return;
+  const summary = countBy(tickets, "Status");
+  const completed = tickets.filter((ticket) => statusClass(ticket.Status) === "status-completed").length;
+  const completion = tickets.length ? Math.round((completed / tickets.length) * 100) : 0;
+
+  renderPerfDonutChart(statusList, summary, {
+    centerLabel: "On Track",
+    centerValue: `${completion}%`,
+    emptyMessage: "No ticket data available",
+    colorFn: dashboardStatusColor
+  });
+
+  if (!dashboardOnTrack) return;
+  if (!tickets.length) {
+    dashboardOnTrack.hidden = true;
+    return;
+  }
+  dashboardOnTrack.hidden = false;
+  dashboardOnTrack.classList.toggle("is-warn", completion < 70);
+  if (dashboardOnTrackMsg) {
+    dashboardOnTrackMsg.textContent = completion >= 70
+      ? "Your tasks are on track!"
+      : "Workload needs attention — clear blocked and not-started items.";
+  }
 }
 
 function renderPerfBarChart(target, summary, options = {}) {
@@ -6491,8 +6635,20 @@ function renderPerformance(tickets) {
   renderPerformanceRecent(scopedTickets, selectedOwner);
 }
 
+function formatDashboardActivityTime(ticket) {
+  const stamp = ticket.lastUpdated || ticket.createdOn || ticket.closedOn || "";
+  const parsed = parseTicketDate(stamp);
+  if (!parsed) return "";
+  try {
+    return parsed.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  } catch (err) {
+    return "";
+  }
+}
+
 function renderDashboardRecent(tickets) {
-  const todayTickets = getTodayActivityTickets(tickets);
+  if (!dashboardRecentList) return;
+  const todayTickets = getTodayActivityTickets(tickets).slice(0, 12);
 
   if (!todayTickets.length) {
     dashboardRecentList.innerHTML = '<div class="breakdown-empty">No activity today</div>';
@@ -6501,7 +6657,13 @@ function renderDashboardRecent(tickets) {
 
   dashboardRecentList.innerHTML = todayTickets
     .map((ticket) => {
-      const activityLabel = formatTodayActivityLabel(ticket);
+      const activityLabel = formatTodayActivityLabel(ticket) || "Updated today";
+      const timeLabel = formatDashboardActivityTime(ticket);
+      const metaParts = [
+        ticket.Owner || "No owner",
+        activityLabel,
+        timeLabel
+      ].filter(Boolean);
       return `
       <article class="dashboard-recent-item ${statusClass(ticket.Status)}${showsMilestoneTodayHighlight(ticket) ? " milestone-today-item" : ""}">
         <div class="dashboard-recent-head">
@@ -6509,8 +6671,7 @@ function renderDashboardRecent(tickets) {
           <span class="status-pill ${statusClass(ticket.Status)}">${escapeHtml(ticket.Status || "Blank")}</span>
         </div>
         <div class="dashboard-recent-meta">
-          <span>${escapeHtml(ticket.Owner || "No owner")}</span>
-          <span>${escapeHtml(activityLabel)}</span>
+          <span>${escapeHtml(metaParts.join(" • "))}</span>
         </div>
         ${renderScreenshotPreviewButton(ticket)}
         ${getTicketRemarksRichHtml(ticket) ? `<p class="dashboard-recent-remarks">${getTicketRemarksRichHtml(ticket)}</p>` : ""}
@@ -10435,11 +10596,11 @@ function renderTickets(options = {}) {
   if (sideOpenCount) sideOpenCount.textContent = open;
   if (sideBlockedCount) sideBlockedCount.textContent = blocked;
   if (dashboardSubtitle) {
-    dashboardSubtitle.textContent = `${tickets.length} tickets · ${completion}% completed · updated ${new Date().toLocaleString()}`;
+    dashboardSubtitle.textContent = DASHBOARD_SUBTITLE;
   }
   if (dashboardWelcomeTitle) {
-    const userName = cleanText(Auth.currentUser()?.name);
-    dashboardWelcomeTitle.textContent = userName ? `Welcome back, ${userName}` : "Welcome back";
+    const userName = cleanText(Auth.currentUser() && Auth.currentUser().name);
+    dashboardWelcomeTitle.textContent = userName ? `Welcome back, ${userName} 👋` : "Welcome back 👋";
   }
   if (dashboardCompletionRing) {
     dashboardCompletionRing.style.setProperty("--completion", completion);
@@ -10454,8 +10615,9 @@ function renderTickets(options = {}) {
   const paintSecondaryNow = activeTab === "performance" || activeTab === "kanban";
 
   if (paintDashboard) {
-    renderBreakdownList(statusList, countBy(tickets, "Status"), tickets.length, "status");
+    renderDashboardStatusBreakdown(tickets);
     renderBreakdownList(ownerList, countBy(tickets, "Owner"), tickets.length, "owner");
+    renderDashboardMetricTrends(tickets);
     if (deferRecent) {
       const token = ++lastDashboardRecentToken;
       if (dashboardRecentList) {
