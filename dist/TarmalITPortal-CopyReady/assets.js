@@ -2806,36 +2806,81 @@ function lowStockCompactBannerHtml(countMsg = "") {
   `;
 }
 
-/** Compact cream banners for collapsed header + filters-hidden restore rows. */
+function mountLowStockCompactBanner(host, classNames, insertBeforeEl = null) {
+  if (!host) return null;
+  const existing = host.querySelector(".low-stock-banner");
+  if (existing) return existing;
+  const chip = document.createElement("aside");
+  chip.className = classNames;
+  chip.hidden = true;
+  chip.setAttribute("aria-live", "polite");
+  chip.innerHTML = lowStockCompactBannerHtml();
+  if (insertBeforeEl && insertBeforeEl.parentNode === host) {
+    host.insertBefore(chip, insertBeforeEl);
+  } else {
+    host.appendChild(chip);
+  }
+  chip.querySelector(".low-stock-banner-cta")?.addEventListener("click", openConsumablesLowStockFromWarning);
+  return chip;
+}
+
+/** Compact cream banners in every left-title | empty-middle | right-action row. */
 function ensureLowStockCompactBanners() {
-  const rows = Array.from(document.querySelectorAll(".toolbar-restore-row.panel-restore-bar"));
-  rows.forEach((row) => {
+  // Filters-hidden restore bars (Tickets — filters & actions hidden + funnel).
+  document.querySelectorAll(".toolbar-restore-row.panel-restore-bar").forEach((row) => {
     if (row.querySelector(".low-stock-banner--compact")) return;
-    const chip = document.createElement("aside");
-    chip.className = "low-stock-banner low-stock-banner--compact";
-    chip.hidden = true;
-    chip.setAttribute("aria-live", "polite");
-    chip.innerHTML = lowStockCompactBannerHtml();
-    const expandBtn = row.querySelector(".toolbar-expand-btn");
-    if (expandBtn) row.insertBefore(chip, expandBtn);
-    else row.appendChild(chip);
-    chip.querySelector(".low-stock-banner-cta")?.addEventListener("click", openConsumablesLowStockFromWarning);
+    mountLowStockCompactBanner(
+      row,
+      "low-stock-banner low-stock-banner--compact",
+      row.querySelector(".toolbar-expand-btn")
+    );
   });
 
+  // Collapsed global header chrome.
   const expandBar = document.querySelector("#topbarExpandBar");
   if (expandBar && !expandBar.querySelector(".low-stock-banner--compact")) {
-    const chip = document.createElement("aside");
-    chip.className = "low-stock-banner low-stock-banner--compact low-stock-banner--header-collapsed";
-    chip.hidden = true;
-    chip.setAttribute("aria-live", "polite");
-    chip.innerHTML = lowStockCompactBannerHtml();
-    const insertBefore = expandBar.querySelector("#consumableLowStockWarningCompact")
-      || expandBar.querySelector("#topbarExpandStatus")
-      || expandBar.querySelector("#expandTopbarButton");
-    if (insertBefore) expandBar.insertBefore(chip, insertBefore);
-    else expandBar.appendChild(chip);
-    chip.querySelector(".low-stock-banner-cta")?.addEventListener("click", openConsumablesLowStockFromWarning);
+    mountLowStockCompactBanner(
+      expandBar,
+      "low-stock-banner low-stock-banner--compact low-stock-banner--header-collapsed",
+      expandBar.querySelector("#consumableLowStockWarningCompact")
+        || expandBar.querySelector("#topbarExpandStatus")
+        || expandBar.querySelector("#expandTopbarButton")
+    );
   }
+
+  // Dashboard welcome tile center slot.
+  const dashSlot = document.querySelector("#lowStockAlertSlot, .dashboard-hero-alert-slot");
+  if (dashSlot && !dashSlot.querySelector(".low-stock-banner")) {
+    mountLowStockCompactBanner(
+      dashSlot,
+      "low-stock-banner low-stock-banner--compact low-stock-banner--dashboard"
+    );
+  }
+
+  // Section headers: "Recent Tickets" | EMPTY MIDDLE | "+ New Ticket" (and every tab equivalent).
+  document.querySelectorAll(".board-header").forEach((header) => {
+    if (header.querySelector(".low-stock-banner--board")) return;
+    const actions = header.querySelector(".board-actions");
+    if (!actions) return;
+    mountLowStockCompactBanner(
+      header,
+      "low-stock-banner low-stock-banner--compact low-stock-banner--board",
+      actions
+    );
+  });
+
+  // Performance / similar headers that have a real right-side action button group.
+  document.querySelectorAll(".panel-heading").forEach((heading) => {
+    if (heading.querySelector(".low-stock-banner--board")) return;
+    const actions = heading.querySelector(".performance-period-heading-actions, .panel-heading-actions");
+    if (!actions || !actions.querySelector("button")) return;
+    if (!heading.querySelector("h2, .dashboard-title, .panel-title")) return;
+    mountLowStockCompactBanner(
+      heading,
+      "low-stock-banner low-stock-banner--compact low-stock-banner--board",
+      actions
+    );
+  });
 }
 
 function syncLowStockCompactBanners(visible, countMsg = "") {

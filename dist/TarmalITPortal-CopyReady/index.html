@@ -9,12 +9,12 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="./styles.css?v=237">
+    <link rel="stylesheet" href="./styles.css?v=239">
     <!-- auth stays blocking so requireLogin runs before app chrome paints -->
     <script src="./auth.js?v=31"></script>
     <!-- Defer main bundles so HTML can parse while ~210KB+ app.js downloads -->
-    <script src="./app.js?v=257" defer></script>
-    <script src="./assets.js?v=38" defer></script>
+    <script src="./app.js?v=258" defer></script>
+    <script src="./assets.js?v=39" defer></script>
     <script src="./documents.js?v=12" defer></script>
     <script src="./procurement.js?v=6" defer></script>
   </head>
@@ -195,15 +195,27 @@
       <section class="tab-panel active" id="dashboardPanel" data-panel="dashboard" aria-label="Dashboard">
         <div class="dashboard-hero">
           <div class="dashboard-hero-glow" aria-hidden="true"></div>
+          <div class="dashboard-hero-wave" aria-hidden="true"></div>
           <div class="dashboard-hero-main">
             <h2 class="dashboard-hero-title" id="dashboardWelcomeTitle">Welcome back</h2>
-            <p class="dashboard-subtitle" id="dashboardSubtitle">Live ticket snapshot</p>
+            <p class="dashboard-subtitle" id="dashboardSubtitle">Here’s what’s happening with your IT &amp; operations today.</p>
             <div class="dashboard-hero-actions">
-              <button class="primary-button dashboard-hero-cta" type="button" data-open-ticket-create data-requires="createTicket">New Ticket</button>
-              <button class="secondary-button dashboard-hero-cta-secondary" type="button" data-goto-tab="tickets" data-requires="dashboard">View Tickets</button>
-              <button class="secondary-button dashboard-hero-cta-secondary" type="button" data-goto-tab="kanban" data-requires="dashboard">Kanban Board</button>
+              <button class="primary-button dashboard-hero-cta" type="button" data-open-ticket-create data-requires="createTicket">
+                <span class="dashboard-hero-cta-icon dashboard-hero-cta-icon-plus" aria-hidden="true"></span>
+                New Ticket
+              </button>
+              <button class="secondary-button dashboard-hero-cta-secondary" type="button" data-goto-tab="tickets" data-requires="dashboard">
+                <span class="dashboard-hero-cta-icon dashboard-hero-cta-icon-list" aria-hidden="true"></span>
+                View Tickets
+              </button>
+              <button class="secondary-button dashboard-hero-cta-secondary" type="button" data-goto-tab="kanban" data-requires="dashboard">
+                <span class="dashboard-hero-cta-icon dashboard-hero-cta-icon-board" aria-hidden="true"></span>
+                Kanban Board
+              </button>
             </div>
           </div>
+          <!-- Dedicated mount for global Low Stock Alert (header agent may relocate/clone here). Keep in collapsed/narrow layouts. -->
+          <div class="dashboard-hero-alert-slot" id="lowStockAlertSlot" data-low-stock-slot aria-live="polite"></div>
           <div class="dashboard-hero-aside">
             <div class="dashboard-completion-ring" id="dashboardCompletionRing" style="--completion: 0">
               <div class="dashboard-completion-ring-inner">
@@ -212,15 +224,18 @@
               </div>
             </div>
             <div class="dashboard-hero-kpis">
-              <article class="dashboard-hero-kpi">
+              <article class="dashboard-hero-kpi dashboard-hero-kpi-open">
+                <span class="dashboard-hero-kpi-icon" aria-hidden="true"></span>
                 <strong id="openCount">0</strong>
                 <span>Open</span>
               </article>
               <article class="dashboard-hero-kpi dashboard-hero-kpi-alert">
+                <span class="dashboard-hero-kpi-icon" aria-hidden="true"></span>
                 <strong id="blockedCount">0</strong>
                 <span>Blocked</span>
               </article>
-              <article class="dashboard-hero-kpi">
+              <article class="dashboard-hero-kpi dashboard-hero-kpi-high">
+                <span class="dashboard-hero-kpi-icon" aria-hidden="true"></span>
                 <strong id="priorityCount">0</strong>
                 <span>High</span>
               </article>
@@ -229,38 +244,54 @@
         </div>
 
         <section class="summary-grid dashboard-metrics" aria-label="Ticket summary">
-          <article class="metric-card metric-total dashboard-metric">
-            <span class="metric-icon layers-icon" aria-hidden="true"></span>
+          <article class="metric-card metric-total dashboard-metric" data-metric="total">
+            <div class="metric-card-top">
+              <span class="metric-icon layers-icon" aria-hidden="true"></span>
+              <span class="metric-delta is-up" id="totalDelta">—</span>
+            </div>
             <div class="metric-card-body">
               <strong id="totalCount">0</strong>
               <p>Total Tasks</p>
             </div>
+            <svg class="metric-sparkline" id="totalSparkline" viewBox="0 0 120 36" preserveAspectRatio="none" aria-hidden="true"></svg>
           </article>
-          <article class="metric-card metric-progress dashboard-metric">
-            <span class="metric-icon progress-icon" aria-hidden="true"></span>
+          <article class="metric-card metric-progress dashboard-metric" data-metric="progress">
+            <div class="metric-card-top">
+              <span class="metric-icon progress-icon" aria-hidden="true"></span>
+              <span class="metric-delta is-up" id="progressDelta">—</span>
+            </div>
             <div class="metric-card-body">
               <strong id="progressCount">0</strong>
               <p>In Progress</p>
             </div>
+            <svg class="metric-sparkline" id="progressSparkline" viewBox="0 0 120 36" preserveAspectRatio="none" aria-hidden="true"></svg>
           </article>
-          <article class="metric-card metric-pending dashboard-metric">
-            <span class="metric-icon pending-icon" aria-hidden="true"></span>
+          <article class="metric-card metric-pending dashboard-metric" data-metric="pending">
+            <div class="metric-card-top">
+              <span class="metric-icon pending-icon" aria-hidden="true"></span>
+              <span class="metric-delta is-down" id="pendingDelta">—</span>
+            </div>
             <div class="metric-card-body">
               <strong id="pendingCount">0</strong>
               <p>Not Started</p>
             </div>
+            <svg class="metric-sparkline" id="pendingSparkline" viewBox="0 0 120 36" preserveAspectRatio="none" aria-hidden="true"></svg>
           </article>
-          <article class="metric-card metric-completed dashboard-metric">
-            <span class="metric-icon completed-icon" aria-hidden="true"></span>
+          <article class="metric-card metric-completed dashboard-metric" data-metric="completed">
+            <div class="metric-card-top">
+              <span class="metric-icon completed-icon" aria-hidden="true"></span>
+              <span class="metric-delta is-up" id="completedDelta">—</span>
+            </div>
             <div class="metric-card-body">
               <strong id="completedCount">0</strong>
               <p>Completed</p>
             </div>
+            <svg class="metric-sparkline" id="completedSparkline" viewBox="0 0 120 36" preserveAspectRatio="none" aria-hidden="true"></svg>
           </article>
         </section>
 
         <section class="dashboard-layout dashboard-layout-wide dashboard-insights">
-          <article class="dashboard-panel">
+          <article class="dashboard-panel dashboard-status-panel">
             <div class="panel-heading">
               <div>
                 <p class="eyebrow">Workload</p>
@@ -268,7 +299,11 @@
               </div>
               <span class="panel-total" id="statusPanelTotal">0 tickets</span>
             </div>
-            <div class="breakdown-list" id="statusList"></div>
+            <div class="dashboard-status-body" id="statusList"></div>
+            <div class="dashboard-ontrack" id="dashboardOnTrack" hidden>
+              <span class="dashboard-ontrack-icon" aria-hidden="true"></span>
+              <span id="dashboardOnTrackMsg">Your tasks are on track!</span>
+            </div>
           </article>
           <article class="dashboard-panel">
             <div class="panel-heading">
