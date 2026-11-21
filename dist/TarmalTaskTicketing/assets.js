@@ -2873,11 +2873,38 @@ function getActiveBoardHeader() {
     ?.closest(".board-header") || null;
 }
 
+function ensureRibbonLowStockSlot(host, slotId, ribbonKind, bannerClass) {
+  if (!host) return null;
+  let slot = host.querySelector(`#${slotId}`)
+    || host.querySelector(`[data-low-stock-ribbon-slot="${ribbonKind}"]`);
+  if (!slot) {
+    slot = document.createElement("div");
+    slot.id = slotId;
+    slot.className = "ribbon-low-stock-slot";
+    slot.setAttribute("data-low-stock-ribbon-slot", ribbonKind);
+    slot.setAttribute("aria-live", "polite");
+    slot.hidden = true;
+    host.appendChild(slot);
+  }
+  slot.classList.add("ribbon-low-stock-slot");
+  // Kill any legacy stacked strip that lived outside the ribbon.
+  document.querySelectorAll(".low-stock-collapsed-strip").forEach((el) => {
+    if (!el.closest("#sidebarExpandBar, #topbarExpandBar")) el.remove();
+  });
+  if (!slot.querySelector(`.${bannerClass}`)) {
+    mountLowStockCompactBanner(
+      slot,
+      `low-stock-banner low-stock-banner--compact ${bannerClass}`
+    );
+  }
+  return slot;
+}
+
 /**
  * Mount cream banners in:
  *  - top app header middle (when full header tile is visible)
- *  - section header middle e.g. Recent Tickets | alert | actions (sidebar collapsed)
- *  - dedicated strip under thin hamburger topbar (Dashboard / tabs without board row)
+ *  - section header middle e.g. Recent Tickets | alert | actions (Tickets when sidebar collapsed)
+ *  - INLINE inside hamburger ribbon (Dashboard / tabs without board row) — never a stacked row below
  * Never mount in Dashboard welcome hero gauge gap.
  */
 function ensureLowStockCompactBanners() {
@@ -2920,35 +2947,48 @@ function ensureLowStockCompactBanners() {
     );
   });
 
-  // Fallback strip under thin hamburger bar (Dashboard / tabs without board-header).
-  let collapsedStrip = document.querySelector("#lowStockCollapsedStrip, [data-low-stock-collapsed-strip]");
-  if (!collapsedStrip) {
-    const expandBar = document.querySelector("#sidebarExpandBar");
-    collapsedStrip = document.createElement("div");
-    collapsedStrip.id = "lowStockCollapsedStrip";
-    collapsedStrip.className = "low-stock-collapsed-strip";
-    collapsedStrip.setAttribute("data-low-stock-collapsed-strip", "");
-    collapsedStrip.setAttribute("aria-live", "polite");
-    collapsedStrip.hidden = true;
-    if (expandBar?.parentNode) {
-      expandBar.parentNode.insertBefore(collapsedStrip, expandBar.nextSibling);
-    } else {
-      document.querySelector(".app-main")?.prepend(collapsedStrip);
-    }
+  // Dashboard ribbon slots: same row as ☰ + title (not a second full-width banner).
+  ensureRibbonLowStockSlot(
+    document.querySelector("#sidebarExpandBar"),
+    "lowStockCollapsedStrip",
+    "sidebar",
+    "low-stock-banner--ribbon"
+  );
+  ensureRibbonLowStockSlot(
+    document.querySelector("#topbarExpandBar"),
+    "lowStockMobileRibbonSlot",
+    "mobile",
+    "low-stock-banner--ribbon"
+  );
+}
+
+/** Which thin ribbon is currently the visible chrome row? */
+function getVisibleCollapsedRibbonSlot() {
+  const sidebarBar = document.querySelector("#sidebarExpandBar");
+  const mobileBar = document.querySelector("#topbarExpandBar");
+  const sidebarVisible = sidebarBar
+    && window.getComputedStyle(sidebarBar).display !== "none"
+    && !sidebarBar.hidden
+    && sidebarBar.getBoundingClientRect().height > 8;
+  if (sidebarVisible) {
+    return document.querySelector("#lowStockCollapsedStrip, [data-low-stock-ribbon-slot=\"sidebar\"]");
   }
-  if (collapsedStrip && !collapsedStrip.querySelector(".low-stock-banner--collapsed-strip")) {
-    mountLowStockCompactBanner(
-      collapsedStrip,
-      "low-stock-banner low-stock-banner--compact low-stock-banner--collapsed-strip"
-    );
+  const mobileVisible = mobileBar
+    && window.getComputedStyle(mobileBar).display !== "none"
+    && !mobileBar.hidden
+    && mobileBar.getBoundingClientRect().height > 8;
+  if (mobileVisible) {
+    return document.querySelector("#lowStockMobileRibbonSlot, [data-low-stock-ribbon-slot=\"mobile\"]");
   }
+  return document.querySelector("#lowStockCollapsedStrip, [data-low-stock-ribbon-slot=\"sidebar\"]");
 }
 
 /**
  * Mutual exclusion (exactly one when low stock):
  *   full top header visible → header middle only
- *   sidebar/header chrome collapsed → section row (Tickets etc.) OR collapsed strip (Dashboard)
- * Never both; never Dashboard welcome-hero gap.
+ *   sidebar collapsed + Tickets/board → section row only (Recent Tickets middle)
+ *   sidebar collapsed + Dashboard/no board → INLINE in hamburger ribbon only
+ * Never both; never stacked second banner; never welcome-hero gap.
  */
 function syncLowStockCompactBanners(hasLowStock, countMsg = "") {
   ensureLowStockCompactBanners();
@@ -2959,11 +2999,13 @@ function syncLowStockCompactBanners(hasLowStock, countMsg = "") {
   const useFallback = low && !headerAvailable;
   const activeBoard = useFallback ? getActiveBoardHeader() : null;
   const useBoard = Boolean(activeBoard);
-  const useStrip = useFallback && !useBoard;
+  const useRibbon = useFallback && !useBoard;
+  const activeRibbonSlot = useRibbon ? getVisibleCollapsedRibbonSlot() : null;
   const msgText = low ? (countMsg || "") : "";
 
-  const collapsedStripHost = document.querySelector("#lowStockCollapsedStrip, [data-low-stock-collapsed-strip]");
-  if (collapsedStripHost) collapsedStripHost.hidden = !useStrip;
+  document.querySelectorAll(".ribbon-low-stock-slot, [data-low-stock-ribbon-slot]").forEach((slot) => {
+    slot.hidden = !(useRibbon && slot === activeRibbonSlot);
+  });
 
   document.querySelectorAll(".low-stock-banner--compact").forEach((chip) => {
     // Never show in Dashboard welcome hero / gauge middle.
@@ -2975,26 +3017,26 @@ function syncLowStockCompactBanners(hasLowStock, countMsg = "") {
       return;
     }
 
+    const isRibbon = chip.classList.contains("low-stock-banner--ribbon")
+      || Boolean(chip.closest(".ribbon-low-stock-slot, [data-low-stock-ribbon-slot]"));
     let show = false;
     if (low) {
       const isHeader = chip.classList.contains("low-stock-banner--header")
         || Boolean(chip.closest("#lowStockAlertSlot, .topbar-low-stock-slot, #siteTopbar"));
       const isBoard = chip.classList.contains("low-stock-banner--board");
-      const isStrip = chip.classList.contains("low-stock-banner--collapsed-strip")
-        || Boolean(chip.closest("#lowStockCollapsedStrip, [data-low-stock-collapsed-strip]"));
 
-      if (isHeader && !isBoard && !isStrip) {
+      if (isHeader && !isBoard && !isRibbon) {
         show = headerAvailable;
       } else if (isBoard) {
         show = useBoard && chip.closest(".board-header") === activeBoard;
-      } else if (isStrip) {
-        show = useStrip;
+      } else if (isRibbon) {
+        show = useRibbon && Boolean(activeRibbonSlot) && activeRibbonSlot.contains(chip);
       }
     }
 
     chip.hidden = !show;
     const msg = chip.querySelector(".low-stock-banner-msg");
-    if (msg) msg.textContent = show ? msgText : "";
+    if (msg) msg.textContent = show && !isRibbon ? msgText : "";
   });
 }
 

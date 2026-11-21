@@ -326,13 +326,20 @@ textarea {
 
 .sidebar-expand-bar {
   display: none;
+  align-items: center;
+  gap: 8px;
   margin-bottom: 0;
+  min-height: 40px;
+  padding: 4px 8px;
+  box-sizing: border-box;
 }
 
 .sidebar-expand-title {
+  flex: 0 0 auto;
   font-size: 12px;
   font-weight: 600;
   color: var(--ink-secondary);
+  white-space: nowrap;
 }
 
 .app-main {
@@ -2123,32 +2130,63 @@ body.sidebar-collapsed .sidebar-expand-bar {
 
 .board-toolbar-panel.is-collapsed .board-header .toolbar-expand-btn-inline {
   display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  min-height: 40px;
+  padding: 0 12px;
+  box-sizing: border-box;
 }
 
-/* Section/strip alerts only when sidebar is collapsed (full header tile gone). JS also gates. */
+/* Board/ribbon alerts only when sidebar is collapsed (full header tile gone). JS also gates. */
 body:not(.sidebar-collapsed) .low-stock-banner--board,
-body:not(.sidebar-collapsed) .low-stock-banner--collapsed-strip,
-body:not(.sidebar-collapsed) .low-stock-collapsed-strip {
+body:not(.sidebar-collapsed) .low-stock-banner--ribbon,
+body:not(.sidebar-collapsed) .ribbon-low-stock-slot {
   display: none !important;
 }
 
-/* Dedicated strip under thin hamburger topbar (Dashboard / no board-header). */
-.low-stock-collapsed-strip {
+/* Inline chip INSIDE hamburger ribbon — never a second stacked full-width row. */
+.ribbon-low-stock-slot {
   display: none;
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: min(640px, 100%);
+  margin-left: 4px;
+  align-items: center;
+}
+
+.ribbon-low-stock-slot:not([hidden]) {
+  display: flex;
+}
+
+.ribbon-low-stock-slot .low-stock-banner--ribbon {
+  flex: 1 1 auto;
   width: 100%;
-  max-width: 100%;
-  box-sizing: border-box;
+  min-width: 0;
+  min-height: 30px;
   margin: 0;
-  padding: 0;
+  padding: 3px 8px;
+  gap: 6px 8px;
 }
 
-body.sidebar-collapsed .low-stock-collapsed-strip:not([hidden]) {
-  display: block;
+.ribbon-low-stock-slot .low-stock-banner--ribbon .low-stock-banner-msg {
+  display: none;
 }
 
-body.sidebar-collapsed .low-stock-collapsed-strip .low-stock-banner--collapsed-strip {
-  width: 100%;
-  max-width: 100%;
+.topbar-expand-bar .ribbon-low-stock-slot {
+  order: 2;
+}
+
+.topbar-expand-bar .stock-notif-btn-compact {
+  order: 3;
+}
+
+.topbar-expand-bar .topbar-expand-status {
+  order: 4;
+}
+
+.topbar-expand-bar .topbar-expand-btn {
+  order: 5;
 }
 
 .toolbar-collapse-btn {
@@ -4170,6 +4208,10 @@ body.sidebar-collapsed .low-stock-collapsed-strip .low-stock-banner--collapsed-s
 }
 
 .secondary-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
   min-height: 36px;
   padding: 0 12px;
   color: var(--ink-secondary);
@@ -4177,6 +4219,7 @@ body.sidebar-collapsed .low-stock-collapsed-strip .low-stock-banner--collapsed-s
   border: 1px solid var(--line-strong);
   font-size: 13px;
   font-weight: 600;
+  line-height: 1;
 }
 
 .secondary-button:hover {

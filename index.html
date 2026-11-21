@@ -9,12 +9,12 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="./styles.css?v=242">
+    <link rel="stylesheet" href="./styles.css?v=244">
     <!-- auth stays blocking so requireLogin runs before app chrome paints -->
     <script src="./auth.js?v=31"></script>
     <!-- Defer main bundles so HTML can parse while ~210KB+ app.js downloads -->
-    <script src="./app.js?v=263" defer></script>
-    <script src="./assets.js?v=43" defer></script>
+    <script src="./app.js?v=264" defer></script>
+    <script src="./assets.js?v=45" defer></script>
     <script src="./documents.js?v=12" defer></script>
     <script src="./procurement.js?v=6" defer></script>
   </head>
@@ -153,6 +153,8 @@
             <span class="panel-icon-glyph panel-icon-glyph-menu" aria-hidden="true"></span>
           </button>
           <span class="topbar-expand-title" id="topbarExpandPageTitle">Dashboard</span>
+          <!-- Inline low-stock chip for mobile topbar-collapsed ribbon: [☰] Title | alert | CTA -->
+          <div class="ribbon-low-stock-slot" id="lowStockMobileRibbonSlot" data-low-stock-ribbon-slot="mobile" aria-live="polite"></div>
           <button class="stock-notif-btn stock-notif-btn-compact" id="consumableLowStockWarningCompact" type="button" hidden title="Notifications">
             <span class="stock-notif-bell" aria-hidden="true">
               <svg viewBox="0 0 24 24" width="16" height="16" fill="none" focusable="false">
@@ -178,9 +180,9 @@
             <span class="panel-icon-glyph panel-icon-glyph-menu" aria-hidden="true"></span>
           </button>
           <span class="sidebar-expand-title panel-restore-label" id="activeTabLabel">Dashboard</span>
+          <!-- Inline low-stock chip in same white ribbon: [☰] Title | alert | CTA — never a second stacked row -->
+          <div class="ribbon-low-stock-slot" id="lowStockCollapsedStrip" data-low-stock-ribbon-slot="sidebar" aria-live="polite"></div>
         </div>
-        <!-- Low Stock when sidebar collapsed + no section toolbar (e.g. Dashboard). Hidden when header or board row owns the alert. -->
-        <div class="low-stock-collapsed-strip" id="lowStockCollapsedStrip" data-low-stock-collapsed-strip aria-live="polite" hidden></div>
 
       <section class="tab-panel active" id="dashboardPanel" data-panel="dashboard" aria-label="Dashboard">
         <div class="dashboard-hero">
