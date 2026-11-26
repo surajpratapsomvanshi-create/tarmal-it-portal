@@ -695,6 +695,8 @@ function canUserApproveCompletion_(actorName, actorEmail, ownerName, maps) {
 }
 
 function isExactProjectType_(type) {
+  // trim + case-insensitive EXACT match only — never includes("sap") / includes("infra").
+  // "Daily - SAP" / "Daily - Infra" must NOT match.
   const value = String(type || "").trim().toLowerCase();
   return value === "sap" || value === "infra";
 }
@@ -710,10 +712,13 @@ function resolveCompletionWorkflow_(oldStatus, requestedStatus, owner, actorName
   const wasComplete = isCompletedStatus(oldStatus);
   const maps = readUserMasterMaps_();
 
-  // Daily-* / MOM / any non-project type: always complete directly — never Pending Approval,
-  // even if a legacy row was already stuck in Pending Approval.
-  if (wantsComplete && !isExactProjectType_(ticketType)) {
-    return { status: "Completed", approvalSent: false };
+  // Daily-* / MOM / any non-project type: never enter or stay in Pending Approval.
+  // Completing (or a stuck/echoed PA status) → Completed directly — no manager gate.
+  if (!isExactProjectType_(ticketType)) {
+    if (wantsComplete || isPendingApprovalStatus_(requestedStatus)) {
+      return { status: "Completed", approvalSent: false };
+    }
+    return { status: requestedStatus, approvalSent: false };
   }
 
   if (wasPending && wantsComplete) {

@@ -3244,13 +3244,15 @@ function normalizeTicket(ticket) {
   const notesHtml = ensureTicketNotesHtml(ticket, screenshotUrls);
   const remarks = extractRemarks({ ...ticket, NotesHtml: notesHtml });
 
+  const normalizedType = cleanText(ticket.Type);
   return {
     Task: cleanText(ticket.Task),
     Priority: normalizePriority(ticket.Priority),
     Owner: cleanText(ticket.Owner),
     "Raised By": cleanText(ticket["Raised By"]),
-    Status: cleanText(ticket.Status),
-    Type: cleanText(ticket.Type),
+    // Daily-* / MOM must never stay in Pending Approval (legacy / stale server rows).
+    Status: coerceStatusForTicketType(ticket.Status, normalizedType),
+    Type: normalizedType,
     "Start date": canonicalizeTicketDate(ticket["Start date"]),
     "End date": canonicalizeTicketDate(ticket["End date"]),
     Milestone: canonicalizeTicketDate(ticket.Milestone),
@@ -4042,6 +4044,8 @@ function isPendingApprovalStatus(status) {
 
 function canCurrentUserApproveTicket(ticket) {
   if (!isPendingApprovalStatus(ticket?.Status)) return false;
+  // Approval gate is only for exact project SAP / Infra — never Daily-* / MOM.
+  if (!isExactProjectType(ticket?.Type)) return false;
   const user = Auth.currentUser();
   if (!user) return false;
   const manager = getManagerForOwner(ticket.Owner);
@@ -4078,8 +4082,9 @@ function ownerRequiresManagerApproval(ownerName) {
 }
 
 function isExactProjectType(type) {
-  // Approval-gated / admin-create project types only (exact SAP / Infra).
-  // Not Daily - SAP / Daily - Infra / MOM.
+  // Approval-gated / admin-create project types only:
+  // trim + case-insensitive EXACT match on "SAP" or "Infra".
+  // Never substring/includes — "Daily - SAP" / "Daily - Infra" / MOM must not match.
   return isExactSapType(type) || isExactInfraType(type);
 }
 
@@ -4087,6 +4092,7 @@ function shouldRequireCompletionApproval(ticket, user = Auth.currentUser()) {
   const owner = cleanText(ticket?.Owner);
   if (!owner || !isTicketCompleted(ticket)) return false;
   // Completion approval ONLY for exact project SAP / Infra — never Daily-* or MOM.
+  // Use exact match only (no includes("Infra") / includes("SAP")).
   if (isDailyCategoryType(ticket?.Type) || isExactMomType(ticket?.Type)) return false;
   if (!isExactProjectType(ticket?.Type)) return false;
   if (!ownerRequiresManagerApproval(owner)) return false;
@@ -4114,12 +4120,26 @@ function getRequiredApprovalKind(ticket, previousTicket = null, user = Auth.curr
 }
 
 function applyTicketApprovalPreview(ticket, previousTicket = null) {
+  // Daily-* / MOM / any non-exact type: never rewrite to Pending Approval.
+  if (!isExactProjectType(ticket?.Type)) return ticket;
   if (!getRequiredApprovalKind(ticket, previousTicket)) return ticket;
   return { ...ticket, Status: "Pending Approval" };
 }
 
 function applyCompletionApprovalPreview(ticket, previousTicket = null) {
   return applyTicketApprovalPreview(ticket, previousTicket);
+}
+
+/**
+ * Pending Approval is valid only for exact SAP / Infra.
+ * Daily-* / MOM stuck in PA (legacy / stale server) heal to Completed.
+ */
+function coerceStatusForTicketType(status, type) {
+  const next = cleanText(status);
+  if (isPendingApprovalStatus(next) && !isExactProjectType(type)) {
+    return "Completed";
+  }
+  return next;
 }
 
 function reconcileSyncedTicketStatus(ticket, result = {}, expected = {}) {
@@ -4129,40 +4149,48 @@ function reconcileSyncedTicketStatus(ticket, result = {}, expected = {}) {
   const projectApprovalType = isExactProjectType(effectiveType);
   // Approval workflow may rewrite Completed → Pending Approval for SAP/Infra only.
   // Daily-* / MOM must never snap into Pending Approval from a server echo.
+  let resolved = "";
   if (serverStatus && expectedStatus && serverStatus !== expectedStatus) {
     if (/^pending approval$/i.test(serverStatus) && !/^pending approval$/i.test(expectedStatus)) {
-      if (projectApprovalType) return serverStatus;
-      return expectedStatus;
-    }
-    // Prefer the value we just saved — ack/status echo can lag and snap the UI back.
-    if (expected.sheetRow || ticketStableId(expected)) {
-      return expectedStatus;
+      resolved = projectApprovalType ? serverStatus : expectedStatus;
+    } else if (expected.sheetRow || ticketStableId(expected)) {
+      // Prefer the value we just saved — ack/status echo can lag and snap the UI back.
+      resolved = expectedStatus;
     }
   }
-  if (serverStatus) {
+  if (!resolved && serverStatus) {
     if (/^pending approval$/i.test(serverStatus) && !projectApprovalType) {
-      return expectedStatus || "Completed";
+      resolved = expectedStatus || "Completed";
+    } else {
+      resolved = serverStatus;
     }
-    return serverStatus;
   }
-  if (shouldRequireCompletionApproval({ ...ticket, ...expected, Status: "Completed" })
-    && /^completed$/i.test(expectedStatus)) {
-    return "Pending Approval";
+  if (!resolved) {
+    if (shouldRequireCompletionApproval({ ...ticket, ...expected, Status: "Completed" })
+      && /^completed$/i.test(expectedStatus)) {
+      resolved = "Pending Approval";
+    } else if (projectApprovalType
+      && (isPendingApprovalStatus(ticket.Status) || isPendingApprovalStatus(expectedStatus))) {
+      resolved = "Pending Approval";
+    } else {
+      resolved = cleanText(expected.Status || ticket.Status);
+    }
   }
-  if (projectApprovalType
-    && (isPendingApprovalStatus(ticket.Status) || isPendingApprovalStatus(expectedStatus))) {
-    return "Pending Approval";
-  }
-  return cleanText(expected.Status || ticket.Status);
+  return coerceStatusForTicketType(resolved, effectiveType);
 }
 
 function populateTicketEditStatusSelect(ticket) {
   const statusSelect = ticketEditForm?.elements?.Status;
   if (!statusSelect) return;
 
-  const currentStatus = String(ticket?.Status || "Not started").trim();
+  let currentStatus = String(ticket?.Status || "Not started").trim();
+  // Stuck Daily-* / MOM in Pending Approval: treat as Completed (no approval gate).
+  if (isPendingApprovalStatus(currentStatus) && !isExactProjectType(ticket?.Type)) {
+    currentStatus = "Completed";
+  }
   const options = ["Not started", "In progress", "Completed", "Blocked"];
-  if (isPendingApprovalStatus(currentStatus) && !options.includes(currentStatus)) {
+  if (isPendingApprovalStatus(currentStatus) && isExactProjectType(ticket?.Type)
+    && !options.includes(currentStatus)) {
     options.splice(2, 0, "Pending Approval");
   }
 
@@ -4174,7 +4202,8 @@ function populateTicketEditStatusSelect(ticket) {
 
 function populateTicketEditApprovalNote(ticket) {
   if (!ticketEditApprovalNote) return;
-  if (!isPendingApprovalStatus(ticket.Status)) {
+  // No approval banner for Daily-* / MOM / non-project — even if Status is stuck PA.
+  if (!isPendingApprovalStatus(ticket.Status) || !isExactProjectType(ticket?.Type)) {
     ticketEditApprovalNote.hidden = true;
     ticketEditApprovalNote.textContent = "";
     return;
@@ -4183,13 +4212,11 @@ function populateTicketEditApprovalNote(ticket) {
   const manager = getManagerForOwner(ticket.Owner);
   const managerName = manager?.user || "the manager";
   if (canCurrentUserApproveTicket(ticket)) {
-    ticketEditApprovalNote.textContent = isExactProjectType(ticket?.Type)
-      ? `Awaiting your approval to close ${ticket.Type} project task for ${ticket.Owner}. Set status to Completed to approve.`
-      : `Awaiting your approval. Set status to Completed to approve closure for ${ticket.Owner}.`;
+    ticketEditApprovalNote.textContent =
+      `Awaiting your approval to close ${ticket.Type} project task for ${ticket.Owner}. Set status to Completed to approve.`;
   } else {
-    ticketEditApprovalNote.textContent = isExactProjectType(ticket?.Type)
-      ? `Awaiting manager approval from ${managerName} to complete this ${ticket.Type} project task.`
-      : `Awaiting manager approval from ${managerName}.`;
+    ticketEditApprovalNote.textContent =
+      `Awaiting manager approval from ${managerName} to complete this ${ticket.Type} project task.`;
   }
   ticketEditApprovalNote.hidden = false;
 }
@@ -8614,7 +8641,8 @@ async function sendTicketUpdateToSheet(ticket) {
     applyDriveLinksToLocalTicket(ticket.sheetRow, result.notes);
   }
 
-  if (result.approvalPending) {
+  // Ignore server approvalPending for Daily-* / MOM (exact SAP/Infra only).
+  if (result.approvalPending && isExactProjectType(ticket?.Type)) {
     if (result.approvalSentTo) {
       setStatus("online", `Approval email sent to ${result.approvalSentTo}`);
     } else if (result.approvalEmailError) {
@@ -11811,7 +11839,8 @@ form?.addEventListener("submit", async (event) => {
           (ticketStableId(ticket) && ticketStableId(entry) === ticketStableId(ticket))
           || ticketIdentityKey(entry) === ticketIdentityKey(ticket)
         );
-        return saved && isPendingApprovalStatus(saved.Status);
+        // Exact SAP/Infra only — Daily-* / MOM never report as pending approval.
+        return saved && isPendingApprovalStatus(saved.Status) && isExactProjectType(saved.Type);
       })) {
         setStatus("online", "Ticket created — sent for manager approval");
       } else {

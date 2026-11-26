@@ -8765,33 +8765,61 @@ body.view-focus .dashboard-layout {
 
   .topbar-stack {
     flex-wrap: wrap;
-    align-items: center;
+    align-items: stretch;
     gap: 6px 8px;
     padding: 8px 10px;
+    overflow: visible;
   }
 
-  .topbar-chrome,
+  .topbar-chrome {
+    flex: 1 1 100%;
+    width: 100%;
+    min-width: 0;
+  }
+
   .topbar {
-    flex: 1 1 auto;
-    flex-wrap: nowrap;
+    flex: 1 1 100%;
+    flex-wrap: wrap;
     align-items: center;
     gap: 8px;
     min-width: 0;
+    width: 100%;
+    overflow: visible;
   }
 
   .topbar-context {
     display: none;
   }
 
+  /* Actions row first: bell + user + Out + Hide — wrap, never absolute overlap */
   .topbar-actions {
+    order: 1;
+    flex: 1 1 100%;
     width: 100%;
-    flex-wrap: nowrap;
+    flex-wrap: wrap;
     align-items: center;
     justify-content: flex-start;
     gap: 6px;
     min-width: 0;
   }
 
+  /* Low-stock chip: full-width row under actions — no collision with bell/user */
+  .topbar-low-stock-slot {
+    order: 2;
+    flex: 1 1 100%;
+    width: 100%;
+    margin: 0;
+    min-width: 0;
+  }
+
+  .topbar-low-stock-slot .low-stock-banner--header,
+  .topbar .low-stock-banner--header {
+    max-width: 100%;
+    width: 100%;
+    margin: 0;
+  }
+
+  .topbar-actions > .stock-notif,
   .topbar-actions > .user-chip,
   .topbar-actions > .secondary-button,
   .topbar-actions > .topbar-collapse-btn {
@@ -8799,7 +8827,14 @@ body.view-focus .dashboard-layout {
     min-height: 32px;
     height: 32px;
     padding: 0 8px;
-    flex-shrink: 0;
+    flex: 0 0 auto;
+    position: relative;
+  }
+
+  .topbar-actions > .stock-notif {
+    padding: 0;
+    height: auto;
+    min-height: 0;
   }
 
   .user-chip-prefix,
@@ -8816,6 +8851,7 @@ body.view-focus .dashboard-layout {
   }
 
   .topbar-status-strip {
+    order: 3;
     flex: 1 1 100%;
     max-width: none;
     width: 100%;
@@ -8824,6 +8860,9 @@ body.view-focus .dashboard-layout {
     font-size: 11px;
     border-radius: 6px;
     white-space: nowrap;
+    position: relative;
+    z-index: 1;
+    clear: both;
   }
 
   body.view-focus .topbar-stack {
@@ -9096,11 +9135,33 @@ body.view-focus .dashboard-layout {
     width: 100%;
   }
 
-  .topbar-stack,
-  .topbar,
+  /* Phone: stack header rows — actions → low-stock → toast; no overlap */
+  .topbar-stack {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 6px;
+  }
+
+  .topbar-chrome {
+    flex: 0 0 auto;
+    width: 100%;
+  }
+
+  .topbar {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+  }
+
   .topbar-actions {
     flex-direction: row;
+    flex-wrap: wrap;
     align-items: center;
+    justify-content: flex-start;
+    gap: 6px;
+    width: 100%;
   }
 
   .topbar-actions > .user-chip,
@@ -9111,10 +9172,27 @@ body.view-focus .dashboard-layout {
     white-space: nowrap;
     height: 32px;
     min-height: 32px;
+    flex: 0 0 auto;
+  }
+
+  .topbar-low-stock-slot:not(:empty) {
+    display: flex;
+    width: 100%;
+  }
+
+  .topbar-low-stock-slot .low-stock-banner--header {
+    min-height: 32px;
+    padding: 4px 8px;
+  }
+
+  .topbar-low-stock-slot .low-stock-banner--header .low-stock-banner-msg {
+    display: none;
   }
 
   .topbar-status-strip {
     width: 100%;
+    flex: 0 0 auto;
+    max-width: none;
   }
 
   .summary-grid,
