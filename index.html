@@ -9,14 +9,14 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="./styles.css?v=245">
+    <link rel="stylesheet" href="./styles.css?v=247">
     <!-- auth stays blocking so requireLogin runs before app chrome paints -->
     <script src="./auth.js?v=31"></script>
     <!-- Defer main bundles so HTML can parse while ~210KB+ app.js downloads -->
-    <script src="./app.js?v=265" defer></script>
-    <script src="./assets.js?v=45" defer></script>
-    <script src="./documents.js?v=12" defer></script>
-    <script src="./procurement.js?v=6" defer></script>
+    <script src="./app.js?v=267" defer></script>
+    <script src="./assets.js?v=46" defer></script>
+    <script src="./documents.js?v=13" defer></script>
+    <script src="./procurement.js?v=7" defer></script>
   </head>
   <body class="view-focus">
     <script>Auth.requireLogin();</script>
@@ -471,7 +471,6 @@
                   <h2>Recent Tickets</h2>
                 </div>
                 <div class="board-actions">
-                  <button class="primary-button" id="openTicketCreateButton" type="button" data-requires="createTicket">+ New Ticket</button>
                   <button class="secondary-button" id="refreshSheetButton" type="button" data-requires="syncSheet">Refresh</button>
                   <button class="secondary-button" id="exportButton" type="button" data-requires="exportData">Export CSV</button>
                   <button class="secondary-button danger" id="clearLocalButton" type="button">Clear Local</button>
@@ -479,76 +478,100 @@
                 </div>
               </div>
 
-              <div class="ticket-filters" aria-label="Ticket filters">
-            <label class="field filter-field filter-search">
-              <span>Search</span>
-              <input id="ticketSearchFilter" type="search" placeholder="Task, remarks, requester...">
-            </label>
-            <div class="field filter-field">
-              <span>Status</span>
-              <div class="multi-select" data-default-label="All statuses">
-                <button class="multi-select-trigger" id="ticketStatusFilterTrigger" type="button" aria-expanded="false">All statuses</button>
-                <div class="multi-select-panel" id="ticketStatusFilterPanel" hidden></div>
+              <div class="ticket-filters ticket-filters--modern" aria-label="Ticket filters">
+                <div class="ticket-filter-primary">
+                  <button class="filter-add-btn" id="toggleTicketAdvancedFilters" type="button" aria-expanded="false" aria-controls="ticketAdvancedFilters">
+                    <span class="filter-add-glyph" aria-hidden="true"></span>
+                    More filters
+                  </button>
+
+                  <div class="filter-pill filter-field" data-filter-pill="status">
+                    <span class="filter-pill-label">Status:</span>
+                    <div class="multi-select" data-default-label="All">
+                      <button class="multi-select-trigger" id="ticketStatusFilterTrigger" type="button" aria-expanded="false">All</button>
+                      <div class="multi-select-panel" id="ticketStatusFilterPanel" hidden></div>
+                    </div>
+                  </div>
+                  <div class="filter-pill filter-field" data-filter-pill="owner">
+                    <span class="filter-pill-label">Owner:</span>
+                    <div class="multi-select" data-default-label="All">
+                      <button class="multi-select-trigger" id="ticketOwnerFilterTrigger" type="button" aria-expanded="false">All</button>
+                      <div class="multi-select-panel" id="ticketOwnerFilterPanel" hidden></div>
+                    </div>
+                  </div>
+                  <div class="filter-pill filter-field" data-filter-pill="type">
+                    <span class="filter-pill-label">Type:</span>
+                    <div class="multi-select" data-default-label="All">
+                      <button class="multi-select-trigger" id="ticketTypeFilterTrigger" type="button" aria-expanded="false">All</button>
+                      <div class="multi-select-panel" id="ticketTypeFilterPanel" hidden></div>
+                    </div>
+                  </div>
+                  <div class="filter-pill filter-field" data-filter-pill="priority">
+                    <span class="filter-pill-label">Priority:</span>
+                    <div class="multi-select" data-default-label="All">
+                      <button class="multi-select-trigger" id="ticketPriorityFilterTrigger" type="button" aria-expanded="false">All</button>
+                      <div class="multi-select-panel" id="ticketPriorityFilterPanel" hidden></div>
+                    </div>
+                  </div>
+                  <label class="filter-pill filter-field filter-pill--sort" data-filter-pill="sort">
+                    <span class="filter-pill-label">Sort:</span>
+                    <select id="ticketSortFilter">
+                      <option value="recent">Most recent start date</option>
+                      <option value="sheet">Row order (newest first)</option>
+                      <option value="oldest">Oldest date</option>
+                      <option value="priority-desc">Priority high to low</option>
+                      <option value="priority-asc">Priority low to high</option>
+                      <option value="task">Task A-Z</option>
+                      <option value="sap-status">SAP — completed, in progress, not started</option>
+                      <option value="infra-status">Infra — completed, in progress, not started</option>
+                      <option value="milestone-open-desc" selected>Today's milestone first, then newest milestone</option>
+                      <option value="outside-hours">Completed outside office hours</option>
+                      <option value="completed-today">Completed today</option>
+                      <option value="completed-yesterday">Completed yesterday</option>
+                      <option value="completed-this-week">Completed this week</option>
+                      <option value="completed-last-week">Completed last week</option>
+                    </select>
+                  </label>
+
+                  <span class="filter-divider" aria-hidden="true"></span>
+                  <button class="filter-reset-link" id="clearTicketFilters" type="button">Reset</button>
+
+                  <label class="filter-search-modern filter-search">
+                    <span class="filter-search-glyph" aria-hidden="true"></span>
+                    <span class="filter-search-sr">Search</span>
+                    <input id="ticketSearchFilter" type="search" placeholder="Search ticket here">
+                  </label>
+
+                  <div class="filter-saved-views" aria-label="Saved filter views">
+                    <select id="ticketSavedViewSelect" aria-label="Load saved view">
+                      <option value="">Saved views</option>
+                    </select>
+                    <button class="secondary-button filter-view-btn" id="ticketSaveViewButton" type="button" title="Save current filters as a named view">Save view</button>
+                    <button class="secondary-button filter-view-btn filter-view-delete" id="ticketDeleteViewButton" type="button" disabled title="Delete selected saved view">Delete</button>
+                  </div>
+
+                  <button class="primary-button filter-create-btn" id="openTicketCreateButton" type="button" data-requires="createTicket">+ Create Ticket</button>
+                </div>
+
+                <div class="ticket-filter-advanced" id="ticketAdvancedFilters" hidden>
+                  <div class="filter-pill filter-field" data-filter-pill="original-owner">
+                    <span class="filter-pill-label">Original Owner:</span>
+                    <div class="multi-select" data-default-label="All">
+                      <button class="multi-select-trigger" id="ticketBhanuFilterTrigger" type="button" aria-expanded="false">All</button>
+                      <div class="multi-select-panel" id="ticketBhanuFilterPanel" hidden></div>
+                    </div>
+                  </div>
+                  <div class="filter-pill filter-field" data-filter-pill="raised-by">
+                    <span class="filter-pill-label">Raised By:</span>
+                    <div class="multi-select" data-default-label="All">
+                      <button class="multi-select-trigger" id="ticketRaisedByFilterTrigger" type="button" aria-expanded="false">All</button>
+                      <div class="multi-select-panel" id="ticketRaisedByFilterPanel" hidden></div>
+                    </div>
+                  </div>
+                  <button class="secondary-button filter-clear my-focus-mode-button" id="myFocusModeButton" type="button" aria-pressed="false" title="Show only My Focus tickets (also reopens the My Focus note)">⭐ My Focus (0)</button>
+                </div>
               </div>
-            </div>
-            <div class="field filter-field">
-              <span>Owner</span>
-              <div class="multi-select" data-default-label="All owners">
-                <button class="multi-select-trigger" id="ticketOwnerFilterTrigger" type="button" aria-expanded="false">All owners</button>
-                <div class="multi-select-panel" id="ticketOwnerFilterPanel" hidden></div>
-              </div>
-            </div>
-            <div class="field filter-field">
-              <span>Type</span>
-              <div class="multi-select" data-default-label="All types">
-                <button class="multi-select-trigger" id="ticketTypeFilterTrigger" type="button" aria-expanded="false">All types</button>
-                <div class="multi-select-panel" id="ticketTypeFilterPanel" hidden></div>
-              </div>
-            </div>
-            <div class="field filter-field">
-              <span>Priority</span>
-              <div class="multi-select" data-default-label="All priorities">
-                <button class="multi-select-trigger" id="ticketPriorityFilterTrigger" type="button" aria-expanded="false">All priorities</button>
-                <div class="multi-select-panel" id="ticketPriorityFilterPanel" hidden></div>
-              </div>
-            </div>
-            <div class="field filter-field">
-              <span>Original Owner</span>
-              <div class="multi-select" data-default-label="All original owners">
-                <button class="multi-select-trigger" id="ticketBhanuFilterTrigger" type="button" aria-expanded="false">All original owners</button>
-                <div class="multi-select-panel" id="ticketBhanuFilterPanel" hidden></div>
-              </div>
-            </div>
-            <div class="field filter-field">
-              <span>Raised By</span>
-              <div class="multi-select" data-default-label="All raisers">
-                <button class="multi-select-trigger" id="ticketRaisedByFilterTrigger" type="button" aria-expanded="false">All raisers</button>
-                <div class="multi-select-panel" id="ticketRaisedByFilterPanel" hidden></div>
-              </div>
-            </div>
-            <label class="field filter-field">
-              <span>Sort by</span>
-              <select id="ticketSortFilter">
-                <option value="recent">Most recent start date</option>
-                <option value="sheet">Row order (newest first)</option>
-                <option value="oldest">Oldest date</option>
-                <option value="priority-desc">Priority high to low</option>
-                <option value="priority-asc">Priority low to high</option>
-                <option value="task">Task A-Z</option>
-                <option value="sap-status">SAP — completed, in progress, not started</option>
-                <option value="infra-status">Infra — completed, in progress, not started</option>
-                <option value="milestone-open-desc" selected>Today's milestone first, then newest milestone</option>
-                <option value="outside-hours">Completed outside office hours</option>
-                <option value="completed-today">Completed today</option>
-                <option value="completed-yesterday">Completed yesterday</option>
-                <option value="completed-this-week">Completed this week</option>
-                <option value="completed-last-week">Completed last week</option>
-              </select>
-            </label>
-            <button class="secondary-button filter-clear clear-filters-button" id="clearTicketFilters" type="button">Clear Filters</button>
-            <button class="secondary-button filter-clear my-focus-mode-button" id="myFocusModeButton" type="button" aria-pressed="false" title="Show only My Focus tickets (also reopens the My Focus note)">⭐ My Focus (0)</button>
-          </div>
-          <p class="filter-summary" id="ticketFilterSummary"></p>
+              <p class="filter-summary" id="ticketFilterSummary"></p>
             </div>
           </div>
 

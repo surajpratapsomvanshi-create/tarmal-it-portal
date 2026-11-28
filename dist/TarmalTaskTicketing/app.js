@@ -319,12 +319,12 @@ function uniqueCaseInsensitive(values) {
 }
 
 const ticketMultiFilters = [
-  { panel: ticketStatusFilterPanel, trigger: ticketStatusFilterTrigger, defaultLabel: "All statuses", getValues: (ticket) => ticket.Status },
-  { panel: ticketOwnerFilterPanel, trigger: ticketOwnerFilterTrigger, defaultLabel: "All owners", getValues: (ticket) => ticket.Owner },
-  { panel: ticketTypeFilterPanel, trigger: ticketTypeFilterTrigger, defaultLabel: "All types", getValues: (ticket) => ticket.Type, extraOptions: ["Project"] },
-  { panel: ticketPriorityFilterPanel, trigger: ticketPriorityFilterTrigger, defaultLabel: "All priorities", getValues: (ticket) => ticket.Priority, labelFormatter: formatPriorityLabel },
-  { panel: ticketBhanuFilterPanel, trigger: ticketBhanuFilterTrigger, defaultLabel: "All original owners", getValues: (ticket) => getTicketOriginalOwnerValue(ticket), staticOptions: ["Bhanu"] },
-  { panel: ticketRaisedByFilterPanel, trigger: ticketRaisedByFilterTrigger, defaultLabel: "All raisers", getValues: getTicketRaisedByValue, caseInsensitive: true }
+  { panel: ticketStatusFilterPanel, trigger: ticketStatusFilterTrigger, defaultLabel: "All", getValues: (ticket) => ticket.Status },
+  { panel: ticketOwnerFilterPanel, trigger: ticketOwnerFilterTrigger, defaultLabel: "All", getValues: (ticket) => ticket.Owner },
+  { panel: ticketTypeFilterPanel, trigger: ticketTypeFilterTrigger, defaultLabel: "All", getValues: (ticket) => ticket.Type, extraOptions: ["Project"] },
+  { panel: ticketPriorityFilterPanel, trigger: ticketPriorityFilterTrigger, defaultLabel: "All", getValues: (ticket) => ticket.Priority, labelFormatter: formatPriorityLabel },
+  { panel: ticketBhanuFilterPanel, trigger: ticketBhanuFilterTrigger, defaultLabel: "All", getValues: (ticket) => getTicketOriginalOwnerValue(ticket), staticOptions: ["Bhanu"] },
+  { panel: ticketRaisedByFilterPanel, trigger: ticketRaisedByFilterTrigger, defaultLabel: "All", getValues: getTicketRaisedByValue, caseInsensitive: true }
 ];
 
 const projectMultiFilters = [
@@ -4381,11 +4381,46 @@ function updateMultiFilterLabel(trigger, panel, defaultLabel, labelFormatter = n
   const selected = getMultiFilterValues(panel);
   if (!selected.length) {
     trigger.textContent = defaultLabel;
-    return;
+  } else {
+    trigger.textContent = selected.length === 1
+      ? (labelFormatter ? labelFormatter(selected[0]) : selected[0])
+      : `${selected.length} selected`;
   }
-  trigger.textContent = selected.length === 1
-    ? (labelFormatter ? labelFormatter(selected[0]) : selected[0])
-    : `${selected.length} selected`;
+  const pill = trigger?.closest?.(".filter-pill");
+  if (pill) pill.classList.toggle("is-active", selected.length > 0);
+}
+
+function setMultiFilterValues(panel, values = [], { caseInsensitive = false } = {}) {
+  if (!panel) return;
+  const wanted = new Set(
+    (Array.isArray(values) ? values : [])
+      .map((value) => cleanText(value))
+      .filter(Boolean)
+      .map((value) => (caseInsensitive ? value.toLowerCase() : value))
+  );
+  panel.querySelectorAll("input[type='checkbox']").forEach((input) => {
+    const raw = cleanText(input.value);
+    const key = caseInsensitive ? raw.toLowerCase() : raw;
+    input.checked = wanted.has(key);
+  });
+}
+
+function syncTicketFilterPillStates() {
+  ticketMultiFilters.forEach(({ panel, trigger, defaultLabel, labelFormatter }) => {
+    if (!panel || !trigger) return;
+    updateMultiFilterLabel(trigger, panel, defaultLabel, labelFormatter || null);
+  });
+  const sortPill = document.querySelector('.filter-pill[data-filter-pill="sort"]');
+  if (sortPill && ticketSortFilter) {
+    sortPill.classList.toggle(
+      "is-active",
+      Boolean(ticketSortFilter.value) && ticketSortFilter.value !== DEFAULT_TICKET_SORT
+    );
+  }
+  const searchWrap = document.querySelector(".ticket-filters--modern .filter-search-modern");
+  if (searchWrap && ticketSearchFilter) {
+    searchWrap.classList.toggle("is-active", Boolean(cleanText(ticketSearchFilter.value)));
+  }
 }
 
 function getNewTicketOwners() {
@@ -4635,9 +4670,19 @@ function closeMultiFilterPanels(exceptPanel = null) {
   }
 }
 
+let ticketFilterRestoreState = null;
+
 function populateMultiFilter(panel, trigger, values, defaultLabel, labelFormatter = null, staticOptions = null, onChange = null, extraOptions = null) {
   const selected = new Set(getMultiFilterValues(panel));
-  const sortedOptions = staticOptions?.length
+  const restoreValues = ticketFilterRestoreState?.get(panel);
+  if (Array.isArray(restoreValues)) {
+    restoreValues.forEach((value) => {
+      const text = cleanText(value);
+      if (text) selected.add(text);
+    });
+  }
+  const selectedLower = new Set([...selected].map((value) => String(value).toLowerCase()));
+  let sortedOptions = staticOptions?.length
     ? staticOptions
     : labelFormatter === formatPriorityLabel
     ? ["80", "20"].filter((value) => values.some((entry) => normalizePriority(entry) === value))
@@ -4646,16 +4691,30 @@ function populateMultiFilter(panel, trigger, values, defaultLabel, labelFormatte
         ...values.filter(Boolean)
       ])].sort((a, b) => String(a).localeCompare(String(b)));
 
-  panel.innerHTML = sortedOptions.map((value) => `
+  // Keep saved-view selections even if they are temporarily absent from the dataset.
+  if (Array.isArray(restoreValues)) {
+    restoreValues.forEach((value) => {
+      const text = cleanText(value);
+      if (!text) return;
+      const exists = sortedOptions.some((entry) => String(entry) === text
+        || String(entry).toLowerCase() === text.toLowerCase());
+      if (!exists) sortedOptions = [...sortedOptions, text];
+    });
+  }
+
+  panel.innerHTML = sortedOptions.map((value) => {
+    const checked = selected.has(value) || selectedLower.has(String(value).toLowerCase());
+    return `
     <label class="multi-select-option">
-      <input type="checkbox" value="${escapeHtml(value)}" ${selected.has(value) ? "checked" : ""}>
+      <input type="checkbox" value="${escapeHtml(value)}" ${checked ? "checked" : ""}>
       <span>${escapeHtml(labelFormatter ? labelFormatter(value) : value)}</span>
-    </label>
-  `).join("");
+    </label>`;
+  }).join("");
 
   panel.querySelectorAll("input[type='checkbox']").forEach((input) => {
     input.addEventListener("change", () => {
       updateMultiFilterLabel(trigger, panel, defaultLabel, labelFormatter);
+      syncTicketFilterPillStates();
       if (typeof onChange === "function") onChange();
       else renderTickets();
     });
@@ -4983,6 +5042,7 @@ function setTicketSortFilter(sortKey = DEFAULT_TICKET_SORT) {
     entry.toggleAttribute("selected", entry.value === sortKey);
   });
   ticketSortFilter.selectedIndex = option.index;
+  syncTicketFilterPillStates();
 }
 
 function resetTicketFilters() {
@@ -4996,6 +5056,171 @@ function resetTicketFilters() {
   setTicketSortFilter(CLEARED_TICKET_SORT);
   setTicketOutsideHoursFilter(false);
   closeMultiFilterPanels();
+  syncTicketFilterPillStates();
+  const savedSelect = document.querySelector("#ticketSavedViewSelect");
+  if (savedSelect) savedSelect.value = "";
+  updateTicketSavedViewButtons();
+}
+
+const TICKET_SAVED_VIEWS_PREFIX = "tarmal-ticket-saved-views:";
+
+function ticketSavedViewsStorageKey() {
+  const user = typeof Auth !== "undefined" ? Auth.currentUser?.() : null;
+  const key = cleanText(user?.email || user?.username || user?.name || user?.id).toLowerCase();
+  return key ? `${TICKET_SAVED_VIEWS_PREFIX}${key}` : `${TICKET_SAVED_VIEWS_PREFIX}anonymous`;
+}
+
+function readTicketSavedViews() {
+  try {
+    const raw = localStorage.getItem(ticketSavedViewsStorageKey());
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed.filter((entry) => entry && cleanText(entry.name)) : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeTicketSavedViews(views) {
+  try {
+    localStorage.setItem(ticketSavedViewsStorageKey(), JSON.stringify(views));
+  } catch (error) {
+    console.warn("Could not save ticket filter views.", error);
+  }
+}
+
+function captureTicketFilterSnapshot() {
+  return {
+    search: ticketSearchFilter?.value || "",
+    sort: ticketSortFilter?.value || DEFAULT_TICKET_SORT,
+    status: getMultiFilterValues(ticketStatusFilterPanel),
+    owner: getMultiFilterValues(ticketOwnerFilterPanel),
+    type: getMultiFilterValues(ticketTypeFilterPanel),
+    priority: getMultiFilterValues(ticketPriorityFilterPanel),
+    originalOwner: getMultiFilterValues(ticketBhanuFilterPanel),
+    raisedBy: getMultiFilterValues(ticketRaisedByFilterPanel)
+  };
+}
+
+function applyTicketFilterSnapshot(snapshot = {}) {
+  if (!snapshot || typeof snapshot !== "object") return;
+  if (ticketSearchFilter) ticketSearchFilter.value = String(snapshot.search || "");
+  setTicketSortFilter(snapshot.sort || DEFAULT_TICKET_SORT);
+
+  ticketFilterRestoreState = new Map([
+    [ticketStatusFilterPanel, snapshot.status || []],
+    [ticketOwnerFilterPanel, snapshot.owner || []],
+    [ticketTypeFilterPanel, snapshot.type || []],
+    [ticketPriorityFilterPanel, snapshot.priority || []],
+    [ticketBhanuFilterPanel, snapshot.originalOwner || []],
+    [ticketRaisedByFilterPanel, snapshot.raisedBy || []]
+  ]);
+  try {
+    populateFilterOptions(getValidTickets());
+  } finally {
+    ticketFilterRestoreState = null;
+  }
+
+  syncTicketFilterPillStates();
+
+  const hasAdvanced = (snapshot.originalOwner || []).length > 0
+    || (snapshot.raisedBy || []).length > 0;
+  if (hasAdvanced) setTicketAdvancedFiltersOpen(true);
+}
+
+function renderTicketSavedViewsSelect(selectedName = "") {
+  const select = document.querySelector("#ticketSavedViewSelect");
+  if (!select) return;
+  const views = readTicketSavedViews();
+  const current = cleanText(selectedName || select.value);
+  select.innerHTML = `<option value="">Saved views</option>${views.map((view) => {
+    const name = cleanText(view.name);
+    return `<option value="${escapeHtml(name)}"${name === current ? " selected" : ""}>${escapeHtml(name)}</option>`;
+  }).join("")}`;
+  if (current && !views.some((view) => cleanText(view.name) === current)) {
+    select.value = "";
+  }
+  updateTicketSavedViewButtons();
+}
+
+function updateTicketSavedViewButtons() {
+  const select = document.querySelector("#ticketSavedViewSelect");
+  const deleteBtn = document.querySelector("#ticketDeleteViewButton");
+  if (deleteBtn) deleteBtn.disabled = !cleanText(select?.value);
+}
+
+function saveCurrentTicketFilterView() {
+  const name = cleanText(window.prompt("Name for this filter view:"));
+  if (!name) return;
+  const views = readTicketSavedViews();
+  const next = {
+    name,
+    savedAt: new Date().toISOString(),
+    filters: captureTicketFilterSnapshot()
+  };
+  const index = views.findIndex((view) => cleanText(view.name).toLowerCase() === name.toLowerCase());
+  if (index >= 0) views[index] = next;
+  else views.push(next);
+  views.sort((a, b) => cleanText(a.name).localeCompare(cleanText(b.name)));
+  writeTicketSavedViews(views);
+  renderTicketSavedViewsSelect(name);
+  setStatus("ok", `Saved view “${name}”`);
+}
+
+function loadTicketSavedView(name) {
+  const target = cleanText(name);
+  if (!target) return;
+  const view = readTicketSavedViews().find((entry) => cleanText(entry.name) === target);
+  if (!view) {
+    setStatus("error", "Saved view not found.");
+    renderTicketSavedViewsSelect("");
+    return;
+  }
+  applyTicketFilterSnapshot(view.filters || {});
+  updateTicketSavedViewButtons();
+  scheduleRenderTickets({ immediate: true });
+}
+
+function deleteTicketSavedView(name) {
+  const target = cleanText(name);
+  if (!target) return;
+  if (!window.confirm(`Delete saved view “${target}”?`)) return;
+  const views = readTicketSavedViews().filter((entry) => cleanText(entry.name) !== target);
+  writeTicketSavedViews(views);
+  renderTicketSavedViewsSelect("");
+  setStatus("ok", `Deleted view “${target}”`);
+}
+
+function setTicketAdvancedFiltersOpen(open) {
+  const panel = document.querySelector("#ticketAdvancedFilters");
+  const toggle = document.querySelector("#toggleTicketAdvancedFilters");
+  if (!panel || !toggle) return;
+  panel.hidden = !open;
+  toggle.setAttribute("aria-expanded", open ? "true" : "false");
+  toggle.classList.toggle("is-open", open);
+}
+
+function initTicketFilterChrome() {
+  const toggle = document.querySelector("#toggleTicketAdvancedFilters");
+  toggle?.addEventListener("click", () => {
+    const panel = document.querySelector("#ticketAdvancedFilters");
+    setTicketAdvancedFiltersOpen(Boolean(panel?.hidden));
+  });
+
+  ticketSearchFilter?.addEventListener("input", () => syncTicketFilterPillStates());
+  ticketSortFilter?.addEventListener("change", () => syncTicketFilterPillStates());
+
+  const savedSelect = document.querySelector("#ticketSavedViewSelect");
+  const saveBtn = document.querySelector("#ticketSaveViewButton");
+  const deleteBtn = document.querySelector("#ticketDeleteViewButton");
+  savedSelect?.addEventListener("change", () => {
+    updateTicketSavedViewButtons();
+    if (cleanText(savedSelect.value)) loadTicketSavedView(savedSelect.value);
+  });
+  saveBtn?.addEventListener("click", () => saveCurrentTicketFilterView());
+  deleteBtn?.addEventListener("click", () => deleteTicketSavedView(savedSelect?.value || ""));
+
+  renderTicketSavedViewsSelect();
+  syncTicketFilterPillStates();
 }
 
 function alignMultiFilterPanel(panel) {
@@ -9814,6 +10039,225 @@ function getMyFocusCount() {
   return getMyFocusState().items.length;
 }
 
+let openOverflowMenuRoot = null;
+
+function closeOverflowMenu(root = openOverflowMenuRoot) {
+  if (!root) return;
+  const trigger = root.querySelector(".overflow-menu-trigger");
+  const panel = root.querySelector(".overflow-menu-panel");
+  if (panel) {
+    panel.hidden = true;
+    panel.style.cssText = "";
+  }
+  trigger?.setAttribute("aria-expanded", "false");
+  if (openOverflowMenuRoot === root) openOverflowMenuRoot = null;
+}
+
+function closeAllOverflowMenus() {
+  document.querySelectorAll(".overflow-menu-trigger[aria-expanded='true']").forEach((trigger) => {
+    const root = trigger.closest(".overflow-menu");
+    if (root) closeOverflowMenu(root);
+  });
+  openOverflowMenuRoot = null;
+}
+
+function positionOverflowMenuPanel(trigger, panel) {
+  const rect = trigger.getBoundingClientRect();
+  const maxWidth = Math.min(240, Math.max(160, window.innerWidth - 16));
+  panel.hidden = false;
+  panel.style.position = "fixed";
+  panel.style.zIndex = "1600";
+  panel.style.minWidth = "172px";
+  panel.style.maxWidth = `${maxWidth}px`;
+  panel.style.width = "max-content";
+  panel.style.visibility = "hidden";
+  panel.style.top = "0";
+  panel.style.left = "0";
+  panel.style.right = "auto";
+  panel.style.bottom = "auto";
+
+  const panelHeight = panel.offsetHeight || 0;
+  const panelWidth = Math.min(panel.offsetWidth || 180, maxWidth);
+  let top = rect.bottom + 6;
+  let left = rect.right - panelWidth;
+  if (left < 8) left = 8;
+  if (left + panelWidth > window.innerWidth - 8) {
+    left = Math.max(8, window.innerWidth - panelWidth - 8);
+  }
+  if (top + panelHeight > window.innerHeight - 8) {
+    const above = rect.top - 6 - panelHeight;
+    if (above >= 8) top = above;
+    else top = Math.max(8, window.innerHeight - panelHeight - 8);
+  }
+  panel.style.top = `${Math.round(top)}px`;
+  panel.style.left = `${Math.round(left)}px`;
+  panel.style.visibility = "";
+}
+
+function openOverflowMenu(root) {
+  if (!root) return;
+  if (openOverflowMenuRoot && openOverflowMenuRoot !== root) closeOverflowMenu(openOverflowMenuRoot);
+  const trigger = root.querySelector(".overflow-menu-trigger");
+  const panel = root.querySelector(".overflow-menu-panel");
+  if (!trigger || !panel) return;
+  positionOverflowMenuPanel(trigger, panel);
+  trigger.setAttribute("aria-expanded", "true");
+  openOverflowMenuRoot = root;
+}
+
+function toggleOverflowMenu(root) {
+  if (!root) return;
+  const open = root.querySelector(".overflow-menu-trigger")?.getAttribute("aria-expanded") === "true";
+  if (open) closeOverflowMenu(root);
+  else openOverflowMenu(root);
+}
+
+function renderOverflowMenuHtml(items = []) {
+  const rows = (items || []).filter(Boolean).map((item) => {
+    const classes = [
+      "overflow-menu-item",
+      item.className || "",
+      item.danger ? "is-danger" : ""
+    ].filter(Boolean).join(" ");
+    const attrs = item.attrs ? ` ${item.attrs}` : "";
+    const disabled = item.disabled ? " disabled" : "";
+    const pressed = item.pressed == null ? "" : ` aria-pressed="${item.pressed ? "true" : "false"}"`;
+    const title = item.title ? ` title="${escapeHtml(item.title)}"` : "";
+    const ariaLabel = item.ariaLabel || item.label
+      ? ` aria-label="${escapeHtml(item.ariaLabel || item.label)}"`
+      : "";
+    const icon = item.icon
+      ? `<span class="overflow-menu-icon overflow-menu-icon-${escapeHtml(item.icon)}" aria-hidden="true"></span>`
+      : "";
+    return `<button type="button" class="${classes}" role="menuitem"${attrs}${disabled}${pressed}${title}${ariaLabel}>${icon}<span class="overflow-menu-label">${escapeHtml(item.label || "")}</span></button>`;
+  }).join("");
+
+  return `<div class="overflow-menu">
+    <button type="button" class="overflow-menu-trigger" aria-haspopup="menu" aria-expanded="false" aria-label="More actions" title="More actions">
+      <span class="overflow-menu-trigger-glyph" aria-hidden="true">⋯</span>
+    </button>
+    <div class="overflow-menu-panel" role="menu" hidden>${rows}</div>
+  </div>`;
+}
+
+function initOverflowMenus() {
+  if (window.__overflowMenusBound) return;
+  window.__overflowMenusBound = true;
+
+  document.addEventListener("click", (event) => {
+    const trigger = event.target.closest?.(".overflow-menu-trigger");
+    if (trigger) {
+      event.preventDefault();
+      event.stopPropagation();
+      const root = trigger.closest(".overflow-menu");
+      if (root) toggleOverflowMenu(root);
+      return;
+    }
+
+    const item = event.target.closest?.(".overflow-menu-item");
+    if (item && openOverflowMenuRoot?.contains(item) && !item.disabled) {
+      queueMicrotask(() => closeOverflowMenu());
+      return;
+    }
+
+    if (!openOverflowMenuRoot) return;
+    if (openOverflowMenuRoot.contains(event.target)) return;
+    closeOverflowMenu();
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape" || !openOverflowMenuRoot) return;
+    event.preventDefault();
+    const trigger = openOverflowMenuRoot.querySelector(".overflow-menu-trigger");
+    closeOverflowMenu();
+    trigger?.focus();
+  });
+
+  window.addEventListener("resize", () => closeAllOverflowMenus());
+  document.addEventListener("scroll", (event) => {
+    if (!openOverflowMenuRoot) return;
+    if (openOverflowMenuRoot.querySelector(".overflow-menu-panel")?.contains(event.target)) return;
+    closeAllOverflowMenus();
+  }, true);
+}
+
+function renderTicketRowActionsHtml(ticket, {
+  unsynced = false,
+  unsyncedKey = "",
+  retrying = false,
+  subtask = false,
+  focusKey = ""
+} = {}) {
+  const items = [];
+  const milestoneKey = milestoneActionKey(ticket);
+  const focusOn = isMyFocusKey(focusKey);
+
+  if (unsynced) {
+    items.push({
+      className: `ticket-retry-sync-button${retrying ? " is-syncing" : ""}`,
+      icon: "retry",
+      label: "Retry save",
+      disabled: retrying,
+      attrs: `data-unsynced-key="${escapeHtml(unsyncedKey)}"`
+    });
+    items.push({
+      className: "ticket-discard-local-button",
+      icon: "delete",
+      label: "Discard",
+      danger: true,
+      attrs: `data-unsynced-key="${escapeHtml(unsyncedKey)}"`
+    });
+  } else {
+    if (!subtask) {
+      items.push({
+        className: "ticket-subtask-button",
+        icon: "add",
+        label: "Add sub-task",
+        attrs: `data-sheet-row="${ticket.sheetRow}"`
+      });
+    }
+    const milestoneLabel = isMilestoneToday(ticket)
+      ? `Set milestone to ${milestoneAdvanceTargetLabel(getNextMilestoneAdvanceDateValue())}`
+      : "Set milestone to today";
+    items.push({
+      className: [
+        "ticket-milestone-today-button",
+        isMilestoneToday(ticket) ? "is-today" : "",
+        isMilestoneTomorrow(ticket) ? "is-tomorrow" : "",
+        milestoneActionInFlight.has(milestoneKey) ? "is-syncing" : ""
+      ].filter(Boolean).join(" "),
+      icon: "milestone",
+      label: milestoneLabel,
+      attrs: `data-sheet-row="${ticket.sheetRow}"`
+    });
+    items.push({
+      className: `ticket-duplicate-button${duplicateTicketInFlight.has(milestoneKey) ? " is-syncing" : ""}`,
+      icon: "copy",
+      label: "Duplicate",
+      disabled: duplicateTicketInFlight.has(milestoneKey),
+      attrs: `data-sheet-row="${ticket.sheetRow}"`
+    });
+    items.push({
+      className: "ticket-edit-button",
+      icon: "edit",
+      label: "Edit",
+      attrs: `data-sheet-row="${ticket.sheetRow}" data-outside-hours="${completionOutsideOffice(ticket) || isOutsideHoursMarked(ticket) ? "1" : "0"}"`
+    });
+  }
+
+  if (focusKey) {
+    items.push({
+      className: `ticket-focus-button${focusOn ? " is-on" : ""}`,
+      icon: "star",
+      label: focusOn ? "Remove from My Focus" : "Add to My Focus",
+      pressed: focusOn,
+      attrs: `data-focus-key="${escapeHtml(focusKey)}"`
+    });
+  }
+
+  return `<div class="ticket-row-actions">${renderOverflowMenuHtml(items)}</div>`;
+}
+
 function myFocusButtonHtml(key, { inline = false } = {}) {
   if (!key) return "";
   const on = isMyFocusKey(key);
@@ -9838,8 +10282,13 @@ function syncMyFocusRowState(key) {
       button.setAttribute("aria-pressed", on ? "true" : "false");
       button.setAttribute("aria-label", label);
       button.title = label;
-      const glyph = button.querySelector("span");
-      if (glyph) glyph.textContent = on ? "★" : "☆";
+      const menuLabel = button.querySelector(".overflow-menu-label");
+      if (menuLabel) {
+        menuLabel.textContent = label;
+      } else {
+        const glyph = button.querySelector("span");
+        if (glyph) glyph.textContent = on ? "★" : "☆";
+      }
     });
   });
 }
@@ -10507,60 +10956,13 @@ function renderTicketTable(tickets, options = {}) {
         <td class="remarks-col">${renderTicketRemarksCell(ticket)}</td>
         ${canEdit ? `
         <td class="actions-col">
-          <div class="ticket-row-actions">
-            ${unsynced ? `
-            <button
-              class="ticket-retry-sync-button${retrying ? " is-syncing" : ""}"
-              type="button"
-              data-unsynced-key="${escapeHtml(unsyncedKey)}"
-              aria-label="Retry save to Google Sheets"
-              title="Retry save to Google Sheets"
-              ${retrying ? "disabled" : ""}
-            >↻</button>
-            <button
-              class="ticket-discard-local-button"
-              type="button"
-              data-unsynced-key="${escapeHtml(unsyncedKey)}"
-              aria-label="Discard unsaved ticket"
-              title="Discard — remove from this browser"
-            >✕</button>` : `
-            ${!subtask ? `
-            <button
-              class="ticket-subtask-button"
-              type="button"
-              data-sheet-row="${ticket.sheetRow}"
-              aria-label="Add sub-task"
-              title="Add sub-task"
-            >+</button>` : ""}
-            <button
-              class="ticket-milestone-today-button${isMilestoneToday(ticket) ? " is-today" : ""}${isMilestoneTomorrow(ticket) ? " is-tomorrow" : ""}${milestoneActionInFlight.has(milestoneActionKey(ticket)) ? " is-syncing" : ""}"
-              type="button"
-              data-sheet-row="${ticket.sheetRow}"
-              aria-label="${isMilestoneToday(ticket) ? `Set milestone to ${milestoneAdvanceTargetLabel(getNextMilestoneAdvanceDateValue())}` : "Set milestone to today"}"
-              title="${isMilestoneToday(ticket) ? `Set milestone to ${milestoneAdvanceTargetLabel(getNextMilestoneAdvanceDateValue())}` : "Set milestone to today"}"
-            >M</button>
-            <button
-              class="ticket-duplicate-button${duplicateTicketInFlight.has(milestoneActionKey(ticket)) ? " is-syncing" : ""}"
-              type="button"
-              data-sheet-row="${ticket.sheetRow}"
-              aria-label="Duplicate"
-              title="Duplicate"
-              ${duplicateTicketInFlight.has(milestoneActionKey(ticket)) ? "disabled" : ""}
-            >
-              <span class="duplicate-icon" aria-hidden="true"></span>
-            </button>
-            <button
-              class="ticket-edit-button"
-              type="button"
-              data-sheet-row="${ticket.sheetRow}"
-              data-outside-hours="${completionOutsideOffice(ticket) || isOutsideHoursMarked(ticket) ? "1" : "0"}"
-              aria-label="Edit ticket"
-              title="Edit ticket"
-            >
-              <span class="edit-icon" aria-hidden="true"></span>
-            </button>`}
-            ${myFocusButtonHtml(focusKey)}
-          </div>
+          ${renderTicketRowActionsHtml(ticket, {
+            unsynced,
+            unsyncedKey,
+            retrying,
+            subtask,
+            focusKey
+          })}
         </td>` : ""}
       </tr>
     `;
@@ -12022,6 +12424,8 @@ ticketEditModal?.addEventListener("click", (event) => {
   }
 });
 
+initOverflowMenus();
+
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && ticketDeleteConfirmModal && !ticketDeleteConfirmModal.hidden) {
     closeTicketDeleteConfirm();
@@ -12254,6 +12658,7 @@ bindRecurrenceFormControls("ticketEdit");
 setTicketSortFilter(DEFAULT_TICKET_SORT);
 setProjectSortFilter(DEFAULT_TICKET_SORT);
 bindClearTicketFiltersButtons();
+initTicketFilterChrome();
 
 function bindClearTicketFiltersButtons() {
   clearTicketFilters?.addEventListener("click", () => {

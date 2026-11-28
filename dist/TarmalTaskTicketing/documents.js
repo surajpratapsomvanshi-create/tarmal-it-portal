@@ -700,11 +700,46 @@ function renderDocumentRow(doc) {
       <td>${escapeHtml(formatDocumentDate(doc.uploadedAt))}</td>
       <td class="document-row-actions">
         <div class="document-row-actions-inner">
+          ${typeof renderOverflowMenuHtml === "function" ? renderOverflowMenuHtml([
+            {
+              className: "document-preview-button",
+              icon: "view",
+              label: "Preview",
+              attrs: `data-document-id="${escapeHtml(doc.id)}"`
+            },
+            {
+              className: "document-download-button",
+              icon: "download",
+              label: "Download",
+              attrs: `data-document-id="${escapeHtml(doc.id)}"`
+            },
+            ...(canEdit ? [
+              {
+                className: "document-share-all-button",
+                icon: "share",
+                label: "Share all",
+                attrs: `data-document-id="${escapeHtml(doc.id)}"`
+              },
+              {
+                className: "document-access-button",
+                icon: "access",
+                label: "Access",
+                attrs: `data-document-id="${escapeHtml(doc.id)}"`
+              }
+            ] : []),
+            ...(canDelete ? [{
+              className: "document-delete-button",
+              icon: "delete",
+              label: "Delete",
+              danger: true,
+              attrs: `data-document-id="${escapeHtml(doc.id)}"`
+            }] : [])
+          ]) : `
           <button class="doc-action-btn doc-action-preview document-preview-button" type="button" data-document-id="${escapeHtml(doc.id)}">Preview</button>
           <button class="doc-action-btn doc-action-download document-download-button" type="button" data-document-id="${escapeHtml(doc.id)}">Download</button>
           ${canEdit ? `<button class="doc-action-btn doc-action-share document-share-all-button" type="button" data-document-id="${escapeHtml(doc.id)}">Share all</button>` : ""}
           ${canEdit ? `<button class="doc-action-btn doc-action-access document-access-button" type="button" data-document-id="${escapeHtml(doc.id)}">Access</button>` : ""}
-          ${canDelete ? `<button class="doc-action-btn doc-action-delete document-delete-button" type="button" data-document-id="${escapeHtml(doc.id)}">Delete</button>` : ""}
+          ${canDelete ? `<button class="doc-action-btn doc-action-delete document-delete-button" type="button" data-document-id="${escapeHtml(doc.id)}">Delete</button>` : ""}`}
         </div>
       </td>
     </tr>

@@ -796,9 +796,27 @@ function renderProcurement() {
         </td>
         <td class="actions-col procurement-actions-col">
           <div class="row-actions">
+            ${typeof renderOverflowMenuHtml === "function" ? renderOverflowMenuHtml([
+              {
+                icon: "quotes",
+                label: "Quotes",
+                attrs: `data-procurement-quotes="${escapeProcurementHtml(item.id)}"`
+              },
+              {
+                icon: "edit",
+                label: "Edit",
+                attrs: `data-procurement-edit="${escapeProcurementHtml(item.id)}"`
+              },
+              {
+                icon: "delete",
+                label: "Delete",
+                danger: true,
+                attrs: `data-procurement-delete="${escapeProcurementHtml(item.id)}"`
+              }
+            ]) : `
             <button class="secondary-button row-action-btn" type="button" data-procurement-quotes="${escapeProcurementHtml(item.id)}">Quotes</button>
             <button class="secondary-button row-action-btn" type="button" data-procurement-edit="${escapeProcurementHtml(item.id)}">Edit</button>
-            <button class="secondary-button row-action-btn danger-text" type="button" data-procurement-delete="${escapeProcurementHtml(item.id)}">Delete</button>
+            <button class="secondary-button row-action-btn danger-text" type="button" data-procurement-delete="${escapeProcurementHtml(item.id)}">Delete</button>`}
           </div>
         </td>
       </tr>`;

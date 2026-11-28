@@ -1212,11 +1212,34 @@ function renderAssets() {
           </td>
           <td class="asset-actions-cell">
             <div class="asset-actions asset-row-actions">
+              ${typeof renderOverflowMenuHtml === "function" ? renderOverflowMenuHtml([
+                {
+                  className: "asset-view-button",
+                  icon: "view",
+                  label: "View",
+                  attrs: `data-asset-id="${escapeHtml(asset.id)}"`
+                },
+                ...(showActions ? [
+                  {
+                    className: "asset-edit-button",
+                    icon: "edit",
+                    label: "Edit",
+                    attrs: `data-asset-id="${escapeHtml(asset.id)}"`
+                  },
+                  {
+                    className: "asset-delete-button",
+                    icon: "delete",
+                    label: "Delete",
+                    danger: true,
+                    attrs: `data-asset-id="${escapeHtml(asset.id)}"`
+                  }
+                ] : [])
+              ]) : `
               <button class="text-button asset-view-button" type="button" data-asset-id="${escapeHtml(asset.id)}">View</button>
               ${showActions ? `
                 <button class="text-button asset-edit-button" type="button" data-asset-id="${escapeHtml(asset.id)}">Edit</button>
                 <button class="text-button asset-delete-button" type="button" data-asset-id="${escapeHtml(asset.id)}">Delete</button>
-              ` : ""}
+              ` : ""}`}
             </div>
           </td>
         </tr>
@@ -3202,12 +3225,41 @@ function renderConsumables() {
         <td class="consumable-vendor-cell">${escapeHtml(item.vendor || "—")}</td>
         <td class="asset-actions-cell consumable-actions-cell">
           <div class="asset-actions">
+            ${typeof renderOverflowMenuHtml === "function" ? renderOverflowMenuHtml([
+              {
+                className: "consumable-view-button",
+                icon: "view",
+                label: "View",
+                attrs: `data-item-id="${escapeHtml(item.id)}"`
+              },
+              ...(manage ? [
+                {
+                  className: "consumable-move-button",
+                  icon: "stock",
+                  label: "Stock",
+                  attrs: `data-item-id="${escapeHtml(item.id)}"`
+                },
+                {
+                  className: "consumable-edit-button",
+                  icon: "edit",
+                  label: "Edit",
+                  attrs: `data-item-id="${escapeHtml(item.id)}"`
+                },
+                {
+                  className: "consumable-delete-button",
+                  icon: "delete",
+                  label: "Delete",
+                  danger: true,
+                  attrs: `data-item-id="${escapeHtml(item.id)}"`
+                }
+              ] : [])
+            ]) : `
             <button class="text-button consumable-view-button" type="button" data-item-id="${escapeHtml(item.id)}">View</button>
             ${manage ? `
               <button class="text-button consumable-move-button" type="button" data-item-id="${escapeHtml(item.id)}">Stock</button>
               <button class="text-button consumable-edit-button" type="button" data-item-id="${escapeHtml(item.id)}">Edit</button>
               <button class="text-button consumable-delete-button" type="button" data-item-id="${escapeHtml(item.id)}">Delete</button>
-            ` : ""}
+            ` : ""}`}
           </div>
         </td>
       </tr>

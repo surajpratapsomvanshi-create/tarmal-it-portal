@@ -4407,9 +4407,9 @@ body:not(.sidebar-collapsed) .ribbon-low-stock-slot {
 }
 
 .ticket-table .actions-col {
-  width: 152px;
-  min-width: 152px;
-  max-width: 168px;
+  width: 48px;
+  min-width: 48px;
+  max-width: 56px;
   padding: 4px 6px;
   text-align: center;
   white-space: normal;
@@ -4936,11 +4936,443 @@ tbody tr.is-unsynced > td:first-child {
 #ticketTable .ticket-row-actions,
 #projectTable .ticket-row-actions {
   display: inline-flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   justify-content: center;
-  gap: 3px;
+  gap: 0;
   max-width: 100%;
+}
+
+/* Row overflow menu (⋯) — shared Actions pattern */
+.overflow-menu {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.overflow-menu-trigger {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  min-width: 28px;
+  min-height: 28px;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--soft);
+  color: var(--ink-secondary);
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+}
+
+.overflow-menu-trigger:hover,
+.overflow-menu-trigger:focus-visible,
+.overflow-menu-trigger[aria-expanded="true"] {
+  background: #fff;
+  border-color: var(--line-strong);
+  color: var(--ink);
+  outline: none;
+}
+
+.overflow-menu-trigger-glyph {
+  display: block;
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0.02em;
+  transform: translateY(-1px);
+}
+
+.overflow-menu-panel {
+  box-sizing: border-box;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: var(--shadow);
+}
+
+.overflow-menu-panel[hidden] {
+  display: none !important;
+}
+
+.overflow-menu-item {
+  box-sizing: border-box;
+  display: flex !important;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-width: 0;
+  min-height: 36px;
+  height: auto !important;
+  margin: 0;
+  padding: 8px 10px !important;
+  border: 0 !important;
+  border-radius: 10px !important;
+  background: transparent !important;
+  color: var(--ink) !important;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.25;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+  box-shadow: none !important;
+  opacity: 1 !important;
+}
+
+.overflow-menu-item:hover,
+.overflow-menu-item:focus-visible {
+  background: var(--soft) !important;
+  outline: none;
+}
+
+.overflow-menu-item:disabled {
+  opacity: 0.55 !important;
+  cursor: wait;
+}
+
+.overflow-menu-item.is-danger,
+.overflow-menu-item.is-danger .overflow-menu-icon,
+.overflow-menu-item.is-danger .overflow-menu-label {
+  color: var(--red) !important;
+}
+
+.overflow-menu-item.is-danger:hover,
+.overflow-menu-item.is-danger:focus-visible {
+  background: var(--red-soft) !important;
+}
+
+.overflow-menu-label {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.overflow-menu-icon {
+  position: relative;
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  color: inherit;
+}
+
+.overflow-menu-icon-edit::before {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 10px;
+  height: 10px;
+  border: 1.5px solid currentColor;
+  border-radius: 2px;
+  transform: rotate(-45deg);
+}
+
+.overflow-menu-icon-edit::after {
+  content: "";
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  width: 6px;
+  height: 1.5px;
+  background: currentColor;
+  transform: rotate(-45deg);
+  transform-origin: right center;
+}
+
+.overflow-menu-icon-view::before {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 1px;
+  width: 14px;
+  height: 10px;
+  border: 1.5px solid currentColor;
+  border-radius: 50%;
+}
+
+.overflow-menu-icon-view::after {
+  content: "";
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.overflow-menu-icon-delete::before {
+  content: "";
+  position: absolute;
+  top: 4px;
+  left: 3px;
+  width: 10px;
+  height: 10px;
+  border: 1.5px solid currentColor;
+  border-top: 0;
+  border-radius: 0 0 2px 2px;
+}
+
+.overflow-menu-icon-delete::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 2px;
+  background: currentColor;
+  box-shadow: 0 -2px 0 currentColor;
+}
+
+.overflow-menu-icon-copy::before,
+.overflow-menu-icon-copy::after {
+  content: "";
+  position: absolute;
+  width: 9px;
+  height: 11px;
+  border: 1.5px solid currentColor;
+  border-radius: 2px;
+  background: #fff;
+}
+
+.overflow-menu-icon-copy::before {
+  top: 0;
+  left: 4px;
+}
+
+.overflow-menu-icon-copy::after {
+  top: 3px;
+  left: 1px;
+}
+
+.overflow-menu-icon-add::before,
+.overflow-menu-icon-add::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  background: currentColor;
+  border-radius: 1px;
+  transform: translate(-50%, -50%);
+}
+
+.overflow-menu-icon-add::before {
+  width: 12px;
+  height: 1.5px;
+}
+
+.overflow-menu-icon-add::after {
+  width: 1.5px;
+  height: 12px;
+}
+
+.overflow-menu-icon-milestone::before {
+  content: "M";
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  color: #b45309;
+}
+
+.overflow-menu-icon-star::before {
+  content: "☆";
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-size: 14px;
+  line-height: 1;
+  color: #a16207;
+}
+
+.overflow-menu-item.ticket-focus-button.is-on .overflow-menu-icon-star::before,
+.overflow-menu-item.is-on .overflow-menu-icon-star::before {
+  content: "★";
+  color: #ca8a04;
+}
+
+.overflow-menu-icon-retry::before {
+  content: "↻";
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.overflow-menu-icon-stock::before {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  border: 1.5px solid currentColor;
+  border-radius: 2px;
+}
+
+.overflow-menu-icon-stock::after {
+  content: "";
+  position: absolute;
+  top: 6px;
+  left: 5px;
+  width: 6px;
+  height: 1.5px;
+  background: currentColor;
+  box-shadow: 0 3px 0 currentColor;
+}
+
+.overflow-menu-icon-download::before {
+  content: "";
+  position: absolute;
+  top: 1px;
+  left: 7px;
+  width: 1.5px;
+  height: 8px;
+  background: currentColor;
+}
+
+.overflow-menu-icon-download::after {
+  content: "";
+  position: absolute;
+  top: 8px;
+  left: 4px;
+  width: 8px;
+  height: 6px;
+  border: 1.5px solid currentColor;
+  border-top: 0;
+  border-radius: 0 0 2px 2px;
+}
+
+.overflow-menu-icon-share::before {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 5px;
+  height: 5px;
+  border: 1.5px solid currentColor;
+  border-radius: 50%;
+  box-shadow: 7px 3.5px 0 -0.25px currentColor, 0 7px 0 -0.25px currentColor;
+}
+
+.overflow-menu-icon-share::after {
+  content: "";
+  position: absolute;
+  top: 5px;
+  left: 6px;
+  width: 6px;
+  height: 1.5px;
+  background: currentColor;
+  transform: rotate(28deg);
+  box-shadow: 0 5px 0 currentColor;
+}
+
+.overflow-menu-icon-access::before {
+  content: "";
+  position: absolute;
+  top: 1px;
+  left: 3px;
+  width: 10px;
+  height: 7px;
+  border: 1.5px solid currentColor;
+  border-radius: 5px 5px 0 0;
+  border-bottom: 0;
+}
+
+.overflow-menu-icon-access::after {
+  content: "";
+  position: absolute;
+  top: 7px;
+  left: 1px;
+  width: 14px;
+  height: 8px;
+  border: 1.5px solid currentColor;
+  border-radius: 2px;
+}
+
+.overflow-menu-icon-quotes::before {
+  content: "";
+  position: absolute;
+  top: 1px;
+  left: 2px;
+  width: 12px;
+  height: 14px;
+  border: 1.5px solid currentColor;
+  border-radius: 2px;
+}
+
+.overflow-menu-icon-quotes::after {
+  content: "";
+  position: absolute;
+  top: 5px;
+  left: 5px;
+  width: 6px;
+  height: 1.5px;
+  background: currentColor;
+  box-shadow: 0 3px 0 currentColor, 0 6px 0 currentColor;
+}
+
+/* Neutralize legacy square action-button chrome inside overflow rows */
+.overflow-menu-item.ticket-edit-button,
+.overflow-menu-item.ticket-duplicate-button,
+.overflow-menu-item.ticket-subtask-button,
+.overflow-menu-item.ticket-milestone-today-button,
+.overflow-menu-item.ticket-focus-button,
+.overflow-menu-item.ticket-retry-sync-button,
+.overflow-menu-item.ticket-discard-local-button,
+.overflow-menu-item.asset-view-button,
+.overflow-menu-item.asset-edit-button,
+.overflow-menu-item.asset-delete-button,
+.overflow-menu-item.consumable-view-button,
+.overflow-menu-item.consumable-move-button,
+.overflow-menu-item.consumable-edit-button,
+.overflow-menu-item.consumable-delete-button,
+.overflow-menu-item.document-preview-button,
+.overflow-menu-item.document-download-button,
+.overflow-menu-item.document-share-all-button,
+.overflow-menu-item.document-access-button,
+.overflow-menu-item.document-delete-button {
+  width: 100% !important;
+  min-width: 0 !important;
+  min-height: 36px !important;
+  float: none;
+}
+
+tbody tr.milestone-today:not(.status-blocked) .overflow-menu-trigger {
+  background: rgba(255, 255, 255, 0.16);
+  border-color: rgba(255, 255, 255, 0.45);
+  color: #fff;
+}
+
+tbody tr.milestone-today:not(.status-blocked) .overflow-menu-trigger:hover,
+tbody tr.milestone-today:not(.status-blocked) .overflow-menu-trigger[aria-expanded="true"] {
+  background: rgba(255, 255, 255, 0.28);
+  border-color: rgba(255, 255, 255, 0.7);
+  color: #fff;
+}
+
+tbody tr.milestone-today:not(.status-blocked) .overflow-menu-item.ticket-focus-button,
+tbody tr.milestone-today:not(.status-blocked) .overflow-menu-item.ticket-edit-button,
+tbody tr.milestone-today:not(.status-blocked) .overflow-menu-item.ticket-duplicate-button,
+tbody tr.milestone-today:not(.status-blocked) .overflow-menu-item.ticket-subtask-button,
+tbody tr.milestone-today:not(.status-blocked) .overflow-menu-item.ticket-milestone-today-button {
+  color: var(--ink) !important;
+  background: transparent !important;
+  border-color: transparent !important;
 }
 
 .ticket-subtask-button:hover {
@@ -5031,9 +5463,9 @@ tbody tr.is-unsynced > td:first-child {
 
 #ticketTable.ticket-table-can-edit .actions-col,
 #projectTable.ticket-table-can-edit .actions-col {
-  width: 152px;
-  min-width: 152px;
-  max-width: 168px;
+  width: 48px;
+  min-width: 48px;
+  max-width: 56px;
   padding: 4px 6px;
   text-align: center;
   white-space: normal;
@@ -5306,43 +5738,335 @@ tbody tr.milestone-today:not(.status-blocked):hover {
   overflow: visible;
 }
 
-.ticket-filters[aria-label="Ticket filters"] > .filter-field,
-.ticket-filters[aria-label="Ticket filters"] > .filter-clear,
-.ticket-filters[aria-label="Ticket filters"] > .clear-filters-button {
-  flex: 0 0 auto;
-  width: auto;
-  min-width: max-content;
-  max-width: none;
+.ticket-filters--modern {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: stretch;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-soft);
   overflow: visible;
 }
 
-.ticket-filters[aria-label="Ticket filters"] > .filter-search {
-  flex: 1 1 120px;
-  min-width: 120px;
-  max-width: 280px;
+.ticket-filter-primary,
+.ticket-filter-advanced {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
 }
 
-.ticket-filters[aria-label="Ticket filters"] > .filter-field {
-  gap: 2px;
+.ticket-filter-advanced {
+  padding-top: 8px;
+  border-top: 1px dashed var(--line);
 }
 
-.ticket-filters[aria-label="Ticket filters"] .filter-field > span {
-  font-size: 10px;
-  line-height: 1.1;
-  letter-spacing: 0.03em;
+.ticket-filter-advanced[hidden] {
+  display: none !important;
+}
+
+.filter-add-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--ink-secondary);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.filter-add-btn:hover,
+.filter-add-btn:focus-visible,
+.filter-add-btn.is-open {
+  background: var(--blue-soft);
+  color: var(--blue);
+  outline: none;
+}
+
+.filter-add-glyph {
+  position: relative;
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+}
+
+.filter-add-glyph::before,
+.filter-add-glyph::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  border-radius: 999px;
+  background: currentColor;
+}
+
+.filter-add-glyph::before {
+  top: 3px;
+  box-shadow: 3px 0 0 1.5px currentColor;
+}
+
+.filter-add-glyph::after {
+  bottom: 3px;
+  box-shadow: -3px 0 0 1.5px currentColor;
+}
+
+.filter-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 36px;
+  max-width: 100%;
+  padding: 0 10px 0 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: #fff;
+  color: var(--ink);
   white-space: nowrap;
 }
 
-.ticket-filters[aria-label="Ticket filters"] .filter-field input:not([type="checkbox"]),
-.ticket-filters[aria-label="Ticket filters"] .filter-field select,
-.ticket-filters[aria-label="Ticket filters"] .multi-select-trigger,
-.ticket-filters[aria-label="Ticket filters"] .filter-clear {
+.filter-pill.is-active {
+  border-color: rgba(0, 143, 211, 0.55);
+  background: var(--blue-soft);
+}
+
+.filter-pill-label {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.filter-pill .multi-select {
+  min-width: 0;
+}
+
+.ticket-filters--modern .filter-pill .multi-select-trigger,
+.ticket-filters--modern .filter-pill--sort select {
   height: 32px;
   min-height: 32px;
   max-height: 32px;
-  padding: 0 8px;
+  padding: 0 22px 0 2px;
+  border: 0;
+  background-color: transparent;
+  box-shadow: none;
+  color: var(--ink);
   font-size: 12px;
-  line-height: 30px;
+  font-weight: 700;
+  line-height: 32px;
+}
+
+.ticket-filters--modern .filter-pill .multi-select-trigger:hover,
+.ticket-filters--modern .filter-pill .multi-select-trigger:focus-visible,
+.ticket-filters--modern .filter-pill--sort select:hover,
+.ticket-filters--modern .filter-pill--sort select:focus-visible {
+  background: transparent;
+  outline: none;
+}
+
+.ticket-filters--modern .filter-pill--sort select {
+  width: auto;
+  max-width: min(220px, 48vw);
+  field-sizing: content;
+  cursor: pointer;
+}
+
+.filter-divider {
+  display: inline-block;
+  width: 1px;
+  height: 22px;
+  margin: 0 2px;
+  background: var(--line-strong);
+  flex: 0 0 auto;
+}
+
+.filter-reset-link {
+  margin: 0;
+  padding: 0 4px;
+  border: 0;
+  background: transparent;
+  color: #c45b7a;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.filter-reset-link:hover,
+.filter-reset-link:focus-visible {
+  color: var(--red);
+  text-decoration: underline;
+  outline: none;
+}
+
+.filter-search-modern {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1 1 180px;
+  min-width: 160px;
+  max-width: 320px;
+  min-height: 36px;
+  padding: 0 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: #fff;
+}
+
+.filter-search-modern.is-active {
+  border-color: rgba(0, 143, 211, 0.55);
+  background: var(--blue-soft);
+}
+
+.filter-search-glyph {
+  position: relative;
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  color: var(--muted);
+}
+
+.filter-search-glyph::before {
+  content: "";
+  position: absolute;
+  top: 1px;
+  left: 1px;
+  width: 8px;
+  height: 8px;
+  border: 1.5px solid currentColor;
+  border-radius: 50%;
+}
+
+.filter-search-glyph::after {
+  content: "";
+  position: absolute;
+  right: 1px;
+  bottom: 1px;
+  width: 6px;
+  height: 1.5px;
+  background: currentColor;
+  transform: rotate(45deg);
+  transform-origin: right center;
+}
+
+.filter-search-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.ticket-filters--modern .filter-search-modern input {
+  flex: 1 1 auto;
+  width: 100%;
+  min-width: 0;
+  height: 32px;
+  min-height: 32px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  font-size: 13px;
+  line-height: 32px;
+}
+
+.ticket-filters--modern .filter-search-modern input:focus {
+  outline: none;
+}
+
+.filter-saved-views {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.filter-saved-views select {
+  min-width: 128px;
+  max-width: 180px;
+  height: 36px;
+  min-height: 36px;
+  padding: 0 28px 0 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background-color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.filter-view-btn {
+  min-height: 36px;
+  padding: 0 12px;
+  border-radius: 999px;
+  font-size: 12px;
+}
+
+.filter-view-delete:not(:disabled) {
+  color: var(--red);
+}
+
+.filter-create-btn {
+  margin-left: auto;
+  min-height: 36px;
+  padding: 0 16px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.ticket-filters--modern .my-focus-mode-button {
+  min-height: 36px;
+  border-radius: 999px;
+}
+
+@media (max-width: 900px) {
+  .ticket-filter-primary,
+  .ticket-filter-advanced {
+    gap: 8px;
+  }
+
+  .filter-create-btn {
+    margin-left: 0;
+    width: 100%;
+    justify-content: center;
+  }
+
+  .filter-search-modern {
+    flex: 1 1 100%;
+    max-width: none;
+  }
+
+  .filter-saved-views {
+    width: 100%;
+  }
+
+  .filter-saved-views select {
+    flex: 1 1 auto;
+    max-width: none;
+  }
+
+  .filter-divider {
+    display: none;
+  }
+
+  .ticket-filters--modern .filter-pill--sort select {
+    max-width: min(260px, 70vw);
+  }
 }
 
 .asset-filters {
@@ -6337,12 +7061,12 @@ body.view-focus #projectTable td.remarks-col {
 
   .ticket-table-wrap > #ticketTable.ticket-table thead th.actions-col,
   .ticket-table-wrap > #projectTable.ticket-table thead th.actions-col {
-    width: 7.875rem;
+    width: 2.75rem;
   }
 
   .ticket-table-wrap > #ticketTable.ticket-table .ticket-row-actions,
   .ticket-table-wrap > #projectTable.ticket-table .ticket-row-actions {
-    gap: 2px;
+    gap: 0;
   }
 }
 
@@ -6416,11 +7140,10 @@ body.view-focus #projectTable td.remarks-col {
     width: 3.75rem;
   }
 
-  /* Five 20px action buttons wrap 3 + 2; the dates give back the extra width
-     so Task keeps its share at 1024px with the sidebar open. */
+  /* Single ⋯ overflow trigger; keep Actions narrow so Task keeps width. */
   .ticket-table-wrap > #ticketTable.ticket-table thead th.actions-col,
   .ticket-table-wrap > #projectTable.ticket-table thead th.actions-col {
-    width: 4.25rem;
+    width: 2.5rem;
   }
 
   .ticket-table-wrap > #ticketTable.ticket-table .actions-col,
@@ -6429,12 +7152,12 @@ body.view-focus #projectTable td.remarks-col {
     padding-right: 2px;
   }
 
-  .ticket-table-wrap > #ticketTable.ticket-table .ticket-row-actions > button,
-  .ticket-table-wrap > #projectTable.ticket-table .ticket-row-actions > button {
-    width: 20px;
-    height: 20px;
-    min-width: 20px;
-    min-height: 20px;
+  .ticket-table-wrap > #ticketTable.ticket-table .overflow-menu-trigger,
+  .ticket-table-wrap > #projectTable.ticket-table .overflow-menu-trigger {
+    width: 24px;
+    height: 24px;
+    min-width: 24px;
+    min-height: 24px;
   }
 
   /* Outside-hours adds Completed: the stamp wraps to two lines, the meta
@@ -7488,7 +8211,7 @@ body.view-focus .dashboard-layout {
 
 .asset-actions-cell {
   width: 1%;
-  min-width: 118px;
+  min-width: 44px;
   white-space: nowrap;
   vertical-align: middle;
   overflow: visible;
@@ -7497,7 +8220,15 @@ body.view-focus .dashboard-layout {
 .asset-row-actions {
   position: relative;
   z-index: 1;
-  gap: 4px;
+  gap: 0;
+  justify-content: center;
+}
+
+.asset-actions .overflow-menu,
+.consumable-actions-cell .overflow-menu,
+.document-row-actions-inner .overflow-menu,
+.procurement-actions-col .overflow-menu {
+  margin: 0 auto;
 }
 
 .asset-table .asset-actions .text-button,
@@ -9902,24 +10633,23 @@ body.view-focus .dashboard-layout {
   #ticketTable .ticket-row-actions,
   #projectTable .ticket-row-actions {
     display: flex;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
     justify-content: flex-start;
-    gap: 8px;
+    gap: 0;
     max-width: 100%;
   }
 
-  #ticketTable .ticket-row-actions > button,
-  #projectTable .ticket-row-actions > button,
-  #ticketTable .ticket-edit-button,
-  #projectTable .ticket-edit-button,
-  #ticketTable .ticket-focus-button,
-  #projectTable .ticket-focus-button,
-  #ticketTable .ticket-subtask-button,
-  #projectTable .ticket-subtask-button,
-  #ticketTable .ticket-milestone-today-button,
-  #projectTable .ticket-milestone-today-button,
-  #ticketTable .ticket-duplicate-button,
-  #projectTable .ticket-duplicate-button {
+  #ticketTable .overflow-menu-trigger,
+  #projectTable .overflow-menu-trigger {
+    width: 36px;
+    height: 36px;
+    min-width: 36px;
+    min-height: 36px;
+    border-radius: 8px;
+  }
+
+  #ticketTable .ticket-focus-button.is-inline,
+  #projectTable .ticket-focus-button.is-inline {
     width: 36px;
     height: 36px;
     min-width: 36px;
