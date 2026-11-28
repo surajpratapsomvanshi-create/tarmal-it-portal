@@ -5773,30 +5773,52 @@ tbody tr.milestone-today:not(.status-blocked):hover {
 .filter-add-btn {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 8px;
+  box-sizing: border-box;
   min-height: 36px;
-  padding: 0 12px;
-  border: 0;
+  height: 36px;
+  padding: 0 14px 0 12px;
+  border: 1px solid var(--line-strong);
   border-radius: 999px;
-  background: transparent;
-  color: var(--ink-secondary);
-  font-size: 13px;
-  font-weight: 600;
+  background: #fff;
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  line-height: 1;
+  white-space: nowrap;
+  box-shadow: 0 1px 0 rgba(15, 23, 42, 0.03);
   cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
 }
 
 .filter-add-btn:hover,
-.filter-add-btn:focus-visible,
-.filter-add-btn.is-open {
-  background: var(--blue-soft);
+.filter-add-btn:focus-visible {
+  background: #f5f9fc;
+  border-color: rgba(0, 143, 211, 0.45);
   color: var(--blue);
   outline: none;
+  box-shadow: 0 1px 2px rgba(0, 143, 211, 0.08);
+}
+
+.filter-add-btn.is-open {
+  background: var(--blue-soft);
+  border-color: rgba(0, 143, 211, 0.65);
+  color: var(--blue);
+  box-shadow: inset 0 0 0 1px rgba(0, 143, 211, 0.12);
+}
+
+.filter-add-btn.is-open:hover,
+.filter-add-btn.is-open:focus-visible {
+  background: #d9eef9;
+  border-color: rgba(0, 143, 211, 0.8);
 }
 
 .filter-add-glyph {
   position: relative;
-  width: 14px;
-  height: 14px;
+  width: 15px;
+  height: 15px;
   flex: 0 0 auto;
 }
 
@@ -5813,12 +5835,12 @@ tbody tr.milestone-today:not(.status-blocked):hover {
 
 .filter-add-glyph::before {
   top: 3px;
-  box-shadow: 3px 0 0 1.5px currentColor;
+  box-shadow: 4px 0 0 1.5px currentColor;
 }
 
 .filter-add-glyph::after {
   bottom: 3px;
-  box-shadow: -3px 0 0 1.5px currentColor;
+  box-shadow: -4px 0 0 1.5px currentColor;
 }
 
 .filter-pill {
